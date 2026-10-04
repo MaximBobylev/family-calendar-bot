@@ -18,7 +18,7 @@ docker compose up dev                             # wrangler dev (окружен
 После изменения `package.json`: `docker compose build && docker compose run --rm dev npm ci`.
 После изменения `wrangler.jsonc`: `docker compose run --rm test npm run types`.
 
-Секреты и токены — в `.env` (не коммитится), например `CLOUDFLARE_API_TOKEN` для `npx wrangler deploy` или для удалённого Workers AI.
+Секреты и токены — в `.env` (не коммитится): `cp .env.example .env` и заполнить — там же описано, где взять каждое значение.
 
 ## Структура
 
