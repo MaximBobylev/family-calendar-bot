@@ -1,0 +1,63 @@
+# US-02: привязка Google-аккаунта. US-01: без календаря интент не распознаётся.
+
+- id: start-offers-connect
+  story: US-01
+  steps:
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"], buttons: ["Подключить Google Календарь"] }
+
+- id: message-before-connect-offers-connect
+  story: US-01
+  steps:
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"], text_not_contains: ["Привет"], buttons: ["Подключить Google Календарь"] }
+
+- id: connect-google
+  story: US-02
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - google_account:
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family123@group.calendar.google.com, summary: "Семья", accessRole: writer }
+          - { id: ru.russian#holiday@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, buttons: ["Подключить Google Календарь"] }
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["ivan@gmail.com", "подключён", "Europe/Moscow"] }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Google Календарь"], text_not_contains: ["подключите"] }
+
+- id: connect-denied
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001 }
+    - oauth: { deny: true }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["не выдан"], buttons: ["Подключить Google Календарь"] }
+
+- id: connect-link-is-single-use
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    - oauth: { consent: ivan@gmail.com }
+    - oauth_reuse_last_link: { expect_status: 400 }
+
+- id: connect-link-expires
+  story: US-02
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    - clock: "2026-10-07T07:11:00Z"
+    - oauth: { consent: ivan@gmail.com, expect_status: 400 }

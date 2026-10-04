@@ -20,7 +20,20 @@ type Step =
   | { telegram: TelegramInput }
   | { webhook_raw: { body: unknown; secret?: string | null; expect_status: number } }
   | { expect_telegram: TelegramExpectation[] }
-  | { expect_no_telegram: true };
+  | { expect_no_telegram: true }
+  | { google_account: { email: string; calendars: unknown[] } }
+  | { oauth: OAuthStep }
+  | { oauth_reuse_last_link: { expect_status: number } };
+
+/**
+ * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
+ * или отказывает (deny: true).
+ */
+interface OAuthStep {
+  consent?: string;
+  deny?: boolean;
+  expect_status?: number;
+}
 
 interface TelegramInput {
   from: number;
@@ -56,7 +69,24 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 
 interface TelegramCall {
   method: string;
-  body: { chat_id?: number; text?: string; reply_markup?: { inline_keyboard?: { text: string }[][] } };
+  body: { chat_id?: number | string; text?: string; reply_markup?: { inline_keyboard?: { text: string; url?: string }[][] } };
+}
+
+async function allTelegramCalls(): Promise<TelegramCall[]> {
+  return (await (await fetch(`${FAKES}/__fake/telegram/calls`)).json()) as TelegramCall[];
+}
+
+/** URL последней кнопки привязки Google из сообщений бота. */
+async function lastConnectUrl(): Promise<string> {
+  const urls = (await allTelegramCalls())
+    .flatMap((c) => (c.body.reply_markup?.inline_keyboard ?? []).flat())
+    .map((b) => b.url)
+    .filter((u): u is string => !!u && u.includes("/oauth/google/start"));
+  const last = urls.at(-1);
+  if (!last) throw new AssertionError("no «connect Google» button was sent");
+  // Бот формирует ссылку с PUBLIC_BASE_URL; раннер ходит в SUT по своему адресу
+  const u = new URL(last);
+  return `${SUT}${u.pathname}${u.search}`;
 }
 
 // --- Выполнение --------------------------------------------------------------
@@ -69,8 +99,10 @@ async function runScenario(s: Scenario): Promise<void> {
   let updateId = 1000;
   let seen = 0; // сколько вызовов Telegram уже проверено
 
+  let lastOAuth: { startUrl: string; callbackUrl: string } | undefined;
+
   const newCalls = async (): Promise<TelegramCall[]> => {
-    const all = (await (await fetch(`${FAKES}/__fake/telegram/calls`)).json()) as TelegramCall[];
+    const all = await allTelegramCalls();
     const fresh = all.slice(seen);
     seen = all.length;
     return fresh;
@@ -107,6 +139,39 @@ async function runScenario(s: Scenario): Promise<void> {
         throw new AssertionError(`${where}: expected ${step.expect_telegram.length} Telegram call(s), got ${calls.length}: ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);
       }
       step.expect_telegram.forEach((exp, k) => checkCall(`${where}.${k + 1}`, calls[k]!, exp));
+    } else if ("google_account" in step) {
+      await post(`${FAKES}/__fake/google/accounts`, step.google_account);
+    } else if ("oauth" in step) {
+      const startUrl = await lastConnectUrl();
+      const start = await fetch(startUrl, { redirect: "manual" });
+      if (start.status !== 302) {
+        // Плохая/протухшая ссылка может быть отвергнута уже на старте
+        if (step.oauth.expect_status === start.status) continue;
+        throw new AssertionError(`${where}: oauth start → ${start.status}, expected 302`);
+      }
+      const consent = new URL(start.headers.get("location") ?? "");
+      const p = consent.searchParams;
+      for (const [k, v] of [["access_type", "offline"], ["prompt", "consent"], ["response_type", "code"]] as const) {
+        if (p.get(k) !== v) throw new AssertionError(`${where}: consent URL ${k}=${p.get(k)}, expected ${v}`);
+      }
+      if (!p.get("scope")?.includes("calendar.events")) throw new AssertionError(`${where}: consent URL scope ${p.get("scope")}`);
+      const callback = new URL(p.get("redirect_uri") ?? "");
+      const query: Record<string, string> = step.oauth.deny
+        ? { error: "access_denied", state: p.get("state") ?? "" }
+        : { code: `code-${step.oauth.consent}`, state: p.get("state") ?? "" };
+      const callbackUrl = `${SUT}${callback.pathname}?${new URLSearchParams(query)}`;
+      lastOAuth = { startUrl, callbackUrl };
+      const res = await fetch(callbackUrl);
+      const expected = step.oauth.expect_status ?? 200;
+      if (res.status !== expected) throw new AssertionError(`${where}: oauth callback → ${res.status}, expected ${expected}: ${await res.text()}`);
+    } else if ("oauth_reuse_last_link" in step) {
+      if (!lastOAuth) throw new AssertionError(`${where}: no previous oauth step`);
+      for (const u of [lastOAuth.startUrl, lastOAuth.callbackUrl]) {
+        const res = await fetch(u, { redirect: "manual" });
+        if (res.status !== step.oauth_reuse_last_link.expect_status) {
+          throw new AssertionError(`${where}: reuse ${new URL(u).pathname} → ${res.status}, expected ${step.oauth_reuse_last_link.expect_status}`);
+        }
+      }
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);
@@ -117,7 +182,8 @@ async function runScenario(s: Scenario): Promise<void> {
 function checkCall(where: string, call: TelegramCall, exp: TelegramExpectation) {
   const method = exp.method ?? "sendMessage";
   if (call.method !== method) throw new AssertionError(`${where}: method ${call.method}, expected ${method}`);
-  if (exp.chat_id !== undefined && call.body.chat_id !== exp.chat_id) {
+  // Telegram принимает chat_id и числом, и строкой — сравниваем как строки
+  if (exp.chat_id !== undefined && String(call.body.chat_id) !== String(exp.chat_id)) {
     throw new AssertionError(`${where}: chat_id ${call.body.chat_id}, expected ${exp.chat_id}`);
   }
   const text = call.body.text ?? "";

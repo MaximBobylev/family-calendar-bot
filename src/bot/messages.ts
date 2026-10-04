@@ -15,6 +15,34 @@ const messages = {
     ru: "Напишите мне в личные сообщения.",
     en: "Please message me directly.",
   },
+  connectPrompt: {
+    ru: "Чтобы начать, подключите Google Календарь — это займёт пару кликов.",
+    en: "To get started, connect your Google Calendar — it takes a couple of clicks.",
+  },
+  connectButton: {
+    ru: "Подключить Google Календарь",
+    en: "Connect Google Calendar",
+  },
+  connected: {
+    ru: "Календарь {email} подключён. Часовой пояс: {tz}.\n\nТеперь можно писать или говорить, что сделать.",
+    en: "Calendar {email} is connected. Time zone: {tz}.\n\nNow just tell me what to do.",
+  },
+  accessDenied: {
+    ru: "Доступ к календарю не выдан. Без него я ничего не смогу сделать — попробуйте ещё раз.",
+    en: "Calendar access was not granted. I can't do anything without it — please try again.",
+  },
+  oauthDonePage: {
+    ru: "Готово! Вернитесь в Telegram.",
+    en: "Done! Go back to Telegram.",
+  },
+  oauthBadLinkPage: {
+    ru: "Ссылка устарела или уже использована. Вернитесь в Telegram и нажмите «Подключить» ещё раз.",
+    en: "This link has expired or was already used. Go back to Telegram and tap “Connect” again.",
+  },
+  oauthFailedPage: {
+    ru: "Не получилось подключить календарь. Вернитесь в Telegram и попробуйте ещё раз.",
+    en: "Couldn't connect the calendar. Go back to Telegram and try again.",
+  },
   notImplemented: {
     ru: "Пока я умею только здороваться — остальное в разработке.",
     en: "For now I can only say hello — the rest is in development.",
@@ -23,6 +51,6 @@ const messages = {
 
 export type MessageKey = keyof typeof messages;
 
-export function t(key: MessageKey, locale: string): string {
-  return messages[key][locale === "en" ? "en" : "ru"];
+export function t(key: MessageKey, locale: string, params: Record<string, string> = {}): string {
+  return messages[key][locale === "en" ? "en" : "ru"].replace(/\{(\w+)\}/g, (_, k: string) => params[k] ?? `{${k}}`);
 }

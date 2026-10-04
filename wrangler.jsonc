@@ -10,6 +10,8 @@
     "TELEGRAM_API_BASE": "https://api.telegram.org",
     "GOOGLE_API_BASE": "https://www.googleapis.com",
     "GOOGLE_OAUTH_BASE": "https://oauth2.googleapis.com",
+    "GOOGLE_ACCOUNTS_BASE": "https://accounts.google.com",
+    "PUBLIC_BASE_URL": "https://calendar-assist-bot.example.workers.dev",
     "TEST_MODE": "false"
   },
 
@@ -39,7 +41,13 @@
         "TELEGRAM_API_BASE": "http://fakes:9100/telegram",
         "GOOGLE_API_BASE": "http://fakes:9100/google",
         "GOOGLE_OAUTH_BASE": "http://fakes:9100/google-oauth",
+        "GOOGLE_ACCOUNTS_BASE": "http://fakes:9100/google-accounts",
+        "PUBLIC_BASE_URL": "http://dev:8787",
         "TEST_MODE": "true",
+        "GOOGLE_CLIENT_ID": "test-client-id",
+        "GOOGLE_CLIENT_SECRET": "test-client-secret",
+        // Тестовый ключ (не секрет): 32 байта нулей в base64
+        "TOKEN_ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "TELEGRAM_BOT_TOKEN": "test-token",
         "TELEGRAM_WEBHOOK_SECRET": "test-secret",
         "ALLOWED_TELEGRAM_IDS": "1001,1002"

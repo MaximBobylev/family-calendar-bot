@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": { "types": ["node"] },
-  "include": [".", "../src/dates"]
+  "include": [".", "../src/dates", "../src/crypto.ts"]
 }

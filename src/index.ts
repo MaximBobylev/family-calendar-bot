@@ -8,6 +8,7 @@ import { acceptUpdate, type InboxMessage } from "./inbox";
 import { processInboxUpdate } from "./process";
 import { tick } from "./scheduler";
 import type { TgUpdate } from "./telegram/types";
+import { handleOAuthRoute } from "./oauth-routes";
 import { handleTestRoute } from "./testing/routes";
 
 async function context(env: Env): Promise<AppContext> {
@@ -38,6 +39,7 @@ export default {
 
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request);
+    if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
     if (ctx.config.testMode && url.pathname.startsWith("/__test/")) return handleTestRoute(ctx, request, url.pathname);
     return new Response("Not found", { status: 404 });
   },
