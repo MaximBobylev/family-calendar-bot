@@ -1,0 +1,59 @@
+# Пояса и переход на зимнее время. Все значения — локальное время в tz кейса.
+cases:
+  - id: tz-001
+    text: "в 12"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Asia/Tbilisi
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: tz-002
+    text: "в 12 по Москве"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Asia/Tbilisi
+    status: proposed
+    note: "явно названный пояс → пересчёт в пояс пользователя (Москва UTC+3, Тбилиси UTC+4)"
+    expect: { datetime: "2026-10-07T13:00" }
+
+  - id: tz-003
+    text: "завтра в 10"
+    kind: point
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    note: "25.10.2026 в Берлине переход на зимнее время; 10:00 существует однозначно"
+    expect: { datetime: "2026-10-25T10:00" }
+
+  - id: tz-004
+    text: "завтра в 2:30 ночи"
+    kind: point
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    status: proposed
+    note: "02:30 25.10 в Берлине бывает дважды; берём первое (летнее, UTC+2) — смещение выбирает адаптер календаря, корпус проверяет локальное время"
+    expect: { datetime: "2026-10-25T02:30" }
+
+  - id: tz-005
+    text: "через 24 часа"
+    kind: point
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    status: proposed
+    note: "через переход на зимнее время: 24 реальных часа = 11:00 следующего дня по местному времени"
+    expect: { datetime: "2026-10-25T11:00" }
+
+  - id: tz-006
+    text: "через день"
+    kind: point
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    note: "календарный день — локальная дата +1"
+    expect: { date: "2026-10-25" }
+
+  - id: tz-007
+    text: "каждый понедельник в 10"
+    kind: recurrence
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    note: "время в правиле — локальное; при переходе на зимнее время остаётся 10:00 (US-07)"
+    expect: { recurrence: { freq: weekly, by_day: [MO], time: "10:00" } }

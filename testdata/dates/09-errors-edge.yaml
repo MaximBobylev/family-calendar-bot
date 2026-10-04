@@ -1,0 +1,83 @@
+# Ошибки и пограничные случаи. «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: err-001
+    text: ""
+    expect: { error: empty }
+
+  - id: err-002
+    text: "когда-нибудь"
+    expect: { error: unparseable }
+
+  - id: err-003
+    text: "скоро"
+    expect: { error: unparseable }
+
+  - id: err-004
+    text: "после дождичка в четверг"
+    note: "идиома «никогда», а не четверг"
+    expect: { error: unparseable }
+
+  - id: err-005
+    text: "в 25:00"
+    expect: { error: invalid_time }
+
+  - id: err-006
+    text: "30 февраля"
+    expect: { error: invalid_date }
+
+  - id: err-007
+    text: "31 ноября"
+    expect: { error: invalid_date }
+
+  - id: err-008
+    text: "вчера в 15"
+    expect: { error: in_past }
+
+  - id: err-009
+    text: "в 9:75"
+    expect: { error: invalid_time }
+
+  - id: edge-001
+    text: "в 10"
+    now: "2026-10-07T10:00"
+    status: proposed
+    note: "время равно «сейчас» — считается прошедшим"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T22:00" }
+        - { datetime: "2026-10-08T10:00" }
+
+  - id: edge-002
+    text: "завтра"
+    now: "2026-12-31T20:00"
+    note: "переход через год"
+    expect: { date: "2027-01-01" }
+
+  - id: edge-003
+    text: "через неделю"
+    now: "2026-12-28T12:00"
+    expect: { date: "2027-01-04" }
+
+  - id: edge-004
+    text: "29 февраля"
+    now: "2027-01-10T12:00"
+    note: "2027 — не високосный, 2028 — високосный"
+    status: proposed
+    expect: { date: "2028-02-29" }
+
+  - id: edge-005
+    text: "в понедельник"
+    now: "2026-10-11T23:50"
+    note: "воскресенье, почти полночь"
+    expect: { date: "2026-10-12" }
+
+  - id: edge-006
+    text: "сегодня"
+    now: "2026-10-08T00:10"
+    note: "сразу после полуночи «сегодня» — уже четверг"
+    expect: { date: "2026-10-08" }

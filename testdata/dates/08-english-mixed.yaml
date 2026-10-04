@@ -1,0 +1,101 @@
+# Английский и смешанная речь. «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: en-001
+    text: "tomorrow at 3pm"
+    expect: { datetime: "2026-10-08T15:00" }
+
+  - id: en-002
+    text: "at 3"
+    note: "правило часа без AM/PM общее для языков"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: en-003
+    text: "this Friday"
+    expect: { date: "2026-10-09" }
+
+  - id: en-004
+    text: "next Friday"
+    note: "как «в следующую пятницу»"
+    expect:
+      ambiguous:
+        - { date: "2026-10-09" }
+        - { date: "2026-10-16" }
+
+  - id: en-005
+    text: "on Monday"
+    expect: { date: "2026-10-12" }
+
+  - id: en-006
+    text: "in 2 hours"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: en-007
+    text: "Oct 14 at 9:30am"
+    expect: { datetime: "2026-10-14T09:30" }
+
+  - id: en-008
+    text: "14 Oct"
+    expect: { date: "2026-10-14" }
+
+  - id: en-009
+    text: "the day after tomorrow"
+    expect: { date: "2026-10-09" }
+
+  - id: en-010
+    text: "at noon"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: en-011
+    text: "a week from today"
+    expect: { date: "2026-10-14" }
+
+  - id: en-012
+    text: "this weekend"
+    kind: range
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: en-013
+    text: "next week"
+    kind: range
+    expect: { range: { from: "2026-10-12", to: "2026-10-18" } }
+
+  - id: en-014
+    text: "this morning"
+    kind: range
+    expect: { range: { from: "2026-10-07T06:00", to: "2026-10-07T12:00" } }
+
+  - id: en-015
+    text: "from 1 to 2pm"
+    expect: { interval: { start: "2026-10-07T13:00", end: "2026-10-07T14:00" } }
+
+  # Смешанная речь
+  - id: mix-001
+    text: "в пятницу at 3pm"
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: mix-002
+    text: "tomorrow в 10"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: mix-003
+    text: "в 3pm"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: mix-004
+    text: "в 9am"
+    status: proposed
+    note: "как «в 8 утра»: явно утро, прошло → завтра"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: mix-005
+    text: "next week в среду"
+    expect: { date: "2026-10-14" }
+
+  - id: mix-006
+    text: "on Friday в половине третьего"
+    expect: { datetime: "2026-10-09T14:30" }

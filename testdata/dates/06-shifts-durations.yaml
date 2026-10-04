@@ -1,0 +1,85 @@
+# Сдвиги при переносе (kind: shift) и длительности (kind: duration).
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: shift
+
+cases:
+  - id: sh-001
+    text: "на час позже"
+    expect: { shift: "+PT1H" }
+
+  - id: sh-002
+    text: "на полчаса раньше"
+    expect: { shift: "-PT30M" }
+
+  - id: sh-003
+    text: "на 15 минут позже"
+    expect: { shift: "+PT15M" }
+
+  - id: sh-004
+    text: "на полтора часа позже"
+    expect: { shift: "+PT1H30M" }
+
+  - id: sh-005
+    text: "на день позже"
+    expect: { shift: "+P1D" }
+
+  - id: sh-006
+    text: "на два дня раньше"
+    expect: { shift: "-P2D" }
+
+  - id: sh-007
+    text: "на неделю вперёд"
+    expect: { shift: "+P7D" }
+
+  - id: sh-008
+    text: "на час"
+    status: proposed
+    note: "в контексте переноса без направления → позже"
+    expect: { shift: "+PT1H" }
+
+  - id: sh-009
+    text: "1 hour later"
+    expect: { shift: "+PT1H" }
+
+  - id: dur-001
+    kind: duration
+    text: "на полчаса"
+    expect: { duration: "PT30M" }
+
+  - id: dur-002
+    kind: duration
+    text: "на час"
+    expect: { duration: "PT1H" }
+
+  - id: dur-003
+    kind: duration
+    text: "на полтора часа"
+    expect: { duration: "PT1H30M" }
+
+  - id: dur-004
+    kind: duration
+    text: "на 45 минут"
+    expect: { duration: "PT45M" }
+
+  - id: dur-005
+    kind: duration
+    text: "на два часа"
+    expect: { duration: "PT2H" }
+
+  - id: dur-006
+    kind: duration
+    text: "часа на три"
+    note: "приблизительная форма"
+    expect: { duration: "PT3H" }
+
+  - id: dur-007
+    kind: duration
+    text: "на весь день"
+    expect: { duration: all_day }
+
+  - id: dur-008
+    kind: duration
+    text: "for 30 minutes"
+    expect: { duration: "PT30M" }

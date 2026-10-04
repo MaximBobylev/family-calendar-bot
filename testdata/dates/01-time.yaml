@@ -1,0 +1,169 @@
+# Время без дня. «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: time-001
+    text: "в 12"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: time-002
+    text: "в 3"
+    note: "1…6 → после полудня"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: time-003
+    text: "в 1"
+    expect: { datetime: "2026-10-07T13:00" }
+
+  - id: time-004
+    text: "в 6"
+    expect: { datetime: "2026-10-07T18:00" }
+
+  - id: time-005
+    text: "в 11"
+    note: "7…11 → утро; 11:00 ещё не прошло"
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: time-006
+    text: "в 9"
+    note: "date-rules: время без дня уже прошло → сегодня вечером / завтра утром"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T21:00" }
+        - { datetime: "2026-10-08T09:00" }
+
+  - id: time-007
+    text: "в 7"
+    note: "07:00 прошло — то же правило, что для «в 9»"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T19:00" }
+        - { datetime: "2026-10-08T07:00" }
+
+  - id: time-008
+    text: "в 9:30"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T21:30" }
+        - { datetime: "2026-10-08T09:30" }
+
+  - id: time-009
+    text: "в 15"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: time-010
+    text: "в 21:30"
+    expect: { datetime: "2026-10-07T21:30" }
+
+  - id: time-011
+    text: "в 14:00"
+    expect: { datetime: "2026-10-07T14:00" }
+
+  - id: time-012
+    text: "в 15.30"
+    note: "точка как разделитель — частый вывод Whisper"
+    expect: { datetime: "2026-10-07T15:30" }
+
+  - id: time-013
+    text: "в 7 вечера"
+    expect: { datetime: "2026-10-07T19:00" }
+
+  - id: time-014
+    text: "в 8 утра"
+    status: proposed
+    note: "явно «утра», 08:00 сегодня прошло, день не назван → завтра (не вариант «вечером»)"
+    expect: { datetime: "2026-10-08T08:00" }
+
+  - id: time-015
+    text: "в 3 ночи"
+    status: proposed
+    note: "03:00 сегодня прошло, день не назван → ближайшие 03:00"
+    expect: { datetime: "2026-10-08T03:00" }
+
+  - id: time-016
+    text: "в 12 ночи"
+    status: proposed
+    note: "полночь в конце сегодняшнего дня = начало завтрашнего"
+    expect: { datetime: "2026-10-08T00:00" }
+
+  - id: time-017
+    text: "в полночь"
+    status: proposed
+    expect: { datetime: "2026-10-08T00:00" }
+
+  - id: time-018
+    text: "в полдень"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: time-019
+    text: "в половине третьего"
+    note: "час 3 → после полудня; половина третьего = 2:30 → 14:30"
+    expect: { datetime: "2026-10-07T14:30" }
+
+  - id: time-020
+    text: "в полтретьего"
+    expect: { datetime: "2026-10-07T14:30" }
+
+  - id: time-021
+    text: "без пятнадцати три"
+    expect: { datetime: "2026-10-07T14:45" }
+
+  - id: time-022
+    text: "без четверти шесть"
+    expect: { datetime: "2026-10-07T17:45" }
+
+  - id: time-023
+    text: "в пять минут восьмого"
+    note: "07:05 → утро, прошло → варианты"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T19:05" }
+        - { datetime: "2026-10-08T07:05" }
+
+  - id: time-024
+    text: "в пятнадцать тридцать"
+    note: "числительные словами — вывод Whisper"
+    expect: { datetime: "2026-10-07T15:30" }
+
+  - id: time-025
+    text: "в восемнадцать ноль-ноль"
+    expect: { datetime: "2026-10-07T18:00" }
+
+  - id: time-026
+    text: "через час"
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: time-027
+    text: "через 15 минут"
+    expect: { datetime: "2026-10-07T10:15" }
+
+  - id: time-028
+    text: "через полтора часа"
+    expect: { datetime: "2026-10-07T11:30" }
+
+  - id: time-029
+    text: "в 9"
+    now: "2026-10-07T22:00"
+    status: proposed
+    note: "и 09:00, и 21:00 сегодня прошли → завтра 09:00, без вариантов"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: time-030
+    text: "в 3"
+    now: "2026-10-07T16:00"
+    status: proposed
+    note: "15:00 прошло; правило «1…6 → после полудня» сохраняется → завтра 15:00"
+    expect: { datetime: "2026-10-08T15:00" }
+
+  - id: time-031
+    text: "в 12"
+    now: "2026-10-07T23:30"
+    status: proposed
+    note: "полдень прошёл; «в 12» поздно вечером может значить полночь через 30 минут"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-08T00:00" }
+        - { datetime: "2026-10-08T12:00" }

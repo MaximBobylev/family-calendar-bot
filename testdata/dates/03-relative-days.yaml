@@ -1,0 +1,85 @@
+# Относительные дни. «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: rel-001
+    text: "сегодня"
+    expect: { date: "2026-10-07" }
+
+  - id: rel-002
+    text: "завтра"
+    expect: { date: "2026-10-08" }
+
+  - id: rel-003
+    text: "послезавтра"
+    expect: { date: "2026-10-09" }
+
+  - id: rel-004
+    text: "завтра в 15:30"
+    expect: { datetime: "2026-10-08T15:30" }
+
+  - id: rel-005
+    text: "завтра в 9"
+    note: "день назван явно — «прошедшего времени» нет, 9 → утро"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: rel-006
+    text: "завтра в 3"
+    expect: { datetime: "2026-10-08T15:00" }
+
+  - id: rel-007
+    text: "сегодня в 9"
+    status: proposed
+    note: "день — сегодня, 09:00 прошло → 21:00 без вариантов"
+    expect: { datetime: "2026-10-07T21:00" }
+
+  - id: rel-008
+    text: "сегодня в 8 утра"
+    note: "date-rules: время в прошлом → переспросить"
+    expect: { error: in_past }
+
+  - id: rel-009
+    text: "сегодня вечером"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
+  - id: rel-010
+    text: "завтра утром"
+    expect: { date: { date: "2026-10-08", part: morning } }
+
+  - id: rel-011
+    text: "завтра днём"
+    expect: { date: { date: "2026-10-08", part: day } }
+
+  - id: rel-012
+    text: "через 2 дня"
+    expect: { date: "2026-10-09" }
+
+  - id: rel-013
+    text: "через два дня в 10"
+    expect: { datetime: "2026-10-09T10:00" }
+
+  - id: rel-014
+    text: "через неделю"
+    expect: { date: "2026-10-14" }
+
+  - id: rel-015
+    text: "через месяц"
+    expect: { date: "2026-11-07" }
+
+  - id: rel-016
+    text: "вчера"
+    expect: { error: in_past }
+
+  - id: rel-017
+    text: "на завтра"
+    note: "в контексте переноса: новая дата, время сохраняет код (keep_time)"
+    expect: { date: "2026-10-08" }
+
+  - id: rel-018
+    text: "в понедельник через неделю"
+    status: proposed
+    note: "ближайший понедельник (12) + неделя"
+    expect: { date: "2026-10-19" }

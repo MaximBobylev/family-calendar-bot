@@ -1,0 +1,95 @@
+# Абсолютные даты. «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: abs-001
+    text: "14 октября"
+    expect: { date: "2026-10-14" }
+
+  - id: abs-002
+    text: "14.10"
+    expect: { date: "2026-10-14" }
+
+  - id: abs-003
+    text: "14/10"
+    note: "день/месяц, как принято в RU"
+    expect: { date: "2026-10-14" }
+
+  - id: abs-004
+    text: "14 октября в 9:30"
+    expect: { datetime: "2026-10-14T09:30" }
+
+  - id: abs-005
+    text: "14.10 в 9"
+    expect: { datetime: "2026-10-14T09:00" }
+
+  - id: abs-006
+    text: "на 14-е"
+    expect: { date: "2026-10-14" }
+
+  - id: abs-007
+    text: "23-го"
+    expect: { date: "2026-10-23" }
+
+  - id: abs-008
+    text: "двадцать третьего"
+    expect: { date: "2026-10-23" }
+
+  - id: abs-009
+    text: "двадцать пятого октября в десять утра"
+    expect: { datetime: "2026-10-25T10:00" }
+
+  - id: abs-010
+    text: "первого ноября в полдень"
+    expect: { datetime: "2026-11-01T12:00" }
+
+  - id: abs-011
+    text: "третьего"
+    status: proposed
+    note: "3-е текущего месяца прошло → следующий месяц"
+    expect: { date: "2026-11-03" }
+
+  - id: abs-012
+    text: "5 января"
+    note: "прошло в этом году → следующий год"
+    expect: { date: "2027-01-05" }
+
+  - id: abs-013
+    text: "1 октября"
+    status: proposed
+    note: "прошло неделю назад → следующий год; год обязательно показывается в карточке"
+    expect: { date: "2027-10-01" }
+
+  - id: abs-014
+    text: "1 января"
+    expect: { date: "2027-01-01" }
+
+  - id: abs-015
+    text: "31 декабря в 23:59"
+    expect: { datetime: "2026-12-31T23:59" }
+
+  - id: abs-016
+    text: "14 октября 2027"
+    expect: { date: "2027-10-14" }
+
+  - id: abs-017
+    text: "5.11.26"
+    expect: { date: "2026-11-05" }
+
+  - id: abs-018
+    text: "2026-11-05"
+    expect: { date: "2026-11-05" }
+
+  - id: abs-019
+    text: "7 октября в 12"
+    note: "сегодня, время не прошло"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: abs-020
+    text: "7 октября в 9"
+    status: proposed
+    note: "дата — сегодня, 09:00 прошло → как «сегодня в 9»"
+    expect: { datetime: "2026-10-07T21:00" }

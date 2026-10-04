@@ -1,0 +1,70 @@
+# Каталог интентов
+
+LLM получает текст + контекст (текущие дата/время, пояс пользователя, список календарей и алиасов, последний показанный список событий, открытый черновик) и возвращает вызов функции из списка ниже (tool calling). Реестр интентов со схемами — единый источник для tool calling, валидации и будущих API (ADR-0003).
+
+Правила:
+- Свободный текст от LLM пользователю **не отправляется**: все ответы и вопросы строятся кодом по шаблонам i18n.
+- В MVP — **один** интент на сообщение. Если LLM вернула несколько вызовов, не выполняется ни один, ответ «Давайте по одной» (US-12).
+- Результат LLM всегда проходит валидацию схемой и правилами [date-rules.md](date-rules.md).
+- **Даты и время LLM не вычисляет.** Во всех слотах дат (`start`, `range`, `due`, `reschedule.at`, `reschedule.date` и т.п.) LLM возвращает **сырой фрагмент текста** («в среду в 12», «на час позже», «с 10 по 20 ноября»), а абсолютное значение получает детерминированный парсер по date-rules.md (ADR-0005). Примеры с ISO ниже — это результат парсера, а не вывод LLM.
+
+| Интент | Слоты | Обязательные | Подтверждение (US-05) | Приоритет |
+|---|---|---|---|---|
+| `list_events` | `range`, `query?`, `calendar?`, `limit?` | `range` | нет | MVP |
+| `find_event` | `event_ref` | `event_ref` | нет | MVP |
+| `create_event` | `calendar?`, `title?`, `start`, `end?` / `duration?`, `all_day?`, `location?`, `description?`, `reminders?`, `recurrence?`, `conference?` | `start` | по режиму; серия — всегда | MVP |
+| `modify_event` | `event_ref`, `scope?`, `reschedule?`, `duration?`, `title?`, `description?`, `location?`, `recurrence?`, `target_calendar?` | `event_ref` + хотя бы одно изменение | по режиму; `following`/`all` — всегда | MVP |
+| `set_reminders` | `event_ref`, `reminders[]` (`minutes`, `method`), `scope?` | оба | по режиму | MVP |
+| `delete_event` | `event_ref` **или** `range`, `scope?` | одно из двух | всегда | MVP |
+| `set_setting` | `setting` (enum), `value` | оба | нет; `confirmation_mode` — да | MVP |
+| `set_calendar_alias` | `calendar`, `alias?`, `make_default?` | `calendar` | нет | MVP |
+| `set_notifications` | `kind` (`today` / `tomorrow` / `week` / `before_event`), `enabled?`, `time?`, `weekday?`, `minutes_before?` | `kind` | нет | MVP |
+| `set_timezone` | `place` / `tz`, `mode` (`trip` / `permanent`)?, `until?`, `return_home?` | `place`/`tz` или `return_home` | да (кнопки «на поездку / навсегда», US-07) | MVP |
+| `refresh_calendars` | — | — | нет | MVP |
+| `undo` | — | — | нет | MVP |
+| `provide_title` | `title` | `title` | нет | MVP, доступен **только** при ожидании названия (US-30) |
+| `assign` | `title`, `assignee` (имя/алиас или «кто-то»), `due`, `event_ref?`, `reminders?` | `title`, `due` | да | R1 |
+| `set_responsible` | `event_ref`, `responsible?`, `for_whom?`, `scope?` | `event_ref` | по режиму | R1 |
+| `assignment_status` | `assignment_ref`, `status` (`done` / `cancel`) | оба | нет | R1 |
+| `free_slots` | `range`, `duration` | `range` | нет | P2 |
+| `invite` | `event_ref`, `attendees[]` | оба | всегда | stretch |
+| `extract_events` | `source` (`forward` / `image` / `file`), `instruction?` (комментарий пользователя), `events[]` (поля как у `create_event` + `quotes`), `looks_like_change?` | `events[]` (может быть пустым) | всегда | R1 |
+| `clarify` | `missing[]` (имена слотов) | — | — | служебный |
+| `unsupported` | `reason` (enum) | — | — | служебный |
+
+`set_setting.setting` ∈ {`default_duration`, `default_reminders`, `default_reminders_all_day`, `confirmation_mode`, `language`, `default_calendar`}. Уведомления — только через `set_notifications`.
+
+## `reschedule` — как задаётся перенос
+
+LLM не знает текущее время события, поэтому перенос описывается относительно:
+
+| Вариант | Пример фразы | Значение |
+|---|---|---|
+| `{ at: ISO }` | «перенеси на пятницу в 15» | новое абсолютное начало |
+| `{ shift: ISO-duration }` | «на час позже», «на день раньше» | `PT1H`, `-P1D` |
+| `{ date: ISO-date, keep_time: true }` | «на пятницу на то же время» | новая дата, время прежнее |
+| `{ time: HH:MM, keep_date: true }` | «на 11» | новое время, дата прежняя |
+
+Итоговое время и `end` (с сохранением длительности) считает код после разрешения `event_ref`.
+
+## `event_ref` — как ссылаться на событие
+
+- `{ query?, date?, time?, calendar? }` — поиск: `events.list` по диапазону + нечёткое/морфологическое сопоставление в коде (не `q` Google);
+- `{ list_index: n }` — n-е событие из последнего показанного списка;
+- `{ last: true }` — последнее созданное/изменённое («её», «эту встречу»);
+- `{ next: true, query? }` — ближайшее ещё не начавшееся («следующую встречу», «следующий созвон с Петей»).
+
+Разрешение: 0 кандидатов → «не нашёл» + что есть в этот день; 1 → дальше; 2–5 → кнопки; >5 → «уточните». Результат — непрозрачная ссылка `{accountId, calendarId, eventId}` (ADR-0003).
+
+## `calendar`
+
+То, что сказал пользователь («общий», «work»). Код сопоставляет с алиасами и названиями (нечётко, с падежами). Не указан → календарь по умолчанию. Нечёткое совпадение → обязательное подтверждение.
+
+## `recurrence` и `scope`
+
+- `recurrence` — структура (`freq`, `interval`, `by_day`, `by_month_day`, `by_set_pos`, `until` / `count`), из которой код собирает RRULE (адаптер Google) или иной формат (другие провайдеры). Сырой RRULE от LLM не принимаем.
+- `scope` — `this` | `following` | `all` | не указан (→ правила US-43).
+
+## Неоднозначные даты
+
+LLM может пометить слот `ambiguous` с вариантами, но код **всегда** сам перепроверяет правила date-rules.md и при неоднозначности показывает варианты кнопками.

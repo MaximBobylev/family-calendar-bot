@@ -1,0 +1,101 @@
+# Повторения (kind: recurrence). Дата начала серии выбирает код по правилу и дате события;
+# здесь проверяется только правило.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: recurrence
+
+cases:
+  - id: rec-001
+    text: "каждый понедельник"
+    expect: { recurrence: { freq: weekly, by_day: [MO] } }
+
+  - id: rec-002
+    text: "каждый понедельник в 10"
+    expect: { recurrence: { freq: weekly, by_day: [MO], time: "10:00" } }
+
+  - id: rec-003
+    text: "по будням"
+    expect: { recurrence: { freq: weekly, by_day: [MO, TU, WE, TH, FR] } }
+
+  - id: rec-004
+    text: "по будням в 11 до конца года"
+    expect: { recurrence: { freq: weekly, by_day: [MO, TU, WE, TH, FR], time: "11:00", until: "2026-12-31" } }
+
+  - id: rec-005
+    text: "каждый день"
+    expect: { recurrence: { freq: daily } }
+
+  - id: rec-006
+    text: "по выходным"
+    expect: { recurrence: { freq: weekly, by_day: [SA, SU] } }
+
+  - id: rec-007
+    text: "каждый вторник и четверг"
+    expect: { recurrence: { freq: weekly, by_day: [TU, TH] } }
+
+  - id: rec-008
+    text: "раз в две недели по четвергам"
+    expect: { recurrence: { freq: weekly, interval: 2, by_day: [TH] } }
+
+  - id: rec-009
+    text: "каждую вторую среду"
+    status: proposed
+    note: "по-русски обычно «раз в две недели», а не «вторая среда месяца»"
+    expect: { recurrence: { freq: weekly, interval: 2, by_day: [WE] } }
+
+  - id: rec-010
+    text: "каждую вторую среду месяца"
+    expect: { recurrence: { freq: monthly, by_day: [WE], by_set_pos: 2 } }
+
+  - id: rec-011
+    text: "в первый понедельник месяца"
+    expect: { recurrence: { freq: monthly, by_day: [MO], by_set_pos: 1 } }
+
+  - id: rec-012
+    text: "в последнюю пятницу месяца"
+    expect: { recurrence: { freq: monthly, by_day: [FR], by_set_pos: -1 } }
+
+  - id: rec-013
+    text: "каждое 15 число"
+    expect: { recurrence: { freq: monthly, by_month_day: 15 } }
+
+  - id: rec-014
+    text: "в последний день месяца"
+    expect: { recurrence: { freq: monthly, by_month_day: -1 } }
+
+  - id: rec-015
+    text: "31 числа каждого месяца"
+    note: "US-32: предупредить, что Google пропустит короткие месяцы"
+    expect: { recurrence: { freq: monthly, by_month_day: 31, warning: skips_short_months } }
+
+  - id: rec-016
+    text: "каждый год 3 марта"
+    expect: { recurrence: { freq: yearly, by_month: 3, by_month_day: 3 } }
+
+  - id: rec-017
+    text: "каждую неделю 10 раз"
+    note: "день недели — по дате события"
+    expect: { recurrence: { freq: weekly, count: 10 } }
+
+  - id: rec-018
+    text: "каждый понедельник до 1 декабря"
+    expect: { recurrence: { freq: weekly, by_day: [MO], until: "2026-12-01" } }
+
+  - id: rec-019
+    text: "every weekday at 9"
+    expect: { recurrence: { freq: weekly, by_day: [MO, TU, WE, TH, FR], time: "09:00" } }
+
+  - id: rec-020
+    text: "every other Friday"
+    expect: { recurrence: { freq: weekly, interval: 2, by_day: [FR] } }
+
+  - id: rec-021
+    text: "ежемесячно"
+    note: "число — по дате события"
+    expect: { recurrence: { freq: monthly } }
+
+  - id: rec-022
+    text: "каждый понедельник в 3"
+    note: "правило часа без AM/PM действует и в повторениях"
+    expect: { recurrence: { freq: weekly, by_day: [MO], time: "15:00" } }

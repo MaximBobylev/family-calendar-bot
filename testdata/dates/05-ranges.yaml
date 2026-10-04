@@ -1,0 +1,128 @@
+# Периоды для чтения (kind: range) и интервалы событий (kind: point с началом и концом).
+# «Сейчас» — среда 2026-10-07 10:00. Неделя — пн–вс.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: range
+
+cases:
+  - id: rng-001
+    text: "сегодня"
+    expect: { range: { from: "2026-10-07", to: "2026-10-07" } }
+
+  - id: rng-002
+    text: "завтра"
+    expect: { range: { from: "2026-10-08", to: "2026-10-08" } }
+
+  - id: rng-003
+    text: "на этой неделе"
+    note: "date-rules: с сегодня до воскресенья"
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: rng-004
+    text: "неделю"
+    note: "«покажи неделю» = эта неделя"
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: rng-005
+    text: "на следующей неделе"
+    expect: { range: { from: "2026-10-12", to: "2026-10-18" } }
+
+  - id: rng-006
+    text: "в выходные"
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: rng-007
+    text: "на следующих выходных"
+    status: proposed
+    note: "как «следующая пятница» — две трактовки"
+    expect:
+      ambiguous:
+        - { range: { from: "2026-10-10", to: "2026-10-11" } }
+        - { range: { from: "2026-10-17", to: "2026-10-18" } }
+
+  - id: rng-008
+    text: "в этом месяце"
+    expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
+
+  - id: rng-009
+    text: "в следующем месяце"
+    expect: { range: { from: "2026-11-01", to: "2026-11-30" } }
+
+  - id: rng-010
+    text: "в ноябре"
+    expect: { range: { from: "2026-11-01", to: "2026-11-30" } }
+
+  - id: rng-011
+    text: "в октябре"
+    status: proposed
+    note: "текущий месяц — с сегодня, как «в этом месяце»"
+    expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
+
+  - id: rng-012
+    text: "утром"
+    note: "date-rules: утро 06–12"
+    expect: { range: { from: "2026-10-07T06:00", to: "2026-10-07T12:00" } }
+
+  - id: rng-013
+    text: "завтра утром"
+    expect: { range: { from: "2026-10-08T06:00", to: "2026-10-08T12:00" } }
+
+  - id: rng-014
+    text: "днём"
+    expect: { range: { from: "2026-10-07T12:00", to: "2026-10-07T18:00" } }
+
+  - id: rng-015
+    text: "в пятницу после обеда"
+    expect: { range: { from: "2026-10-09T13:00", to: "2026-10-09T18:00" } }
+
+  - id: rng-016
+    text: "сегодня вечером"
+    expect: { range: { from: "2026-10-07T18:00", to: "2026-10-08T00:00" } }
+
+  - id: rng-017
+    text: "до конца недели"
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: rng-018
+    text: "ближайшие 3 дня"
+    expect: { range: { from: "2026-10-07", to: "2026-10-09" } }
+
+  - id: rng-019
+    text: "на две недели вперёд"
+    status: proposed
+    note: "14 дней, включая сегодня"
+    expect: { range: { from: "2026-10-07", to: "2026-10-20" } }
+
+  - id: rng-020
+    text: "вчера"
+    note: "для чтения прошлое допустимо"
+    expect: { range: { from: "2026-10-06", to: "2026-10-06" } }
+
+  # Интервалы событий
+  - id: rng-021
+    kind: point
+    text: "с часу до двух"
+    expect: { interval: { start: "2026-10-07T13:00", end: "2026-10-07T14:00" } }
+
+  - id: rng-022
+    kind: point
+    text: "в пятницу с 10 до 12"
+    expect: { interval: { start: "2026-10-09T10:00", end: "2026-10-09T12:00" } }
+
+  - id: rng-023
+    kind: point
+    text: "с 23 до 2"
+    note: "через полночь"
+    expect: { interval: { start: "2026-10-07T23:00", end: "2026-10-08T02:00" } }
+
+  - id: rng-024
+    kind: point
+    text: "с 10 по 20 ноября"
+    note: "событие на весь день, диапазон включительно (в Google end.date = 21-е — это делает адаптер)"
+    expect: { range: { from: "2026-11-10", to: "2026-11-20" } }
+
+  - id: rng-025
+    kind: point
+    text: "завтра с 15:00 до 16:30"
+    expect: { interval: { start: "2026-10-08T15:00", end: "2026-10-08T16:30" } }
