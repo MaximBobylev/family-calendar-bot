@@ -28,6 +28,16 @@ export class TelegramApi {
     });
   }
 
+  editMessageText(chatId: number | string, messageId: number | string, text: string, replyMarkup?: ReplyMarkup, opts: { html?: boolean } = {}) {
+    return this.call<unknown>("editMessageText", {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      text,
+      reply_markup: replyMarkup ?? { inline_keyboard: [] },
+      ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
+    });
+  }
+
   answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.call<true>("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
   }

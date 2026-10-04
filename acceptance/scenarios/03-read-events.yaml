@@ -4,49 +4,50 @@
 
 - id: read-tomorrow
   story: US-20
-  steps: &setup
-    - clock: "2026-10-07T07:00:00Z"
-    - connected_user:
-        from: 1001
-        email: ivan@gmail.com
-        calendars:
-          - id: ivan@gmail.com
-            summary: "Иван"
-            accessRole: owner
-            primary: true
-            timeZone: Europe/Moscow
-            events:
-              - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
-              - { id: e2, summary: "Созвон с Петей", location: "Zoom", start: { dateTime: "2026-10-08T15:30:00+03:00" }, end: { dateTime: "2026-10-08T16:00:00+03:00" } }
-              - { id: e3, summary: "День рождения мамы", start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
-              - id: e4
-                summary: "Скучная встреча"
-                start: { dateTime: "2026-10-08T12:00:00+03:00" }
-                end: { dateTime: "2026-10-08T13:00:00+03:00" }
-                attendees: [{ self: true, responseStatus: declined }]
-              - { id: e5, summary: "Офис", eventType: workingLocation, start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
-              - { id: e6, summary: "Обед <с коллегами>", transparency: transparent, start: { dateTime: "2026-10-07T13:00:00+03:00" }, end: { dateTime: "2026-10-07T14:00:00+03:00" } }
-          - id: family@group.calendar.google.com
-            summary: "Семья"
-            accessRole: writer
-            events:
-              - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
-          - id: holidays@group.v.calendar.google.com
-            summary: "Праздники"
-            accessRole: reader
-            events:
-              - { id: h1, summary: "День народного единства", start: { date: "2026-11-04" }, end: { date: "2026-11-05" } }
-    - llm:
-        "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
-        "Покажи неделю": { tool: list_events, args: { range: "неделю" } }
-        "Что у меня в субботу?": { tool: list_events, args: { range: "в субботу" } }
-        "Что завтра в семейном?": { tool: list_events, args: { range: "завтра", calendar: "Семья" } }
-        "Что в рабочем календаре?": { tool: list_events, args: { range: "сегодня", calendar: "Работа" } }
-        "Что у меня на следующих выходных?": { tool: list_events, args: { range: "на следующих выходных" } }
-        "Что у меня на днях?": { tool: list_events, args: { range: "на днях" } }
-        "Что в ноябре?": { tool: list_events, args: { range: "в ноябре" } }
-        "Какая завтра погода?": { tool: unsupported }
-        "Покажи завтра и удали планёрку": { tools: [{ tool: list_events, args: { range: "завтра" } }, { tool: list_events, args: { range: "сегодня" } }] }
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+                - { id: e2, summary: "Созвон с Петей", location: "Zoom", start: { dateTime: "2026-10-08T15:30:00+03:00" }, end: { dateTime: "2026-10-08T16:00:00+03:00" } }
+                - { id: e3, summary: "День рождения мамы", start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
+                - id: e4
+                  summary: "Скучная встреча"
+                  start: { dateTime: "2026-10-08T12:00:00+03:00" }
+                  end: { dateTime: "2026-10-08T13:00:00+03:00" }
+                  attendees: [{ self: true, responseStatus: declined }]
+                - { id: e5, summary: "Офис", eventType: workingLocation, start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
+                - { id: e6, summary: "Обед <с коллегами>", transparency: transparent, start: { dateTime: "2026-10-07T13:00:00+03:00" }, end: { dateTime: "2026-10-07T14:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              events:
+                - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+            - id: holidays@group.v.calendar.google.com
+              summary: "Праздники"
+              accessRole: reader
+              events:
+                - { id: h1, summary: "День народного единства", start: { date: "2026-11-04" }, end: { date: "2026-11-05" } }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Покажи неделю": { tool: list_events, args: { range: "неделю" } }
+          "Что у меня в субботу?": { tool: list_events, args: { range: "в субботу" } }
+          "Что завтра в семейном?": { tool: list_events, args: { range: "завтра", calendar: "Семья" } }
+          "Что в рабочем календаре?": { tool: list_events, args: { range: "сегодня", calendar: "Работа" } }
+          "Что у меня на следующих выходных?": { tool: list_events, args: { range: "на следующих выходных" } }
+          "Что у меня на днях?": { tool: list_events, args: { range: "на днях" } }
+          "Что в ноябре?": { tool: list_events, args: { range: "в ноябре" } }
+          "Какая завтра погода?": { tool: unsupported }
+          "Покажи завтра и удали планёрку": { tools: [{ tool: list_events, args: { range: "завтра" } }, { tool: list_events, args: { range: "сегодня" } }] }
     - telegram: { from: 1001, text: "Что у меня завтра?" }
     - expect_telegram:
         - text_contains:

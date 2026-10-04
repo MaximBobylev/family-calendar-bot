@@ -26,6 +26,12 @@ type Step =
   | { oauth_reuse_last_link: { expect_status: number } }
   | { google_revoke: string }
   | { llm: Record<string, unknown> }
+  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
+  | { press: string | { button: string; from?: number; again?: boolean } }
+  /** Ответить (reply) на последний вопрос бота с ForceReply. */
+  | { reply: { from: number; text: string } }
+  | { expect_callback_answer: { text_contains?: string[]; empty?: boolean } }
+  | { expect_google_events: { email: string; calendar: string; events: ExpectedEvent[]; count?: number } }
   /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
   | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } };
 
@@ -48,6 +54,16 @@ interface TelegramInput {
   edited?: boolean;
   /** Повторить последний update_id — имитация повторной доставки Telegram. */
   redeliver?: boolean;
+  /** message_id сообщения бота, на которое это reply. */
+  reply_to?: number;
+}
+
+interface ExpectedEvent {
+  summary: string;
+  /** Момент со смещением («2026-10-08T15:00:00+03:00») или дата для событий на весь день. */
+  start: string;
+  end: string;
+  location?: string;
 }
 
 interface TelegramExpectation {
@@ -73,7 +89,13 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 
 interface TelegramCall {
   method: string;
-  body: { chat_id?: number | string; text?: string; reply_markup?: { inline_keyboard?: { text: string; url?: string }[][] } };
+  messageId?: number;
+  body: {
+    chat_id?: number | string;
+    message_id?: number;
+    text?: string;
+    reply_markup?: { inline_keyboard?: { text: string; url?: string; callback_data?: string }[][]; force_reply?: boolean };
+  };
 }
 
 async function allTelegramCalls(): Promise<TelegramCall[]> {
@@ -113,6 +135,7 @@ async function runScenario(s: Scenario): Promise<void> {
       chat: { id: t.chat_id ?? t.from, type: t.chat_type ?? "private" },
       from: { id: t.from, is_bot: false, first_name: "Test", language_code: t.language ?? "ru" },
       ...(t.text !== undefined ? { text: t.text } : {}),
+      ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
     };
     const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
     const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
@@ -121,11 +144,32 @@ async function runScenario(s: Scenario): Promise<void> {
     if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
   };
 
+  // Ответы на нажатия (answerCallbackQuery) проверяются отдельным шагом, в expect_telegram их нет
   const newCalls = async (): Promise<TelegramCall[]> => {
     const all = await allTelegramCalls();
     const fresh = all.slice(seen);
     seen = all.length;
-    return fresh;
+    return fresh.filter((c) => c.method !== "answerCallbackQuery");
+  };
+
+  let callbackSeq = 0;
+  let lastPress: { from: number; chatId: number; messageId: number; data: string } | undefined;
+
+  const sendCallback = async (p: { from: number; chatId: number; messageId: number; data: string }, where: string) => {
+    updateId++;
+    const update = {
+      update_id: updateId,
+      callback_query: {
+        id: `cq${++callbackSeq}`,
+        from: { id: p.from, is_bot: false, first_name: "Test", language_code: "ru" },
+        message: { message_id: p.messageId, date: 0, chat: { id: p.chatId, type: "private" } },
+        data: p.data,
+      },
+    };
+    const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
+    if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
+    const drain = await post(`${SUT}/__test/drain`, {});
+    if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
   };
 
   // Общая подготовка подключается YAML-якорем как вложенный список шагов
@@ -185,6 +229,54 @@ async function runScenario(s: Scenario): Promise<void> {
       await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
     } else if ("llm" in step) {
       await post(`${FAKES}/__fake/llm/fixtures`, step.llm);
+    } else if ("press" in step) {
+      const p = typeof step.press === "string" ? { button: step.press } : step.press;
+      if (p.again) {
+        if (!lastPress) throw new AssertionError(`${where}: nothing pressed before`);
+        await sendCallback(lastPress, where);
+        continue;
+      }
+      const calls = await allTelegramCalls();
+      let target: { call: TelegramCall; data: string } | undefined;
+      for (const c of [...calls].reverse()) {
+        const btn = (c.body.reply_markup?.inline_keyboard ?? []).flat().find((b) => b.text === p.button && b.callback_data);
+        if (btn) {
+          target = { call: c, data: btn.callback_data! };
+          break;
+        }
+      }
+      if (!target) throw new AssertionError(`${where}: no button «${p.button}»`);
+      const messageId = target.call.messageId ?? target.call.body.message_id;
+      if (!messageId) throw new AssertionError(`${where}: message with «${p.button}» has no id`);
+      lastPress = { from: p.from ?? Number(target.call.body.chat_id), chatId: Number(target.call.body.chat_id), messageId, data: target.data };
+      await sendCallback(lastPress, where);
+    } else if ("reply" in step) {
+      const q = [...(await allTelegramCalls())].reverse().find((c) => c.body.reply_markup?.force_reply && c.messageId);
+      if (!q) throw new AssertionError(`${where}: no question with ForceReply`);
+      await sendUpdate({ from: step.reply.from, text: step.reply.text, reply_to: q.messageId! }, where);
+    } else if ("expect_callback_answer" in step) {
+      const answers = (await allTelegramCalls()).filter((c) => c.method === "answerCallbackQuery");
+      const last = answers.at(-1) as { body: { text?: string } } | undefined;
+      if (!last) throw new AssertionError(`${where}: no answerCallbackQuery`);
+      const text = last.body.text ?? "";
+      if (step.expect_callback_answer.empty && text) throw new AssertionError(`${where}: callback answer «${text}», expected empty`);
+      for (const part of step.expect_callback_answer.text_contains ?? []) {
+        if (!text.includes(part)) throw new AssertionError(`${where}: callback answer «${text}» does not contain «${part}»`);
+      }
+    } else if ("expect_google_events" in step) {
+      const e = step.expect_google_events;
+      const cals = (await (await fetch(`${FAKES}/__fake/google/events?email=${encodeURIComponent(e.email)}`)).json()) as {
+        id: string;
+        events?: { summary?: string; location?: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string } }[];
+      }[];
+      const events = cals.find((c) => c.id === e.calendar)?.events ?? [];
+      if (e.count !== undefined && events.length !== e.count) throw new AssertionError(`${where}: ${events.length} events in ${e.calendar}, expected ${e.count}`);
+      const same = (got: { dateTime?: string; date?: string }, want: string) =>
+        want.includes("T") ? !!got.dateTime && Date.parse(got.dateTime) === Date.parse(want) : got.date === want;
+      for (const want of e.events) {
+        const found = events.find((g) => g.summary === want.summary && same(g.start, want.start) && same(g.end, want.end) && (!want.location || g.location === want.location));
+        if (!found) throw new AssertionError(`${where}: event ${JSON.stringify(want)} not found in ${e.calendar}: ${JSON.stringify(events.map((g) => [g.summary, g.start, g.end]))}`);
+      }
     } else if ("connected_user" in step) {
       const c = step.connected_user;
       await post(`${FAKES}/__fake/google/accounts`, { email: c.email, calendars: c.calendars });

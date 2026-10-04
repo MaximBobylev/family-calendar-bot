@@ -69,3 +69,33 @@ export async function listEvents(
   } while (pageToken);
   return items;
 }
+
+export interface GoogleEventInput {
+  summary?: string;
+  location?: string;
+  description?: string;
+  start?: { dateTime?: string; date?: string; timeZone?: string };
+  end?: { dateTime?: string; date?: string; timeZone?: string };
+  reminders?: { useDefault: boolean; overrides?: { method: "popup" | "email"; minutes: number }[] };
+}
+
+async function writeEvent(url: URL, method: "POST" | "PATCH", accessToken: string, body: GoogleEventInput): Promise<GoogleEvent & { htmlLink?: string }> {
+  const res = await fetch(url, {
+    method,
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`events.${method === "POST" ? "insert" : "patch"} failed: ${res.status} ${await res.text()}`);
+  return (await res.json()) as GoogleEvent & { htmlLink?: string };
+}
+
+export function insertEvent(apiBase: string, accessToken: string, calendarId: string, body: GoogleEventInput) {
+  return writeEvent(new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`), "POST", accessToken, body);
+}
+
+export function patchEvent(apiBase: string, accessToken: string, calendarId: string, eventId: string, body: GoogleEventInput) {
+  return writeEvent(
+    new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`),
+    "PATCH", accessToken, body,
+  );
+}

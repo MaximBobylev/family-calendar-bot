@@ -3,8 +3,20 @@
 
 import { callTools, type LlmConfig, type ToolDefinition } from "./llm";
 
+export interface CreateEventIntent {
+  name: "create_event";
+  /** Фрагмент даты/времени как сказано, включая конец интервала: «завтра с часу до двух». */
+  start: string;
+  title?: string;
+  duration?: string;
+  allDay?: boolean;
+  calendar?: string;
+  location?: string;
+}
+
 export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
+  | CreateEventIntent
   | { name: "unsupported" }
   | { name: "multiple" };
 
@@ -23,6 +35,25 @@ export const TOOLS: ToolDefinition[] = [
           calendar: str("If the user named a calendar, its name exactly as written in the user's calendar list. Omit otherwise."),
         },
         required: ["range"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_event",
+      description: "Create a new calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
+      parameters: {
+        type: "object",
+        properties: {
+          start: str("When, exactly as the user said it, including an end time if given: «в среду в 12», «завтра с часу до двух», «с 10 по 20 ноября»."),
+          title: str("Event title as the user said it, without date/time words: «Созвон с Петей», «День рождения мамы». Omit if the user did not name the event (e.g. just «встречу»)."),
+          duration: str("Duration exactly as said: «на полчаса», «на два часа». Omit if not said."),
+          all_day: { type: "boolean", description: "true for all-day events: birthdays, vacations, holidays, or when the user says «на весь день»." },
+          calendar: str("If the user named a calendar, its name exactly as written in the user's calendar list. Omit otherwise."),
+          location: str("Place if said: «в кафе Пушкин». Omit otherwise."),
+        },
+        required: ["start"],
       },
     },
   },
@@ -61,6 +92,19 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
   if (call?.name === "list_events" && typeof call.arguments.range === "string" && call.arguments.range.trim()) {
     const calendar = typeof call.arguments.calendar === "string" && call.arguments.calendar.trim() ? call.arguments.calendar : undefined;
     return { intent: { name: "list_events", range: call.arguments.range, ...(calendar ? { calendar } : {}) }, ...usage };
+  }
+  if (call?.name === "create_event" && typeof call.arguments.start === "string" && call.arguments.start.trim()) {
+    const a = call.arguments;
+    const opt = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? { [k]: (a[k] as string).trim() } : {});
+    return {
+      intent: {
+        name: "create_event",
+        start: a.start as string,
+        ...opt("title"), ...opt("duration"), ...opt("calendar"), ...opt("location"),
+        ...(a.all_day === true ? { allDay: true } : {}),
+      } as CreateEventIntent,
+      ...usage,
+    };
   }
   return { intent: { name: "unsupported" }, ...usage };
 }

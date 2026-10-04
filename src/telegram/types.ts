@@ -19,6 +19,7 @@ export interface TgMessage {
   from?: TgUser;
   text?: string;
   voice?: { file_id: string; duration: number };
+  reply_to_message?: { message_id: number };
   forward_origin?: unknown;
 }
 
@@ -42,6 +43,6 @@ export interface InlineKeyboardButton {
   url?: string;
 }
 
-export interface ReplyMarkup {
-  inline_keyboard: InlineKeyboardButton[][];
-}
+export type ReplyMarkup =
+  | { inline_keyboard: InlineKeyboardButton[][] }
+  | { force_reply: true; input_field_placeholder?: string };

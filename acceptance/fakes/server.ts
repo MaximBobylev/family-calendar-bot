@@ -12,6 +12,7 @@
 //   POST /__fake/google/revoke      — отозвать доступ аккаунта: {email}
 //   POST /__fake/llm/fixtures       — {"<текст>": {tool, args} | {tools: [...]} | {error: status}}
 //   GET  /__fake/llm/requests       — все запросы к LLM
+//   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
 //   POST /__fake/reset              — сброс состояния
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -20,6 +21,8 @@ interface TelegramCall {
   method: string;
   token: string;
   body: Record<string, unknown>;
+  /** message_id, который фейк выдал отправленному сообщению. */
+  messageId?: number;
 }
 
 interface GoogleEvent {
@@ -65,6 +68,24 @@ function zonedMidnight(date: string, tz: string): number {
   const asLocal = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:00Z`);
   return guess - (asLocal - guess);
 }
+
+/** Локальное «2026-10-08T15:00:00» в поясе tz → мс UTC. */
+function zonedToUtc(local: string, tz: string): number {
+  const [date, time] = local.split("T");
+  const [h, m] = (time ?? "00:00").split(":").map(Number);
+  return zonedMidnight(date!, tz) + (h! * 60 + m!) * 60_000;
+}
+
+/** Приводит время события к виду, который вернул бы Google: dateTime со смещением (здесь — в UTC). */
+function normalizeTimes(e: GoogleEvent, tz: string): GoogleEvent {
+  const fix = (t: { dateTime?: string; date?: string; timeZone?: string } | undefined) =>
+    t?.dateTime && !/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime)
+      ? { ...t, dateTime: new Date(zonedToUtc(t.dateTime, t.timeZone ?? tz)).toISOString() }
+      : t;
+  return { ...e, start: fix(e.start)!, end: fix(e.end)! };
+}
+
+let nextEventId = 1;
 
 function eventBounds(e: GoogleEvent, tz: string): [number, number] {
   const s = e.start.dateTime ? Date.parse(e.start.dateTime) : zonedMidnight(e.start.date!, tz);
@@ -116,6 +137,7 @@ const server = createServer(async (req, res) => {
       tokenRequests = [];
       llmFixtures = new Map();
       llmRequests = [];
+      nextEventId = 1;
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
@@ -136,6 +158,10 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/llm/requests") return send(res, 200, llmRequests);
+    if (url.pathname === "/__fake/google/events") {
+      const acc = googleAccounts.get(url.searchParams.get("email") ?? "");
+      return send(res, 200, acc?.calendars ?? []);
+    }
 
     // --- LLM (OpenAI-совместимый) ---
     if (url.pathname === "/llm/v1/chat/completions" && req.method === "POST") {
@@ -182,7 +208,31 @@ const server = createServer(async (req, res) => {
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, ...c }) => c) });
     }
+    const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
+    if (evOne && req.method === "PATCH") {
+      const account = googleAccountByToken(req);
+      if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
+      const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
+      if (!cal || !ev) return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
+      Object.assign(ev, normalizeTimes({ ...ev, ...(await readJson(req)) } as GoogleEvent, cal.timeZone ?? "UTC"));
+      return send(res, 200, ev);
+    }
+
     const evList = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events$/.exec(url.pathname);
+    if (evList && req.method === "POST") {
+      const account = googleAccountByToken(req);
+      if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
+      if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
+      const id = `new${nextEventId++}`;
+      const input = (await readJson(req)) as unknown as GoogleEvent;
+      const ev = normalizeTimes({ ...input, id, status: "confirmed", htmlLink: `https://calendar.google.com/event?eid=${id}` }, cal.timeZone ?? "UTC");
+      (cal.events ??= []).push(ev);
+      return send(res, 200, ev);
+    }
     if (evList && req.method === "GET") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
@@ -204,8 +254,10 @@ const server = createServer(async (req, res) => {
     const tg = /^\/telegram\/bot([^/]+)\/(\w+)$/.exec(url.pathname);
     if (tg) {
       const body = await readJson(req);
-      telegramCalls.push({ token: tg[1]!, method: tg[2]!, body });
-      return send(res, 200, { ok: true, result: telegramResult(tg[2]!, body) });
+      const result = telegramResult(tg[2]!, body);
+      const messageId = (result as { message_id?: number }).message_id;
+      telegramCalls.push({ token: tg[1]!, method: tg[2]!, body, ...(messageId ? { messageId } : {}) });
+      return send(res, 200, { ok: true, result });
     }
 
     return send(res, 501, { ok: false, description: `fake: not implemented ${req.method} ${url.pathname}` });

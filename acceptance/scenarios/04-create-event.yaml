@@ -1,0 +1,228 @@
+# US-30, US-31: создание события. US-05: карточки и кнопки. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: create-with-confirmation
+  story: US-30
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+            - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+      - llm:
+          "Созвон с Петей завтра в 15:30 на полчаса": { tool: create_event, args: { start: "завтра в 15:30", title: "Созвон с Петей", duration: "на полчаса" } }
+          "Поставь встречу в пятницу в 3": { tool: create_event, args: { start: "в пятницу в 3" } }
+          "Поставь встречу на среду в 12": { tool: create_event, args: { start: "на среду в 12" } }
+          "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } }
+          "Завтра день рождения мамы": { tool: create_event, args: { start: "завтра", title: "День рождения мамы", all_day: true } }
+          "Отпуск с 10 по 20 ноября": { tool: create_event, args: { start: "с 10 по 20 ноября", title: "Отпуск", all_day: true } }
+          "Поставь встречу с Машей в пятницу": { tool: create_event, args: { start: "в пятницу", title: "Встреча с Машей" } }
+          "Поставь звонок сегодня в 8 утра": { tool: create_event, args: { start: "сегодня в 8 утра", title: "Звонок" } }
+          "Ужин в семейный календарь в субботу в 19": { tool: create_event, args: { start: "в субботу в 19", title: "Ужин", calendar: "Семья" } }
+          "Поставь в праздники встречу завтра в 12": { tool: create_event, args: { start: "завтра в 12", calendar: "Праздники" } }
+          "Обед в пятницу с часу до двух": { tool: create_event, args: { start: "в пятницу с часу до двух", title: "Обед" } }
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Созвон с Петей</b>", "чт, 8 октября, 15:30–16:00", "🗓 Иван"]
+          text_not_contains: ["Пересекается"]
+          buttons: ["Создать", "Отмена"]
+    - press: "Создать"
+    - expect_callback_answer: { empty: true }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "Созвон с Петей", "15:30–16:00"], buttons: ["Открыть в календаре"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Созвон с Петей", start: "2026-10-08T15:30:00+03:00", end: "2026-10-08T16:00:00+03:00" }]
+
+- id: create-without-title-asks-name
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу в пятницу в 3" }
+    - expect_telegram:
+        - text_contains: ["<b>Встреча</b>", "пт, 9 октября, 15:00–16:00"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { text_contains: ["Как назвать встречу?"] }
+    - reply: { from: 1001, text: "Ревью дизайна" }
+    - expect_telegram:
+        - { text_contains: ["назвал «Ревью дизайна»"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Ревью дизайна", start: "2026-10-09T15:00:00+03:00", end: "2026-10-09T16:00:00+03:00" }]
+
+- id: create-title-question-ignored-for-new-command
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу в пятницу в 3" }
+    - press: "Создать"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText }
+        - { text_contains: ["Как назвать встречу?"] }
+        - { text_contains: ["Планёрка"], text_not_contains: ["назвал"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Встреча", start: "2026-10-09T15:00:00+03:00", end: "2026-10-09T16:00:00+03:00" }]
+
+- id: create-ambiguous-weekday-offers-two-dates
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу на среду в 12" }
+    - expect_telegram:
+        - text_contains: ["Когда именно?"]
+          buttons: ["ср, 7 октября, 12:00–13:00", "ср, 14 октября, 12:00–13:00", "Отмена"]
+    - press: "ср, 14 октября, 12:00–13:00"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Встреча", start: "2026-10-14T12:00:00+03:00", end: "2026-10-14T13:00:00+03:00" }]
+
+- id: create-warns-about-overlap
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - text_contains: ["10:30–11:30", "Пересекается: 10:00–11:00 Планёрка"]
+          buttons: ["Создать", "Отмена"]
+
+- id: create-cancel
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+    - press: "Отмена"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 1 }
+
+- id: create-double-press-creates-once
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - press: "Создать"
+    - press: { button: "Создать", again: true }
+    - expect_callback_answer: { text_contains: ["Уже сделано"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 2 }
+
+- id: create-new-command-cancels-card
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Планёрка"] }
+    - press: "Создать"
+    - expect_callback_answer: { text_contains: ["устарела"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 1 }
+
+- id: create-card-expires
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - clock: "2026-10-07T07:16:00Z"
+    - press: "Создать"
+    - expect_callback_answer: { text_contains: ["устарела"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 1 }
+
+- id: create-all-day
+  story: US-31
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Завтра день рождения мамы" }
+    - expect_telegram:
+        - { text_contains: ["День рождения мамы", "чт, 8 октября, весь день"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "День рождения мамы", start: "2026-10-08", end: "2026-10-09" }]
+
+- id: create-all-day-range-inclusive
+  story: US-31
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Отпуск с 10 по 20 ноября" }
+    - expect_telegram:
+        - { text_contains: ["вт, 10 ноября — пт, 20 ноября, весь день"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Отпуск", start: "2026-11-10", end: "2026-11-21" }]
+
+- id: create-date-without-time-asks-time
+  story: US-12
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу с Машей в пятницу" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    - telegram: { from: 1001, text: "в 16" }
+    - expect_telegram:
+        - { text_contains: ["Встреча с Машей", "пт, 9 октября, 16:00–17:00"], buttons: ["Создать", "Отмена"] }
+
+- id: create-in-past-asks-again
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь звонок сегодня в 8 утра" }
+    - expect_telegram:
+        - { text_contains: ["уже прошло"] }
+    - telegram: { from: 1001, text: "завтра в 8 утра" }
+    - expect_telegram:
+        - { text_contains: ["Звонок", "чт, 8 октября, 08:00–09:00"] }
+
+- id: create-in-named-calendar
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Ужин в семейный календарь в субботу в 19" }
+    - expect_telegram:
+        - { text_contains: ["Ужин", "сб, 10 октября, 19:00–20:00", "🗓 Семья"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Ужин", start: "2026-10-10T19:00:00+03:00", end: "2026-10-10T20:00:00+03:00" }]
+
+- id: create-in-read-only-calendar-refused
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь в праздники встречу завтра в 12" }
+    - expect_telegram:
+        - { text_contains: ["«Праздники» нельзя записывать"] }
+
+- id: create-interval
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Обед в пятницу с часу до двух" }
+    - expect_telegram:
+        - { text_contains: ["Обед", "пт, 9 октября, 13:00–14:00"] }

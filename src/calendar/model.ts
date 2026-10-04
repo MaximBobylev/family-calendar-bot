@@ -38,9 +38,30 @@ export interface CalendarInfo {
   isDefault: boolean;
 }
 
+/** Новое событие: время — локальное в поясе `tz`. */
+export interface NewEvent {
+  calendarId: string;
+  title: string;
+  tz: string;
+  allDay: boolean;
+  startDay: Day;
+  /** Для событий на весь день — включительно. */
+  endDay: Day;
+  start?: Moment;
+  end?: Moment;
+  location?: string;
+}
+
+export interface CreatedEvent {
+  ref: EventRef;
+  link?: string;
+}
+
 /** Интерфейс провайдера календаря (ADR-0003). Реализация — Google. */
 export interface CalendarProvider {
   calendars(): Promise<CalendarInfo[]>;
   /** События всех календарей пользователя в [fromUtc, toUtc), локальное время — в поясе `tz`. */
   listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<CalendarEvent[]>;
+  createEvent(e: NewEvent): Promise<CreatedEvent>;
+  renameEvent(ref: EventRef, title: string): Promise<void>;
 }

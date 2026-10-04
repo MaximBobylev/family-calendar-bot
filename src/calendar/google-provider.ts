@@ -2,10 +2,10 @@
 
 import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
-import { makeDay, utcToLocal } from "../dates/calendar";
+import { formatDate, formatMoment, makeDay, utcToLocal } from "../dates/calendar";
 import { refreshAccessToken } from "../google/auth";
-import { listEvents, type GoogleEvent } from "../google/calendar-api";
-import type { CalendarEvent, CalendarInfo, CalendarProvider } from "./model";
+import { insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
+import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventRef, NewEvent } from "./model";
 
 /** Типы событий, которые не показываем (US-20). */
 const HIDDEN_EVENT_TYPES = new Set(["workingLocation", "focusTime"]);
@@ -96,5 +96,29 @@ export class GoogleCalendarProvider implements CalendarProvider {
       }),
     );
     return perCalendar.flat();
+  }
+
+  private async calendar(id: string): Promise<CalendarInfo> {
+    const cal = (await this.calendars()).find((c) => c.id === id);
+    if (!cal) throw new Error(`unknown calendar ${id}`);
+    return cal;
+  }
+
+  async createEvent(e: NewEvent): Promise<CreatedEvent> {
+    const cal = await this.calendar(e.calendarId);
+    const time = e.allDay
+      ? { start: { date: formatDate(e.startDay) }, end: { date: formatDate(e.endDay + 1) } } // end.date — исключающая
+      : { start: { dateTime: `${formatMoment(e.start!)}:00`, timeZone: e.tz }, end: { dateTime: `${formatMoment(e.end!)}:00`, timeZone: e.tz } };
+    const created = await insertEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, {
+      summary: e.title,
+      ...(e.location ? { location: e.location } : {}),
+      ...time,
+    });
+    return { ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id }, ...(created.htmlLink ? { link: created.htmlLink } : {}) };
+  }
+
+  async renameEvent(ref: EventRef, title: string): Promise<void> {
+    const cal = await this.calendar(ref.calendarId);
+    await patchEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, { summary: title });
   }
 }
