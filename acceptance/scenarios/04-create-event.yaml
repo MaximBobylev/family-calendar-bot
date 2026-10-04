@@ -226,3 +226,56 @@
     - telegram: { from: 1001, text: "Обед в пятницу с часу до двух" }
     - expect_telegram:
         - { text_contains: ["Обед", "пт, 9 октября, 13:00–14:00"] }
+
+# Поведение реального Qwen3 на Workers AI (замер 2026-10-04): теряет части дат, не заполняет длительность,
+# ломает JSON. Даты берутся из текста детерминированно (src/dates/extract.ts) — бот не ошибается.
+
+- id: create-llm-dropped-day-and-duration
+  story: ADR-0005
+  steps:
+    - *setup
+    - llm:
+        "Созвон с Петей завтра в 15:30 на полчаса": { tool: create_event, args: { start: "в 15:30", title: "Созвон с Петей" } }
+        "Обед в пятницу с часу до двух": { tool: create_event, args: { start: "с часу до двух", title: "Обед" } }
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - expect_telegram:
+        - { text_contains: ["Созвон с Петей", "чт, 8 октября, 15:30–16:00"] }
+    - telegram: { from: 1001, text: "Обед в пятницу с часу до двух" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Обед", "пт, 9 октября, 13:00–14:00"] }
+
+- id: create-llm-broken-json
+  story: ADR-0005
+  steps:
+    - *setup
+    - llm:
+        "Поставь стоматолога в четверг в 9:30 на полтора часа": { tool: create_event, raw_arguments: "{\"start\":\"в четверг в 9:30\",\"title\":\"Стоматолога', \"}" }
+    - telegram: { from: 1001, text: "Поставь стоматолога в четверг в 9:30 на полтора часа" }
+    - expect_telegram:
+        - { text_contains: ["Стоматолога", "чт, 8 октября, 09:30–11:00"] }
+
+- id: create-generic-title-is-no-title
+  story: US-30
+  steps:
+    - *setup
+    - llm:
+        "Поставь встречу на среду в 15": { tool: create_event, args: { start: "на среду в 15", title: "встреча" } }
+    - telegram: { from: 1001, text: "Поставь встречу на среду в 15" }
+    - expect_telegram:
+        - { text_contains: ["Когда именно?", "<b>Встреча</b>"], buttons: ["ср, 7 октября, 15:00–16:00", "ср, 14 октября, 15:00–16:00", "Отмена"] }
+    - press: "ср, 7 октября, 15:00–16:00"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { text_contains: ["Как назвать встречу?"] }
+
+- id: create-answer-all-day
+  story: US-31
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу с Машей в пятницу" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    - telegram: { from: 1001, text: "на весь день" }
+    - expect_telegram:
+        - { text_contains: ["Встреча с Машей", "пт, 9 октября, весь день"] }

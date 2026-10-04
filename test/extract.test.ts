@@ -1,0 +1,35 @@
+// Извлечение дат из сообщения (testdata/extract/cases.yaml) + очистка названия и «весь день».
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
+import { cleanTitle, extractDateSpans, looksAllDay } from "../src/dates/extract";
+
+interface Doc {
+  defaults: { now: string; tz: string };
+  cases: { kind: "point" | "range"; text: string; expect: { point?: string; range?: string; duration?: string } }[];
+}
+const doc = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "extract", "cases.yaml"), "utf8")) as Doc;
+
+describe("extractDateSpans", () => {
+  it.each(doc.cases.map((c) => [c.text, c] as const))("%s", (_t, c) => {
+    const { usedWords: _u, ...got } = extractDateSpans(c.text, doc.defaults.now, doc.defaults.tz, c.kind);
+    expect(got).toEqual(c.expect);
+  });
+});
+
+describe("cleanTitle", () => {
+  it("drops generic titles and date words", () => {
+    expect(cleanTitle("Встреча", [])).toBeUndefined();
+    expect(cleanTitle("встречу", [])).toBeUndefined();
+    expect(cleanTitle("Созвон с Петей завтра в 15:30", ["завтра в 15:30"])).toBe("Созвон с Петей");
+    expect(cleanTitle("день рождения мамы", [])).toBe("День рождения мамы");
+  });
+});
+
+describe("looksAllDay", () => {
+  it.each([["Завтра день рождения мамы", true], ["Отпуск с 10 по 20 ноября", true], ["Созвон завтра", false]] as const)("%s", (t, v) => {
+    expect(looksAllDay(t)).toBe(v);
+  });
+});

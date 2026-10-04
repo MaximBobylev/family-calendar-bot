@@ -45,13 +45,13 @@ export const TOOLS: ToolDefinition[] = [
       description: "Create a new calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
       parameters: {
         type: "object",
+        // Порядок важен: маленькие модели обрывают JSON на полях после title — title последним
         properties: {
-          start: str("When, exactly as the user said it, including an end time if given: «в среду в 12», «завтра с часу до двух», «с 10 по 20 ноября»."),
-          title: str("Event title as the user said it, without date/time words: «Созвон с Петей», «День рождения мамы». Omit if the user did not name the event (e.g. just «встречу»)."),
-          duration: str("Duration exactly as said: «на полчаса», «на два часа». Omit if not said."),
-          all_day: { type: "boolean", description: "true for all-day events: birthdays, vacations, holidays, or when the user says «на весь день»." },
-          calendar: str("If the user named a calendar, its name exactly as written in the user's calendar list. Omit otherwise."),
-          location: str("Place if said: «в кафе Пушкин». Omit otherwise."),
+          start: str("All date and time words copied verbatim, including the day and the end of a range: «завтра в 15:30», «в пятницу с часу до двух», «с 10 по 20 ноября»."),
+          duration: str("Duration words verbatim: «на полчаса», «на два часа». Omit if not said."),
+          all_day: { type: "boolean", description: "true for birthdays, anniversaries, holidays, vacations, whole-day events." },
+          calendar: str("Only if the user explicitly named a calendar in this message: its name exactly as in the user's calendar list."),
+          title: str("Event name only, without date/time/duration words: «Созвон с Петей». Omit if the user did not name it («встречу» is not a name)."),
         },
         required: ["start"],
       },
@@ -68,8 +68,15 @@ export const TOOLS: ToolDefinition[] = [
 ];
 
 export const SYSTEM_PROMPT = `You route a user's message (Russian or English) to exactly one calendar tool.
-Never compute or normalize dates and times: copy the date/time words exactly as the user said them.
-If the message is not about the user's calendar, call "unsupported".`;
+Copy date/time words VERBATIM from the message — never drop the day, never compute or translate dates.
+Omit optional fields the user did not say. Never guess a calendar.
+If the message is not about the user's calendar, call "unsupported".
+Examples:
+"Созвон с Петей завтра в 15:30 на полчаса" → create_event {"start":"завтра в 15:30","duration":"на полчаса","title":"Созвон с Петей"}
+"Отпуск с 10 по 20 ноября" → create_event {"start":"с 10 по 20 ноября","all_day":true,"title":"Отпуск"}
+"Поставь встречу на среду в 12" → create_event {"start":"на среду в 12"}
+"Tomorrow at 3pm dentist" → create_event {"start":"Tomorrow at 3pm","title":"Dentist"}
+"Что у меня в пятницу после обеда?" → list_events {"range":"в пятницу после обеда"}`;
 
 export interface ParsedIntent {
   intent: Intent;
@@ -83,7 +90,9 @@ export interface IntentContext {
 }
 
 export async function parseIntent(cfg: LlmConfig, text: string, context: IntentContext): Promise<ParsedIntent> {
-  const system = `${SYSTEM_PROMPT}\nUser's calendars: ${context.calendars.map((c) => `"${c}"`).join(", ")}.`;
+  // Qwen3 по умолчанию «думает»: медленно, дорого и ломает JSON аргументов — отключаем
+  const noThink = /qwen3/i.test(cfg.model) ? "\n/no_think" : "";
+  const system = `${SYSTEM_PROMPT}\nUser's calendars: ${context.calendars.map((c) => `"${c}"`).join(", ")}.${noThink}`;
   const res = await callTools(cfg, system, text, TOOLS);
   const usage = { tokensIn: res.tokensIn, tokensOut: res.tokensOut };
   // В MVP — одна команда на сообщение (US-12)
@@ -93,13 +102,14 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
     const calendar = typeof call.arguments.calendar === "string" && call.arguments.calendar.trim() ? call.arguments.calendar : undefined;
     return { intent: { name: "list_events", range: call.arguments.range, ...(calendar ? { calendar } : {}) }, ...usage };
   }
-  if (call?.name === "create_event" && typeof call.arguments.start === "string" && call.arguments.start.trim()) {
+  if (call?.name === "create_event") {
+    // start может отсутствовать — даты всё равно извлекаются из текста (src/dates/extract.ts)
     const a = call.arguments;
     const opt = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? { [k]: (a[k] as string).trim() } : {});
     return {
       intent: {
         name: "create_event",
-        start: a.start as string,
+        start: typeof a.start === "string" ? a.start : "",
         ...opt("title"), ...opt("duration"), ...opt("calendar"), ...opt("location"),
         ...(a.all_day === true ? { allDay: true } : {}),
       } as CreateEventIntent,

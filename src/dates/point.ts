@@ -306,8 +306,8 @@ function parseAst(tokens: Token[]): Ast {
       continue;
     }
 
-    // «в обед» = 13:00
-    if (w === "обед" || w === "lunch" || w === "lunchtime") { setTime({ h: 13, m: 0 }); i++; continue; }
+    // «в обед» = 13:00 — только после «в»/«at»: само слово «Обед» обычно название события
+    if (ctx && (w === "обед" || w === "lunch" || w === "lunchtime")) { setTime({ h: 13, m: 0 }); i++; continue; }
 
     // Явный пояс: «по Москве», «по московскому времени», «мск»
     if (w === "по" && w1 && TIMEZONE_WORDS.has(w1)) {
@@ -645,6 +645,10 @@ function resolveRange(ast: Ast, now: Moment): ParseResult {
 export function parsePointOrRange(tokens: Token[], kind: "point" | "range", now: Moment, tz: string): ParseResult {
   try {
     const ast = parseAst(tokens);
+    // Одни служебные слова («в», «на») — не дата
+    if (!ast.date && !ast.time && !ast.part && !ast.period && !ast.week && !ast.interval && !ast.dateRange && ast.relMinutes === undefined) {
+      throw new Unparseable();
+    }
     if (kind === "range" && !ast.time && !ast.interval && ast.relMinutes === undefined) return resolveRange(ast, now);
 
     if (!ast.tz || ast.tz === tz) return resolvePoint(ast, now, tz);

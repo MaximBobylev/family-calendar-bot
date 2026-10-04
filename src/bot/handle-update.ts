@@ -3,6 +3,7 @@
 import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
+import { cleanTitle, extractDateSpans, looksAllDay } from "../dates/extract";
 import { hasGoogleAccount } from "../db/accounts";
 import {
   claimPendingAction, ensureConversation, findOpenByMessage, getDialogState, setDialogState, type PendingAction,
@@ -91,6 +92,11 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     await setDialogState(ctx.db, conversationId, user.id, {}, ctx.clock.now());
     if (state.awaiting.expiresAt > ctx.clock.now()) {
       const draft = state.awaiting.draft as CreateDraft;
+      // «Весь день» в ответ на «Во сколько?» (US-31)
+      if (draft.startText && looksAllDay(text)) {
+        await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft: { ...draft, allDay: true } }));
+        return;
+      }
       const combined = draft.startText ? `${draft.startText} ${text}` : text;
       const now = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
       const probe = parseDateFragment({ text: combined, kind: "point", now, tz: user.home_tz });
@@ -128,6 +134,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   });
 
   const intent = parsed.intent;
+  // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
+  const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
   switch (intent.name) {
     case "unsupported":
       await ctx.telegram.sendMessage(chatId, t("unsupported", user.locale));
@@ -135,13 +143,27 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     case "multiple":
       await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
       return;
-    case "create_event":
-      await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft: draftFromIntent(intent) }));
+    case "create_event": {
+      const spans = extractDateSpans(text, localNow, user.home_tz, "point");
+      const startText = spans.point ?? (intent.start || undefined);
+      const durationText = spans.duration ?? intent.duration;
+      const title = cleanTitle(intent.title, [startText, durationText].filter((x): x is string => !!x));
+      const draft: CreateDraft = {
+        ...draftFromIntent(intent),
+        startText,
+        title,
+        durationText,
+        allDay: intent.allDay || looksAllDay(text) || undefined,
+      };
+      for (const k of Object.keys(draft) as (keyof CreateDraft)[]) if (draft[k] === undefined) delete draft[k];
+      await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
       return;
+    }
     case "list_events":
       await withCalendar(ctx, user, chatId, (provider) =>
         readEvents(ctx, provider, {
-          userId: user.id, chatId, locale: user.locale, tz: user.home_tz, range: intent.range,
+          userId: user.id, chatId, locale: user.locale, tz: user.home_tz,
+          range: extractDateSpans(text, localNow, user.home_tz, "range").range ?? intent.range,
           ...(intent.calendar ? { calendar: intent.calendar } : {}),
         }),
       );

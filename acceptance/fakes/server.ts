@@ -44,7 +44,8 @@ interface GoogleCalendar {
 }
 
 type LlmFixture =
-  | { tool: string; args?: Record<string, unknown> }
+  /** raw_arguments — строка аргументов как есть (для имитации битого JSON). */
+  | { tool: string; args?: Record<string, unknown>; raw_arguments?: string }
   | { tools: { tool: string; args?: Record<string, unknown> }[] }
   | { error: number };
 
@@ -173,7 +174,7 @@ const server = createServer(async (req, res) => {
       if ("error" in fx) return send(res, fx.error, { error: "fake llm error" });
       const calls = "tools" in fx ? fx.tools : [fx];
       return send(res, 200, {
-        choices: [{ message: { role: "assistant", content: null, tool_calls: calls.map((c, i) => ({ id: `call_${i}`, type: "function", function: { name: c.tool, arguments: JSON.stringify(c.args ?? {}) } })) } }],
+        choices: [{ message: { role: "assistant", content: null, tool_calls: calls.map((c, i) => ({ id: `call_${i}`, type: "function", function: { name: c.tool, arguments: "raw_arguments" in c && c.raw_arguments !== undefined ? c.raw_arguments : JSON.stringify(c.args ?? {}) } })) } }],
         usage: { prompt_tokens: 1000, completion_tokens: 20 },
       });
     }

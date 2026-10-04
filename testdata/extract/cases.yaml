@@ -1,0 +1,27 @@
+# Извлечение фрагментов дат из всего сообщения (src/dates/extract.ts). Переносимые данные (ADR-0006).
+# «Сейчас» — среда 2026-10-07 10:00 МСК.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+
+cases:
+  - { kind: point, text: "Созвон с Петей завтра в 15:30 на полчаса", expect: { point: "завтра в 15:30", duration: "на полчаса" } }
+  - { kind: point, text: "Поставь встречу на среду в 12", expect: { point: "на среду в 12" } }
+  - { kind: point, text: "Отпуск с 10 по 20 ноября", expect: { point: "с 10 по 20 ноября" } }
+  - { kind: point, text: "Завтра день рождения мамы", expect: { point: "Завтра" } }
+  - { kind: point, text: "Поставь ужин в семейный календарь в субботу в 19", expect: { point: "в субботу в 19" } }
+  - { kind: point, text: "Обед в пятницу с часу до двух", expect: { point: "в пятницу с часу до двух" } }
+  - { kind: point, text: "Напомни себе позвонить в банк послезавтра в 10 утра", expect: { point: "послезавтра в 10 утра" } }
+  - { kind: point, text: "Встреча с Машей в пятницу", expect: { point: "в пятницу" } }
+  - { kind: point, text: "Встреча в пятницу с Машей в 15", expect: { point: "в пятницу в 15" } }
+  - { kind: point, text: "Tomorrow at 3pm dentist", expect: { point: "Tomorrow at 3pm" } }
+  - { kind: point, text: "Поставь стоматолога в четверг в 9:30 на полтора часа", expect: { point: "в четверг в 9:30", duration: "на полтора часа" } }
+  - { kind: point, text: "Годовщина свадьбы 14 февраля", expect: { point: "14 февраля" } }
+  - { kind: point, text: "Запиши созвон по проекту послезавтра в 11", expect: { point: "послезавтра в 11" } }
+  - { kind: point, text: "Обед с Машей в обед в пятницу", expect: { point: "в обед в пятницу" } }
+  - { kind: point, text: "Созвон с командой", expect: {} }
+  - { kind: range, text: "Что у меня завтра?", expect: { range: "завтра" } }
+  - { kind: range, text: "Покажи неделю", expect: { range: "неделю" } }
+  - { kind: range, text: "Что в семейном календаре на выходных?", expect: { range: "на выходных" } }
+  - { kind: range, text: "Что у меня сегодня вечером?", expect: { range: "сегодня вечером" } }
+  - { kind: range, text: "What's on Friday?", expect: { range: "on Friday" } }

@@ -11,9 +11,8 @@
     "GOOGLE_API_BASE": "https://www.googleapis.com",
     "GOOGLE_OAUTH_BASE": "https://oauth2.googleapis.com",
     "GOOGLE_ACCOUNTS_BASE": "https://accounts.google.com",
-    "PUBLIC_BASE_URL": "https://calendar-assist-bot.example.workers.dev",
-    // Workers AI по OpenAI-совместимому API (ADR-0002); <ACCOUNT_ID> — id аккаунта Cloudflare
-    "LLM_BASE": "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1",
+    // Модель Workers AI по OpenAI-совместимому API (ADR-0002). Адрес API (LLM_BASE, содержит account id)
+    // и PUBLIC_BASE_URL зависят от деплоя — задаются секретами (scripts/deploy.sh), а не здесь.
     "LLM_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "TEST_MODE": "false"
   },
@@ -21,7 +20,7 @@
   "ai": { "binding": "AI" },
 
   "d1_databases": [
-    { "binding": "DB", "database_name": "calendar-assist-bot", "database_id": "TODO", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "calendar-assist-bot", "database_id": "0f83ec1b-ff6a-4ffb-bb0e-801245a7294f", "migrations_dir": "migrations" }
   ],
 
   // Inbox апдейтов Telegram и раздача задач планировщика (ADR-0005 п.6).

@@ -56,7 +56,7 @@ export interface TitleQuestionPayload {
 
 export function draftFromIntent(i: CreateEventIntent): CreateDraft {
   return {
-    startText: i.start,
+    ...(i.start ? { startText: i.start } : {}),
     ...(i.title ? { title: i.title } : {}),
     ...(i.duration ? { durationText: i.duration } : {}),
     ...(i.allDay ? { allDay: true } : {}),

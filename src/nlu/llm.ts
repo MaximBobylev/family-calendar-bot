@@ -42,6 +42,7 @@ export async function callTools(
       ],
       tools,
       tool_choice: "required",
+      max_tokens: 300,
     }),
   });
   if (!res.ok) throw new Error(`llm ${res.status}: ${await res.text()}`);
@@ -57,11 +58,19 @@ export async function callTools(
   };
 }
 
-function safeParse(s: string): Record<string, unknown> {
+/**
+ * Аргументы tool call. Маленькие модели иногда возвращают битый JSON
+ * (Qwen3: `{"start":"завтра в 15:30","title":"Созвон с Петей', "}`) — тогда достаём пары ключ-значение.
+ */
+export function safeParse(s: string): Record<string, unknown> {
   try {
     const v = JSON.parse(s) as unknown;
     return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
   } catch {
-    return {};
+    const out: Record<string, unknown> = {};
+    for (const m of s.matchAll(/"(\w+)"\s*:\s*(?:"([^"']*)|(true|false))/g)) {
+      out[m[1]!] = m[3] !== undefined ? m[3] === "true" : m[2]!.trim();
+    }
+    return out;
   }
 }

@@ -79,3 +79,13 @@ cases:
     now: "2026-10-08T00:10"
     note: "сразу после полуночи «сегодня» — уже четверг"
     expect: { date: "2026-10-08" }
+
+  - id: err-010
+    text: "в"
+    kind: range
+    note: "одни служебные слова — не дата (раньше период возвращал «сегодня»)"
+    expect: { error: unparseable }
+
+  - id: err-011
+    text: "на"
+    expect: { error: unparseable }
