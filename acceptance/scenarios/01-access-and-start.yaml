@@ -1,0 +1,52 @@
+# US-01: первый запуск, доступ по allowlist, личные чаты. US-05/ADR-0005: идемпотентность webhook.
+# Разрешённые Telegram id в окружении dev: 1001, 1002.
+
+- id: start-greets-allowed-user
+  story: US-01
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Google Календарь", "Что у меня завтра"] }
+
+- id: start-in-english
+  story: US-10a
+  steps:
+    - telegram: { from: 1002, text: "/start", language: en }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Google Calendar"] }
+
+- id: not-allowed-user-refused
+  story: US-01
+  steps:
+    - telegram: { from: 999, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 999, text_contains: ["закрытом режиме"] }
+
+- id: group-chat-asks-for-private
+  story: US-01
+  steps:
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/start" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["в личные сообщения"] }
+
+- id: edited-message-ignored
+  story: US-10
+  steps:
+    - telegram: { from: 1001, text: "/start", edited: true }
+    - expect_no_telegram: true
+
+- id: redelivered-update-processed-once
+  story: US-05
+  steps:
+    - telegram: { from: 1001, text: "/start" }
+    - telegram: { from: 1001, text: "/start", redeliver: true }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Google Календарь"] }
+
+- id: webhook-requires-secret
+  story: ADR-0005
+  steps:
+    - webhook_raw: { body: { update_id: 1 }, secret: null, expect_status: 403 }
+    - webhook_raw: { body: { update_id: 1 }, secret: "wrong", expect_status: 403 }
+    - webhook_raw: { body: { not_an_update: true }, expect_status: 400 }
