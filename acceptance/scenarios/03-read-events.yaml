@@ -1,0 +1,172 @@
+# US-20: чтение расписания. US-12: неподдерживаемые запросы. US-14: ошибки.
+# «Сейчас» — среда 7 октября 2026, 10:00 МСК (07:00 UTC).
+# Календари: личный (по умолчанию), «Семья» (запись), «Праздники» (только чтение).
+
+- id: read-tomorrow
+  story: US-20
+  steps: &setup
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+              - { id: e2, summary: "Созвон с Петей", location: "Zoom", start: { dateTime: "2026-10-08T15:30:00+03:00" }, end: { dateTime: "2026-10-08T16:00:00+03:00" } }
+              - { id: e3, summary: "День рождения мамы", start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
+              - id: e4
+                summary: "Скучная встреча"
+                start: { dateTime: "2026-10-08T12:00:00+03:00" }
+                end: { dateTime: "2026-10-08T13:00:00+03:00" }
+                attendees: [{ self: true, responseStatus: declined }]
+              - { id: e5, summary: "Офис", eventType: workingLocation, start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
+              - { id: e6, summary: "Обед <с коллегами>", transparency: transparent, start: { dateTime: "2026-10-07T13:00:00+03:00" }, end: { dateTime: "2026-10-07T14:00:00+03:00" } }
+          - id: family@group.calendar.google.com
+            summary: "Семья"
+            accessRole: writer
+            events:
+              - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+          - id: holidays@group.v.calendar.google.com
+            summary: "Праздники"
+            accessRole: reader
+            events:
+              - { id: h1, summary: "День народного единства", start: { date: "2026-11-04" }, end: { date: "2026-11-05" } }
+    - llm:
+        "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+        "Покажи неделю": { tool: list_events, args: { range: "неделю" } }
+        "Что у меня в субботу?": { tool: list_events, args: { range: "в субботу" } }
+        "Что завтра в семейном?": { tool: list_events, args: { range: "завтра", calendar: "Семья" } }
+        "Что в рабочем календаре?": { tool: list_events, args: { range: "сегодня", calendar: "Работа" } }
+        "Что у меня на следующих выходных?": { tool: list_events, args: { range: "на следующих выходных" } }
+        "Что у меня на днях?": { tool: list_events, args: { range: "на днях" } }
+        "Что в ноябре?": { tool: list_events, args: { range: "в ноябре" } }
+        "Какая завтра погода?": { tool: unsupported }
+        "Покажи завтра и удали планёрку": { tools: [{ tool: list_events, args: { range: "завтра" } }, { tool: list_events, args: { range: "сегодня" } }] }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - text_contains:
+            - "Завтра, чт, 8 октября"
+            - "Весь день  День рождения мамы"
+            - "10:00–11:00  Планёрка"
+            - "15:30–16:00  Созвон с Петей"
+            - "📍 Zoom"
+            - "19:00–21:00  Ужин у бабушки · Семья"
+          text_not_contains: ["Скучная встреча", "Офис", "Иван"]
+
+- id: read-week-groups-by-day
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Покажи неделю" }
+    - expect_telegram:
+        - text_contains: ["Сегодня, ср, 7 октября", "Обед &lt;с коллегами&gt; · свободно", "Завтра, чт, 8 октября", "Планёрка"]
+
+- id: read-empty-day
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что у меня в субботу?" }
+    - expect_telegram:
+        - text_contains: ["10 октября", "Встреч нет"]
+
+- id: read-readonly-calendar-included
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что в ноябре?" }
+    - expect_telegram:
+        - text_contains: ["Весь день  День народного единства · Праздники"]
+
+- id: read-named-calendar
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что завтра в семейном?" }
+    - expect_telegram:
+        - text_contains: ["Ужин у бабушки"]
+          text_not_contains: ["Планёрка", "· Семья"]
+
+- id: read-unknown-calendar
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что в рабочем календаре?" }
+    - expect_telegram:
+        - text_contains: ["Не нашёл календарь «Работа»", "«Иван»", "«Семья»"]
+
+- id: read-ambiguous-range-asks
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что у меня на следующих выходных?" }
+    - expect_telegram:
+        - text_contains: ["Уточните", "10 октября", "или", "17 октября"]
+
+- id: read-unparseable-range-asks
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что у меня на днях?" }
+    - expect_telegram:
+        - text_contains: ["Не понял, за какой период"]
+
+- id: unsupported-request
+  story: US-12
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Какая завтра погода?" }
+    - expect_telegram:
+        - text_contains: ["только работать с календарём"]
+
+- id: several-commands-at-once
+  story: US-12
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Покажи завтра и удали планёрку" }
+    - expect_telegram:
+        - text_contains: ["по одной"]
+
+- id: llm-unavailable
+  story: US-14
+  steps:
+    - *setup
+    - llm: { "Что у меня завтра?": { error: 500 } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - text_contains: ["Не могу разобрать команду"]
+
+- id: google-access-revoked
+  story: US-02
+  steps:
+    - *setup
+    - google_revoke: ivan@gmail.com
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - text_contains: ["отозван"]
+          buttons: ["Подключить Google Календарь"]
+
+- id: read-in-english
+  story: US-10a
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1002
+        language: en
+        email: anna@gmail.com
+        calendars:
+          - id: anna@gmail.com
+            summary: "Anna"
+            accessRole: owner
+            primary: true
+            timeZone: Asia/Tbilisi
+            events:
+              - { id: a1, summary: "Yoga", start: { dateTime: "2026-10-08T09:00:00+04:00" }, end: { dateTime: "2026-10-08T10:00:00+04:00" } }
+    - llm: { "What's on tomorrow?": { tool: list_events, args: { range: "tomorrow" } } }
+    - telegram: { from: 1002, text: "What's on tomorrow?", language: en }
+    - expect_telegram:
+        - text_contains: ["Tomorrow, Thu 8 October", "09:00–10:00  Yoga"]

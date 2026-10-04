@@ -23,7 +23,11 @@ type Step =
   | { expect_no_telegram: true }
   | { google_account: { email: string; calendars: unknown[] } }
   | { oauth: OAuthStep }
-  | { oauth_reuse_last_link: { expect_status: number } };
+  | { oauth_reuse_last_link: { expect_status: number } }
+  | { google_revoke: string }
+  | { llm: Record<string, unknown> }
+  /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
+  | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } };
 
 /**
  * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
@@ -101,6 +105,22 @@ async function runScenario(s: Scenario): Promise<void> {
 
   let lastOAuth: { startUrl: string; callbackUrl: string } | undefined;
 
+  const sendUpdate = async (t: TelegramInput, where = "") => {
+    if (!t.redeliver) updateId++;
+    const message = {
+      message_id: updateId,
+      date: 0,
+      chat: { id: t.chat_id ?? t.from, type: t.chat_type ?? "private" },
+      from: { id: t.from, is_bot: false, first_name: "Test", language_code: t.language ?? "ru" },
+      ...(t.text !== undefined ? { text: t.text } : {}),
+    };
+    const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
+    const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
+    if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
+    const drain = await post(`${SUT}/__test/drain`, {});
+    if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
+  };
+
   const newCalls = async (): Promise<TelegramCall[]> => {
     const all = await allTelegramCalls();
     const fresh = all.slice(seen);
@@ -108,26 +128,15 @@ async function runScenario(s: Scenario): Promise<void> {
     return fresh;
   };
 
-  for (const [n, step] of s.steps.entries()) {
+  // Общая подготовка подключается YAML-якорем как вложенный список шагов
+  const steps = (s.steps as unknown[]).flat(Infinity) as Step[];
+  for (const [n, step] of steps.entries()) {
     const where = `step ${n + 1}`;
     if ("clock" in step) {
       const res = await post(`${SUT}/__test/clock`, { now: step.clock });
       if (!res.ok) throw new AssertionError(`${where}: clock → ${res.status}`);
     } else if ("telegram" in step) {
-      const t = step.telegram;
-      if (!t.redeliver) updateId++;
-      const message = {
-        message_id: updateId,
-        date: 0,
-        chat: { id: t.chat_id ?? t.from, type: t.chat_type ?? "private" },
-        from: { id: t.from, is_bot: false, first_name: "Test", language_code: t.language ?? "ru" },
-        ...(t.text !== undefined ? { text: t.text } : {}),
-      };
-      const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
-      const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
-      if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
-      const drain = await post(`${SUT}/__test/drain`, {});
-      if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
+      await sendUpdate(step.telegram, where);
     } else if ("webhook_raw" in step) {
       const w = step.webhook_raw;
       const headers: Record<string, string> = w.secret === null ? {} : { "x-telegram-bot-api-secret-token": w.secret ?? SECRET };
@@ -172,6 +181,21 @@ async function runScenario(s: Scenario): Promise<void> {
           throw new AssertionError(`${where}: reuse ${new URL(u).pathname} → ${res.status}, expected ${step.oauth_reuse_last_link.expect_status}`);
         }
       }
+    } else if ("google_revoke" in step) {
+      await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
+    } else if ("llm" in step) {
+      await post(`${FAKES}/__fake/llm/fixtures`, step.llm);
+    } else if ("connected_user" in step) {
+      const c = step.connected_user;
+      await post(`${FAKES}/__fake/google/accounts`, { email: c.email, calendars: c.calendars });
+      await sendUpdate({ from: c.from, text: "/start", ...(c.language ? { language: c.language } : {}) });
+      const startUrl = await lastConnectUrl();
+      const start = await fetch(startUrl, { redirect: "manual" });
+      const consent = new URL(start.headers.get("location") ?? "");
+      const callback = new URL(consent.searchParams.get("redirect_uri") ?? "");
+      const res = await fetch(`${SUT}${callback.pathname}?${new URLSearchParams({ code: `code-${c.email}`, state: consent.searchParams.get("state") ?? "" })}`);
+      if (res.status !== 200) throw new AssertionError(`${where}: connect ${c.email} → ${res.status}`);
+      await newCalls(); // приветствие и «календарь подключён» — проверены отдельными сценариями
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

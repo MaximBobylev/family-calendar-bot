@@ -43,9 +43,49 @@ const messages = {
     ru: "Не получилось подключить календарь. Вернитесь в Telegram и попробуйте ещё раз.",
     en: "Couldn't connect the calendar. Go back to Telegram and try again.",
   },
+  today: { ru: "Сегодня", en: "Today" },
+  tomorrow: { ru: "Завтра", en: "Tomorrow" },
+  allDay: { ru: "Весь день", en: "All day" },
+  until: { ru: "до", en: "until" },
+  nextDayShort: { ru: "след. день", en: "next day" },
+  free: { ru: "свободно", en: "free" },
+  noEvents: { ru: "Встреч нет 🎉", en: "No events 🎉" },
+  unsupported: {
+    ru: "Я умею только работать с календарём. Например: «Что у меня завтра?»",
+    en: "I can only work with your calendar. For example: “What's on tomorrow?”",
+  },
+  oneAtATime: {
+    ru: "Давайте по одной команде за раз.",
+    en: "Let's do one command at a time.",
+  },
+  llmUnavailable: {
+    ru: "Не могу разобрать команду сейчас, попробуйте чуть позже.",
+    en: "I can't process commands right now, please try again a bit later.",
+  },
+  googleUnavailable: {
+    ru: "Google Календарь не отвечает, попробуйте позже.",
+    en: "Google Calendar isn't responding, please try again later.",
+  },
+  googleRevoked: {
+    ru: "Доступ к Google Календарю отозван. Подключите его заново.",
+    en: "Access to Google Calendar was revoked. Please connect it again.",
+  },
+  rangeUnparseable: {
+    ru: "Не понял, за какой период показать. Например: «завтра», «на этой неделе», «в пятницу».",
+    en: "I didn't get the period. For example: “tomorrow”, “this week”, “on Friday”.",
+  },
+  rangeAmbiguous: {
+    ru: "Уточните, какой период: {options}?",
+    en: "Which period do you mean: {options}?",
+  },
+  or: { ru: "или", en: "or" },
+  calendarNotFound: {
+    ru: "Не нашёл календарь «{name}». Ваши календари: {list}.",
+    en: "I couldn't find the calendar “{name}”. Your calendars: {list}.",
+  },
   notImplemented: {
-    ru: "Пока я умею только здороваться — остальное в разработке.",
-    en: "For now I can only say hello — the rest is in development.",
+    ru: "Это я пока не умею — в разработке.",
+    en: "I can't do that yet — it's in development.",
   },
 } as const satisfies Record<string, Record<Locale, string>>;
 

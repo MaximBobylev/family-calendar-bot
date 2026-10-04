@@ -11,4 +11,6 @@ interface Env {
   GOOGLE_CLIENT_SECRET: string;
   /** base64, 32 байта — AES-GCM для refresh token (src/crypto.ts). */
   TOKEN_ENCRYPTION_KEY: string;
+  /** Ключ OpenAI-совместимого LLM API (Workers AI: API-токен Cloudflare). */
+  LLM_API_KEY: string;
 }

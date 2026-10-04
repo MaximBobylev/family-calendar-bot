@@ -12,6 +12,9 @@
     "GOOGLE_OAUTH_BASE": "https://oauth2.googleapis.com",
     "GOOGLE_ACCOUNTS_BASE": "https://accounts.google.com",
     "PUBLIC_BASE_URL": "https://calendar-assist-bot.example.workers.dev",
+    // Workers AI по OpenAI-совместимому API (ADR-0002); <ACCOUNT_ID> — id аккаунта Cloudflare
+    "LLM_BASE": "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/v1",
+    "LLM_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "TEST_MODE": "false"
   },
 
@@ -43,6 +46,9 @@
         "GOOGLE_OAUTH_BASE": "http://fakes:9100/google-oauth",
         "GOOGLE_ACCOUNTS_BASE": "http://fakes:9100/google-accounts",
         "PUBLIC_BASE_URL": "http://dev:8787",
+        "LLM_BASE": "http://fakes:9100/llm/v1",
+        "LLM_MODEL": "fake-model",
+        "LLM_API_KEY": "test-llm-key",
         "TEST_MODE": "true",
         "GOOGLE_CLIENT_ID": "test-client-id",
         "GOOGLE_CLIENT_SECRET": "test-client-secret",

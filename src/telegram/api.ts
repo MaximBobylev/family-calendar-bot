@@ -19,11 +19,12 @@ export class TelegramApi {
     return json.result as T;
   }
 
-  sendMessage(chatId: number | string, text: string, replyMarkup?: ReplyMarkup) {
+  sendMessage(chatId: number | string, text: string, replyMarkup?: ReplyMarkup, opts: { html?: boolean } = {}) {
     return this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text,
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
     });
   }
 

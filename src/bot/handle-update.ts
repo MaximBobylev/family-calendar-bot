@@ -1,11 +1,16 @@
-// Обработка одного апдейта: доступ, регистрация, привязка календаря (US-01, US-02).
+// Обработка одного апдейта: доступ, регистрация, привязка календаря, команды.
 
+import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { hasGoogleAccount } from "../db/accounts";
-import { ensureTelegramUser } from "../db/users";
-import type { TgUpdate } from "../telegram/types";
+import { recordUsage } from "../db/usage";
+import { ensureTelegramUser, type User } from "../db/users";
+import { GoogleAuthError } from "../google/auth";
+import { parseIntent, type ParsedIntent } from "../nlu/intents";
+import type { TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
+import { readEvents } from "./read-events";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
@@ -42,5 +47,74 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     await ctx.telegram.sendMessage(message.chat.id, t("welcome", user.locale));
     return;
   }
-  await ctx.telegram.sendMessage(message.chat.id, t("notImplemented", user.locale));
+  await handleCommand(ctx, user, message);
+}
+
+async function handleCommand(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
+  const chatId = message.chat.id;
+  const text = message.text?.trim();
+  if (!text) {
+    // Голос, фото и прочее — позже (US-10, US-66)
+    await ctx.telegram.sendMessage(chatId, t("notImplemented", user.locale));
+    return;
+  }
+
+  const calendarNames = await ctx.db
+    .prepare(
+      `SELECT c.title AS name FROM calendars c JOIN provider_accounts a ON a.id = c.account_id WHERE a.user_id = ?1
+       UNION SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
+    )
+    .bind(user.id)
+    .all<{ name: string }>();
+
+  let parsed: ParsedIntent;
+  try {
+    parsed = await parseIntent(ctx.config.llm, text, { calendars: calendarNames.results.map((r) => r.name) });
+  } catch (e) {
+    console.error("llm failed", e);
+    await recordUsage(ctx.db, { userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model, text, result: String(e), outcome: "error", now: ctx.clock.now() });
+    await ctx.telegram.sendMessage(chatId, t("llmUnavailable", user.locale));
+    return;
+  }
+  await recordUsage(ctx.db, {
+    userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model,
+    tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, text, result: parsed.intent, outcome: "ok", now: ctx.clock.now(),
+  });
+
+  const intent = parsed.intent;
+  switch (intent.name) {
+    case "unsupported":
+      await ctx.telegram.sendMessage(chatId, t("unsupported", user.locale));
+      return;
+    case "multiple":
+      await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
+      return;
+    case "list_events":
+      await withCalendar(ctx, user, chatId, (provider) =>
+        readEvents(ctx, provider, {
+          userId: user.id, chatId, locale: user.locale, tz: user.home_tz, range: intent.range,
+          ...(intent.calendar ? { calendar: intent.calendar } : {}),
+        }),
+      );
+      return;
+  }
+}
+
+/** Ошибки Google — понятным текстом (US-14); отозванный доступ — предложить переподключить (US-02). */
+async function withCalendar(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  action: (provider: GoogleCalendarProvider) => Promise<void>,
+): Promise<void> {
+  try {
+    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id));
+  } catch (e) {
+    console.error("calendar action failed", e);
+    if (e instanceof GoogleAuthError && e.revoked) {
+      await ctx.telegram.sendMessage(chatId, t("googleRevoked", user.locale), await connectKeyboard(ctx, user.id, user.locale));
+    } else {
+      await ctx.telegram.sendMessage(chatId, t("googleUnavailable", user.locale));
+    }
+  }
 }
