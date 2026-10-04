@@ -1,0 +1,30 @@
+# Calendar Assist Bot
+
+Семейный диспетчер в Telegram поверх Google Calendar. Документация и решения — [docs/](docs/README.md).
+
+## Разработка
+
+На хосте нужен только Docker; Node, wrangler и workerd — в контейнере.
+
+```sh
+docker compose build                              # один раз и после изменения package.json
+docker compose run --rm test                      # тесты (vitest), включая золотой корпус дат
+docker compose run --rm test npm run typecheck    # проверка типов
+docker compose run --rm test npm run corpus:dates -- --failures   # отчёт по корпусу дат
+docker compose up dev                             # wrangler dev (окружение dev, без Workers AI) → http://localhost:8787
+```
+
+После изменения `package.json`: `docker compose build && docker compose run --rm dev npm ci`.
+После изменения `wrangler.jsonc`: `docker compose run --rm test npm run types`.
+
+Секреты и токены — в `.env` (не коммитится), например `CLOUDFLARE_API_TOKEN` для `npx wrangler deploy` или для удалённого Workers AI.
+
+## Структура
+
+| Путь | Что |
+|---|---|
+| `src/index.ts` | точка входа Worker'а (пока каркас) |
+| `src/dates/` | детерминированный парсер дат (ADR-0005 п.8) |
+| `testdata/dates/` | золотой корпус дат — переносимая спецификация (ADR-0006) |
+| `test/` | тесты |
+| `docs/` | спецификация, ADR, исследования |

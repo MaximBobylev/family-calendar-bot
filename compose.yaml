@@ -1,0 +1,32 @@
+# Всё окружение — в контейнере, на хосте нужен только Docker.
+#   docker compose run --rm test          — тесты (vitest)
+#   docker compose run --rm test npm run typecheck
+#   docker compose up dev                 — wrangler dev на http://localhost:8787
+#   docker compose run --rm dev npx wrangler deploy   (нужен CLOUDFLARE_API_TOKEN в .env)
+# После изменения package.json: docker compose build && docker compose run --rm dev npm ci
+
+x-app: &app
+  build: .
+  image: calendar-assist-bot-dev
+  working_dir: /app
+  volumes:
+    - .:/app
+    # node_modules — отдельный том: бинарники workerd/esbuild для Linux, а не для macOS хоста
+    - node_modules:/app/node_modules
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  dev:
+    <<: *app
+    command: ["npx", "wrangler", "dev", "--env", "dev", "--ip", "0.0.0.0", "--port", "8787"]
+    ports:
+      - "8787:8787"
+
+  test:
+    <<: *app
+    command: ["npm", "test"]
+
+volumes:
+  node_modules:

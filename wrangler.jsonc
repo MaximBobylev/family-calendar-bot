@@ -26,5 +26,27 @@
   },
 
   // Планировщик: раз в минуту.
-  "triggers": { "crons": ["* * * * *"] }
+  "triggers": { "crons": ["* * * * *"] },
+
+  // Локальная разработка и тесты (docker compose): без Workers AI — биндинг AI работает только удалённо
+  // и требует токена; STT/LLM в тестах заменяются фейками (ADR-0006). Окружения не наследуют биндинги,
+  // поэтому D1 и очередь объявлены заново.
+  "env": {
+    "dev": {
+      "vars": {
+        "TELEGRAM_API_BASE": "https://api.telegram.org",
+        "GOOGLE_API_BASE": "https://www.googleapis.com",
+        "GOOGLE_OAUTH_BASE": "https://oauth2.googleapis.com",
+        "TEST_MODE": "true"
+      },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "calendar-assist-bot-dev", "database_id": "local", "migrations_dir": "migrations" }
+      ],
+      "queues": {
+        "producers": [{ "binding": "INBOX", "queue": "cab-inbox-dev" }],
+        "consumers": [{ "queue": "cab-inbox-dev", "max_batch_size": 10, "max_retries": 5 }]
+      },
+      "triggers": { "crons": ["* * * * *"] }
+    }
+  }
 }
