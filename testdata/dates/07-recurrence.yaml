@@ -40,7 +40,6 @@ cases:
 
   - id: rec-009
     text: "каждую вторую среду"
-    status: proposed
     note: "по-русски обычно «раз в две недели», а не «вторая среда месяца»"
     expect: { recurrence: { freq: weekly, interval: 2, by_day: [WE] } }
 

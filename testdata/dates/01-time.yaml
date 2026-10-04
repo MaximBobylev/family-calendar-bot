@@ -73,25 +73,21 @@ cases:
 
   - id: time-014
     text: "в 8 утра"
-    status: proposed
     note: "явно «утра», 08:00 сегодня прошло, день не назван → завтра (не вариант «вечером»)"
     expect: { datetime: "2026-10-08T08:00" }
 
   - id: time-015
     text: "в 3 ночи"
-    status: proposed
     note: "03:00 сегодня прошло, день не назван → ближайшие 03:00"
     expect: { datetime: "2026-10-08T03:00" }
 
   - id: time-016
     text: "в 12 ночи"
-    status: proposed
     note: "полночь в конце сегодняшнего дня = начало завтрашнего"
     expect: { datetime: "2026-10-08T00:00" }
 
   - id: time-017
     text: "в полночь"
-    status: proposed
     expect: { datetime: "2026-10-08T00:00" }
 
   - id: time-018
@@ -147,21 +143,18 @@ cases:
   - id: time-029
     text: "в 9"
     now: "2026-10-07T22:00"
-    status: proposed
     note: "и 09:00, и 21:00 сегодня прошли → завтра 09:00, без вариантов"
     expect: { datetime: "2026-10-08T09:00" }
 
   - id: time-030
     text: "в 3"
     now: "2026-10-07T16:00"
-    status: proposed
     note: "15:00 прошло; правило «1…6 → после полудня» сохраняется → завтра 15:00"
     expect: { datetime: "2026-10-08T15:00" }
 
   - id: time-031
     text: "в 12"
     now: "2026-10-07T23:30"
-    status: proposed
     note: "полдень прошёл; «в 12» поздно вечером может значить полночь через 30 минут"
     expect:
       ambiguous:

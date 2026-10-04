@@ -35,7 +35,6 @@ cases:
 
   - id: sh-008
     text: "на час"
-    status: proposed
     note: "в контексте переноса без направления → позже"
     expect: { shift: "+PT1H" }
 

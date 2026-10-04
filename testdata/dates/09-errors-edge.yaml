@@ -45,7 +45,6 @@ cases:
   - id: edge-001
     text: "в 10"
     now: "2026-10-07T10:00"
-    status: proposed
     note: "время равно «сейчас» — считается прошедшим"
     expect:
       ambiguous:
@@ -67,7 +66,6 @@ cases:
     text: "29 февраля"
     now: "2027-01-10T12:00"
     note: "2027 — не високосный, 2028 — високосный"
-    status: proposed
     expect: { date: "2028-02-29" }
 
   - id: edge-005

@@ -12,7 +12,6 @@ cases:
     kind: point
     now: "2026-10-07T10:00"
     tz: Asia/Tbilisi
-    status: proposed
     note: "явно названный пояс → пересчёт в пояс пользователя (Москва UTC+3, Тбилиси UTC+4)"
     expect: { datetime: "2026-10-07T13:00" }
 
@@ -29,7 +28,6 @@ cases:
     kind: point
     now: "2026-10-24T12:00"
     tz: Europe/Berlin
-    status: proposed
     note: "02:30 25.10 в Берлине бывает дважды; берём первое (летнее, UTC+2) — смещение выбирает адаптер календаря, корпус проверяет локальное время"
     expect: { datetime: "2026-10-25T02:30" }
 
@@ -38,7 +36,6 @@ cases:
     kind: point
     now: "2026-10-24T12:00"
     tz: Europe/Berlin
-    status: proposed
     note: "через переход на зимнее время: 24 реальных часа = 11:00 следующего дня по местному времени"
     expect: { datetime: "2026-10-25T11:00" }
 

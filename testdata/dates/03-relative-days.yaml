@@ -32,7 +32,6 @@ cases:
 
   - id: rel-007
     text: "сегодня в 9"
-    status: proposed
     note: "день — сегодня, 09:00 прошло → 21:00 без вариантов"
     expect: { datetime: "2026-10-07T21:00" }
 
@@ -80,6 +79,5 @@ cases:
 
   - id: rel-018
     text: "в понедельник через неделю"
-    status: proposed
     note: "ближайший понедельник (12) + неделя"
     expect: { date: "2026-10-19" }

@@ -88,7 +88,6 @@ cases:
 
   - id: mix-004
     text: "в 9am"
-    status: proposed
     note: "как «в 8 утра»: явно утро, прошло → завтра"
     expect: { datetime: "2026-10-08T09:00" }
 

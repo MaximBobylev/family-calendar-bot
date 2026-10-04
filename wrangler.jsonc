@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "calendar-assist-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  // Все внешние URL — из конфига (ADR-0006): в тестах указывают на фейки.
+  "vars": {
+    "TELEGRAM_API_BASE": "https://api.telegram.org",
+    "GOOGLE_API_BASE": "https://www.googleapis.com",
+    "GOOGLE_OAUTH_BASE": "https://oauth2.googleapis.com",
+    "TEST_MODE": "false"
+  },
+
+  "ai": { "binding": "AI" },
+
+  "d1_databases": [
+    { "binding": "DB", "database_name": "calendar-assist-bot", "database_id": "TODO", "migrations_dir": "migrations" }
+  ],
+
+  // Inbox апдейтов Telegram и раздача задач планировщика (ADR-0005 п.6).
+  "queues": {
+    "producers": [{ "binding": "INBOX", "queue": "cab-inbox" }],
+    "consumers": [{ "queue": "cab-inbox", "max_batch_size": 10, "max_retries": 5 }]
+  },
+
+  // Планировщик: раз в минуту.
+  "triggers": { "crons": ["* * * * *"] }
+}

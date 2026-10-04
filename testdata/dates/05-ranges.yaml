@@ -34,7 +34,6 @@ cases:
 
   - id: rng-007
     text: "на следующих выходных"
-    status: proposed
     note: "как «следующая пятница» — две трактовки"
     expect:
       ambiguous:
@@ -55,7 +54,6 @@ cases:
 
   - id: rng-011
     text: "в октябре"
-    status: proposed
     note: "текущий месяц — с сегодня, как «в этом месяце»"
     expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
 
@@ -90,7 +88,6 @@ cases:
 
   - id: rng-019
     text: "на две недели вперёд"
-    status: proposed
     note: "14 дней, включая сегодня"
     expect: { range: { from: "2026-10-07", to: "2026-10-20" } }
 
