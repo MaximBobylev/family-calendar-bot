@@ -5,7 +5,7 @@ import type { AppContext } from "./bot/context";
 import { claimUpdate, completeUpdate } from "./inbox";
 
 export async function processInboxUpdate(ctx: AppContext, updateId: number): Promise<void> {
-  const update = await claimUpdate(ctx.db, updateId);
+  const update = await claimUpdate(ctx.db, updateId, ctx.clock.now());
   if (!update) return; // уже обработан
   try {
     await handleUpdate(ctx, update);

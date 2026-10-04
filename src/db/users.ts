@@ -21,14 +21,14 @@ export async function findUserByTelegramId(db: D1Database, telegramId: number): 
 export async function ensureTelegramUser(
   db: D1Database,
   telegramId: number,
-  locale: string | undefined,
   now: number,
 ): Promise<{ user: User; created: boolean }> {
   const existing = await findUserByTelegramId(db, telegramId);
   if (existing) return { user: existing, created: false };
 
   const id = crypto.randomUUID();
-  const userLocale = locale?.startsWith("ru") ? "ru" : locale?.startsWith("en") ? "en" : "ru";
+  // Язык по умолчанию — русский, независимо от языка Telegram; смена — через /settings (US-04, US-10a)
+  const userLocale = "ru";
   await db.batch([
     db.prepare("INSERT INTO users (id, created_at, locale) VALUES (?, ?, ?)").bind(id, now, userLocale),
     db

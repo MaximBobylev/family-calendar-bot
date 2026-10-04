@@ -9,12 +9,12 @@
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["Google Календарь", "Что у меня завтра"] }
 
-- id: start-in-english
+- id: start-in-russian-regardless-of-telegram-language
   story: US-10a
   steps:
     - telegram: { from: 1002, text: "/start", language: en }
     - expect_telegram:
-        - { chat_id: 1002, text_contains: ["Google Calendar"] }
+        - { chat_id: 1002, text_contains: ["Google Календарь"], text_not_contains: ["Calendar"] }
 
 - id: not-allowed-user-refused
   story: US-01

@@ -42,7 +42,7 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     return;
   }
 
-  const { user } = await ensureTelegramUser(ctx.db, from.id, from.language_code, ctx.clock.now());
+  const { user } = await ensureTelegramUser(ctx.db, from.id, ctx.clock.now());
   if (update.callback_query) {
     await handleCallback(ctx, user, update.callback_query);
     return;
@@ -66,6 +66,8 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
 
 async function handleCommand(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
   const chatId = message.chat.id;
+  // «печатает…» сразу: дальше LLM и Google (US-10). Не критично — ошибку игнорируем
+  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId).catch(() => undefined);
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   const text = message.text?.trim();
   if (!text) {

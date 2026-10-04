@@ -26,7 +26,8 @@
   // Inbox апдейтов Telegram и раздача задач планировщика (ADR-0005 п.6).
   "queues": {
     "producers": [{ "binding": "INBOX", "queue": "cab-inbox" }],
-    "consumers": [{ "queue": "cab-inbox", "max_batch_size": 10, "max_retries": 5 }]
+    // Страховка: основная обработка — сразу в waitUntil (src/index.ts); очередь доделывает оборвавшееся
+    "consumers": [{ "queue": "cab-inbox", "max_batch_size": 10, "max_batch_timeout": 1, "max_retries": 5 }]
   },
 
   // Планировщик: раз в минуту.

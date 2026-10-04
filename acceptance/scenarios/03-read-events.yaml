@@ -151,7 +151,7 @@
         - text_contains: ["отозван"]
           buttons: ["Подключить Google Календарь"]
 
-- id: read-in-english
+- id: read-english-command-answers-in-russian
   story: US-10a
   steps:
     - clock: "2026-10-07T07:00:00Z"
@@ -170,4 +170,4 @@
     - llm: { "What's on tomorrow?": { tool: list_events, args: { range: "tomorrow" } } }
     - telegram: { from: 1002, text: "What's on tomorrow?", language: en }
     - expect_telegram:
-        - text_contains: ["Tomorrow, Thu 8 October", "09:00–10:00  Yoga"]
+        - text_contains: ["Завтра, чт, 8 октября", "09:00–10:00  Yoga"]

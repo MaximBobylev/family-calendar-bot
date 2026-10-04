@@ -38,6 +38,10 @@ export class TelegramApi {
     });
   }
 
+  sendChatAction(chatId: number | string, action: "typing" = "typing") {
+    return this.call<true>("sendChatAction", { chat_id: chatId, action });
+  }
+
   answerCallbackQuery(callbackQueryId: string, text?: string) {
     return this.call<true>("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) });
   }
