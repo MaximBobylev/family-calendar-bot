@@ -40,6 +40,8 @@ export interface CalendarInfo {
   title: string;
   writable: boolean;
   isDefault: boolean;
+  /** Другие названия календаря у пользователя: «общий», «семейный» (US-06). */
+  aliases: string[];
 }
 
 /** Новое событие: время — локальное в поясе `tz`. */
@@ -56,6 +58,8 @@ export interface NewEvent {
   location?: string;
   /** Правила повторения RFC 5545: ["RRULE:FREQ=WEEKLY;BYDAY=MO"] (US-32). */
   recurrence?: string[];
+  /** Напоминания (popup), минуты до начала. Нет — как в Google (useDefault). */
+  reminders?: number[];
   /** Ключ идемпотентности: повтор с тем же ключом не создаёт второе событие. */
   idempotencyKey?: string;
 }

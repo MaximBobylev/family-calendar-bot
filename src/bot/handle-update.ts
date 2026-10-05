@@ -28,6 +28,7 @@ import { t } from "./messages";
 import { escapeHtml } from "./format";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
+import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, showSettings } from "./settings";
 import { isEmptySpeech, transcribe, type Transcript } from "../stt/whisper";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
@@ -88,6 +89,11 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     return;
   }
 
+  if (/^\/settings(@\w+)?$/i.test(text) || /^(настройки|settings)$/i.test(text)) {
+    await showSettings(ctx, user, chatId);
+    return;
+  }
+
   // Ответ (reply) на вопрос о названии — переименовать созданное событие (US-30)
   if (message.reply_to_message) {
     const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, message.reply_to_message.message_id, ctx.clock.now());
@@ -110,7 +116,10 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   const state = await getDialogState(ctx.db, conversationId, user.id);
   if (state.awaiting) {
     await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
-    if (state.awaiting.expiresAt > ctx.clock.now()) {
+    if (state.awaiting.expiresAt > ctx.clock.now() && state.awaiting.kind !== "create_time") {
+      if (await handleSettingsInput(ctx, user, chatId, state.awaiting, text)) return;
+    }
+    if (state.awaiting.kind === "create_time" && state.awaiting.expiresAt > ctx.clock.now()) {
       const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.home_tz)), user.home_tz);
       if (draft) {
         await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
@@ -281,6 +290,14 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
 
 /** Нажатие кнопки на карточке: атомарно «забираем» карточку — повторное нажатие ничего не делает (US-05). */
 async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
+  const settings = parseSettingsCallback(cq.data);
+  if (settings && cq.message) {
+    const chatId = cq.message.chat.id;
+    const conversationId = await ensureConversation(ctx.db, chatId, "private");
+    const toast = await handleSettingsCallback(ctx, user, chatId, cq.message.message_id, settings, conversationId);
+    await ctx.telegram.answerCallbackQuery(cq.id, toast);
+    return;
+  }
   const parsed = parseCallbackData(cq.data);
   if (!parsed) {
     await ctx.telegram.answerCallbackQuery(cq.id);

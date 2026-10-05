@@ -2,6 +2,7 @@
 // неоднозначных дат, вопрос «во сколько?», предупреждение о пересечениях, вопрос о названии.
 // US-32: повторяющиеся — правило словами и три ближайшие даты в карточке; серия начинается с первой даты.
 
+import { findCalendarByName } from "../calendar/match";
 import type { CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
 import { addMinutes, formatMoment, localToUtc, parseLocal, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
@@ -10,6 +11,7 @@ import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
 import {
   attachMessage, createPendingAction, mergeDialogState, type PendingAction,
 } from "../db/conversations";
+import { DEFAULT_DURATION_MIN } from "../db/settings";
 import type { User } from "../db/users";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { InlineKeyboardButton } from "../telegram/types";
@@ -21,7 +23,6 @@ import { t } from "./messages";
 
 export const CREATE_CARD = "create";
 export const TITLE_QUESTION = "title";
-const DEFAULT_DURATION_MIN = 60;
 const AWAIT_TTL_MS = 15 * 60 * 1000;
 
 /** Черновик создания: то, что сказал пользователь (фрагменты), — до разрешения дат. */
@@ -112,7 +113,7 @@ type Resolution =
 
 function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): CalendarInfo | { error: "notFound" | "readOnly"; name: string } {
   if (name) {
-    const cal = calendars.find((c) => c.title.toLowerCase() === name.trim().toLowerCase());
+    const cal = findCalendarByName(calendars, name);
     if (!cal) return { error: "notFound", name };
     if (!cal.writable) return { error: "readOnly", name: cal.title };
     return cal;
@@ -120,11 +121,11 @@ function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): C
   return calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable) ?? { error: "notFound", name: "" };
 }
 
-function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string): Resolution {
-  if (draft.recurrenceText) return resolveSeries(draft, draft.recurrenceText, now, tz, cal, locale);
+function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {
+  if (draft.recurrenceText) return resolveSeries(draft, draft.recurrenceText, now, tz, cal, locale, defaultDuration);
   if (!draft.startText) return { kind: "ask", question: "askWhen", keepStart: false };
 
-  const length = resolveLength(draft, now, tz, locale);
+  const length = resolveLength(draft, now, tz, locale, defaultDuration);
   if ("kind" in length) return length;
   const { duration, allDay } = length;
   const base = optionBase(draft, cal, tz, locale);
@@ -165,8 +166,8 @@ function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: Calendar
 }
 
 /** Длительность и «весь день» из черновика. */
-function resolveLength(draft: CreateDraft, now: Moment, tz: string, locale: string): { duration: number; allDay: boolean } | Resolution {
-  let duration = DEFAULT_DURATION_MIN;
+function resolveLength(draft: CreateDraft, now: Moment, tz: string, locale: string, defaultDuration: number): { duration: number; allDay: boolean } | Resolution {
+  let duration = defaultDuration;
   let allDay = draft.allDay ?? false;
   if (draft.durationText) {
     const d = parseDateFragment({ text: draft.durationText, kind: "duration", now: formatMoment(now), tz });
@@ -196,11 +197,11 @@ function optionBase(draft: CreateDraft, cal: CalendarInfo, tz: string, locale: s
 const SERIES_PREVIEW = 3;
 
 /** Серия (US-32): первая дата правила не раньше «сейчас» — начало серии; время — из правила. */
-function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string, cal: CalendarInfo, locale: string): Resolution {
+function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {
   const parsed = parseDateFragment({ text, kind: "recurrence", now: formatMoment(now), tz });
   if (!("recurrence" in parsed)) return { kind: "ask", question: "askWhen", keepStart: false };
   const r: Recurrence = parsed.recurrence;
-  const length = resolveLength(draft, now, tz, locale);
+  const length = resolveLength(draft, now, tz, locale, defaultDuration);
   if ("kind" in length) return length;
   const { duration, allDay } = length;
   if (!r.time && !allDay) return { kind: "ask", question: "askTime", keepStart: true };
@@ -259,7 +260,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     return;
   }
 
-  const res = resolveDraft(a.draft, now, tz, cal, locale);
+  const res = resolveDraft(a.draft, now, tz, cal, locale, user.settings.durationMin ?? DEFAULT_DURATION_MIN);
   if (res.kind === "reply") {
     await ctx.telegram.sendMessage(chatId, res.text);
     return;
@@ -328,6 +329,12 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
     .map((e) => `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}${e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, "ru")})` : ""} ${escapeHtml(e.title)}`);
 }
 
+/** Напоминания по умолчанию из настроек бота (US-04): нет — как в Google; для «весь день» — без напоминаний. */
+function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
+  const r = allDay ? user.settings.allDayReminders ?? [] : user.settings.reminders;
+  return r ? { reminders: r } : {};
+}
+
 /** Нажатие кнопки на карточке создания. Карточка уже «забрана» атомарно (claimPendingAction). */
 export async function confirmCreate(
   ctx: AppContext,
@@ -352,6 +359,7 @@ export async function confirmCreate(
     calendarId: o.calendarId, title: o.title, tz: o.tz, allDay: o.allDay, startDay: o.startDay, endDay: o.endDay,
     ...(o.start ? { start: o.start } : {}), ...(o.end ? { end: o.end } : {}), ...(o.location ? { location: o.location } : {}),
     ...(o.series ? { recurrence: [o.series.rrule] } : {}),
+    ...remindersFor(user, o.allDay),
   });
 
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;

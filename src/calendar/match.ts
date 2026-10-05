@@ -36,3 +36,23 @@ export function titleScore(query: string, title: string): number {
   const t = normalizeWords(title);
   return q.filter((w) => t.some((tw) => sameWord(w, tw))).length / q.length;
 }
+
+/** Слова, которые не отличают один календарь от другого: «в общий календарь», «из рабочего календаря». */
+const CALENDAR_WORDS = new Set(["в", "во", "из", "на", "к", "для", "in", "to", "календарь", "календаря", "календаре", "календарем", "календарём", "calendar"]);
+
+/**
+ * Календарь по названию или алиасу (US-06): сначала точно, потом с учётом падежей («в семейном» ~ «семейный»).
+ * Неоднозначно или не найдено — undefined.
+ */
+export function findCalendarByName<C extends { title: string; aliases: string[] }>(calendars: C[], name: string): C | undefined {
+  const norm = (s: string) => normalizeWords(s).filter((w) => !CALENDAR_WORDS.has(w));
+  const wanted = norm(name);
+  if (wanted.length === 0) return undefined;
+  const names = (c: C) => [c.title, ...c.aliases].map(norm);
+  const exact = calendars.filter((c) => names(c).some((n) => n.join(" ") === wanted.join(" ")));
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return undefined;
+  const fuzzy = calendars.filter((c) =>
+    names(c).some((n) => n.length === wanted.length && n.every((w, i) => sameWord(w, wanted[i]!))));
+  return fuzzy.length === 1 ? fuzzy[0] : undefined;
+}

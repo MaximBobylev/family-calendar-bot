@@ -88,6 +88,18 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
 const tg = (await res.json()) as { ok: boolean; description?: string };
 if (!tg.ok) throw new Error(`setWebhook failed: ${tg.description}`);
 
+// 5. Меню команд Telegram (кнопка «/» в чате)
+const commands = { ru: [{ command: "settings", description: "Настройки" }], en: [{ command: "settings", description: "Settings" }] };
+for (const [lang, list] of [["", commands.ru], ["ru", commands.ru], ["en", commands.en]] as const) {
+  const r = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ commands: list, ...(lang ? { language_code: lang } : {}) }),
+  });
+  const body = (await r.json()) as { ok: boolean; description?: string };
+  if (!body.ok) console.warn(`setMyCommands (${lang || "default"}) failed: ${body.description}`);
+}
+
 console.log(`\n✅ Deployed: ${url}`);
 console.log(`   Telegram webhook: ${url}/telegram/webhook`);
 console.log(`   Google OAuth redirect URI: ${url}/oauth/google/callback`);

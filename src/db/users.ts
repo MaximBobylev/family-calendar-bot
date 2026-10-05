@@ -1,20 +1,24 @@
 // Пользователи и их идентичности в каналах (ADR-0003: внутренний user_id ≠ telegram id).
 
+import { parseSettings, type UserSettings } from "./settings";
+
 export interface User {
   id: string;
   locale: string;
   home_tz: string;
+  settings: UserSettings;
 }
 
 export async function findUserByTelegramId(db: D1Database, telegramId: number): Promise<User | null> {
-  return db
+  const row = await db
     .prepare(
-      `SELECT u.id, u.locale, u.home_tz FROM users u
+      `SELECT u.id, u.locale, u.home_tz, u.settings_json FROM users u
        JOIN channel_identities ci ON ci.user_id = u.id
        WHERE ci.channel = 'telegram' AND ci.external_id = ?`,
     )
     .bind(String(telegramId))
-    .first<User>();
+    .first<{ id: string; locale: string; home_tz: string; settings_json: string }>();
+  return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
 }
 
 /** Находит или создаёт пользователя для Telegram-аккаунта. Новому пользователю выдаётся entitlement `comp`. */
@@ -39,5 +43,5 @@ export async function ensureTelegramUser(
       .prepare("INSERT INTO entitlements (id, user_id, plan, source, starts_at) VALUES (?, ?, 'comp', 'comp', ?)")
       .bind(crypto.randomUUID(), id, now),
   ]);
-  return { user: { id, locale: userLocale, home_tz: "UTC" }, created: true };
+  return { user: { id, locale: userLocale, home_tz: "UTC", settings: {} }, created: true };
 }

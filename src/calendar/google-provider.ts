@@ -56,13 +56,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
   async calendars(): Promise<CalendarInfo[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT c.id, c.account_id, c.provider_calendar_id, c.title, c.writable, c.is_default
+        `SELECT c.id, c.account_id, c.provider_calendar_id, c.title, c.writable, c.is_default,
+                (SELECT json_group_array(alias) FROM calendar_aliases al WHERE al.calendar_id = c.id AND al.user_id = a.user_id) AS aliases
          FROM calendars c JOIN provider_accounts a ON a.id = c.account_id
          WHERE a.user_id = ? AND a.provider = 'google'
          ORDER BY c.is_default DESC, c.title`,
       )
       .bind(this.userId)
-      .all<{ id: string; account_id: string; provider_calendar_id: string; title: string; writable: number; is_default: number }>();
+      .all<{ id: string; account_id: string; provider_calendar_id: string; title: string; writable: number; is_default: number; aliases: string | null }>();
     return results.map((r) => ({
       id: r.id,
       accountId: r.account_id,
@@ -70,6 +71,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       title: r.title,
       writable: r.writable === 1,
       isDefault: r.is_default === 1,
+      aliases: (JSON.parse(r.aliases ?? "[]") as string[]).sort(),
     }));
   }
 
@@ -121,6 +123,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       summary: e.title,
       ...(e.location ? { location: e.location } : {}),
       ...(e.recurrence ? { recurrence: e.recurrence } : {}),
+      ...(e.reminders ? { reminders: { useDefault: false, overrides: e.reminders.map((minutes) => ({ method: "popup" as const, minutes })) } } : {}),
       ...time,
     });
     return {

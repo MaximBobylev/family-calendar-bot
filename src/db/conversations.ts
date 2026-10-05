@@ -21,7 +21,11 @@ export interface StoredRef {
 
 export interface DialogState {
   /** Черновик, ожидающий недостающий слот (US-12): ответ пользователя дополняет его. */
-  awaiting?: { kind: "create_time"; draft: unknown; expiresAt: number };
+  awaiting?:
+    | { kind: "create_time"; draft: unknown; expiresAt: number }
+    /** Ввод пояса или других названий календаря из /settings (US-04, US-06). */
+    | { kind: "settings_tz"; expiresAt: number }
+    | { kind: "settings_alias"; calendarId: string; expiresAt: number };
   /** Последний показанный список — для «перенеси вторую» (US-60). */
   lastList?: { refs: StoredRef[]; at: number };
   /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */

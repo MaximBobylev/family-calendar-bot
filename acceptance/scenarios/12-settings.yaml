@@ -1,0 +1,181 @@
+# US-04: /settings — меню с кнопками, правится на месте. US-06: календарь по умолчанию и другие названия.
+# US-07: часовой пояс (без поездок). US-42: напоминания по умолчанию. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: settings-menu-shows-current-values
+  story: US-04
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+            - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+      - llm:
+          "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } }
+          "Завтра день рождения мамы": { tool: create_event, args: { start: "завтра", title: "День рождения мамы", all_day: true } }
+          "Ужин в общий в субботу в 19": { tool: create_event, args: { start: "в субботу в 19", title: "Ужин", calendar: "общий" } }
+          "Ужин в общем календаре в субботу в 19": { tool: create_event, args: { start: "в субботу в 19", title: "Ужин", calendar: "общем календаре" } }
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - text_contains:
+            - "⚙️ <b>Настройки</b>"
+            - "🗓 Календарь по умолчанию: Иван"
+            - "🌍 Часовой пояс: Europe/Moscow (сейчас 10:00)"
+            - "⏱ Длительность встречи: 1 ч"
+            - "🔔 Напоминания: как в Google"
+            - "🔔 Для событий на весь день: без напоминаний"
+            - "🗣 Язык: русский"
+          buttons: ["🗓 Календари", "🌍 Пояс", "⏱ Длительность", "🔔 Напоминания", "🔔 Весь день", "🗣 English"]
+
+- id: settings-default-duration
+  story: US-04
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "⏱ Длительность"
+    - press: "30 мин"
+    - expect_callback_answer: { text_contains: ["Сохранено"] }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["Длительность новой встречи"], buttons: ["15 мин", "30 мин", "45 мин", "✓ 1 ч", "1 ч 30 мин", "2 ч", "← Назад"] }
+        - { method: editMessageText, text_contains: ["⏱ Длительность встречи: 30 мин"] }
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["чт, 8 октября, 10:30–11:00"] }
+
+- id: settings-reminders-applied-on-create
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🔔 Напоминания"
+    - press: "за 1 ч, за 1 дн."
+    - press: "🔔 Весь день"
+    - press: "накануне в 9:00"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["Напоминания</b> для встреч"] }
+        - { method: editMessageText, text_contains: ["🔔 Напоминания: за 1 ч, за 1 дн."] }
+        - { method: editMessageText, text_contains: ["весь день</b>"] }
+        - { method: editMessageText, text_contains: ["🔔 Для событий на весь день: накануне в 9:00"] }
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - press: "Создать"
+    - telegram: { from: 1001, text: "Завтра день рождения мамы" }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - { summary: "Встреча", start: "2026-10-08T10:30:00+03:00", end: "2026-10-08T11:30:00+03:00", reminders: { useDefault: false, overrides: [{ method: popup, minutes: 60 }, { method: popup, minutes: 1440 }] } }
+          - { summary: "День рождения мамы", start: "2026-10-08", end: "2026-10-09", reminders: { useDefault: false, overrides: [{ method: popup, minutes: 900 }] } }
+
+- id: settings-default-reminders-follow-google
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - press: "Создать"
+    - telegram: { from: 1001, text: "Завтра день рождения мамы" }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          # Не настроено: обычные — как в Google (поля нет), весь день — без напоминаний (US-04)
+          - { summary: "Встреча", start: "2026-10-08T10:30:00+03:00", end: "2026-10-08T11:30:00+03:00", reminders: null }
+          - { summary: "День рождения мамы", start: "2026-10-08", end: "2026-10-09", reminders: { useDefault: false, overrides: [] } }
+
+- id: settings-default-calendar-and-aliases
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗓 Календари"
+    - press: "Семья"
+    - press: "Сделать основным"
+    - press: "Добавить название"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["Календари"], buttons: ["✓ Иван", "Семья", "← Назад"] }
+        - { method: editMessageText, text_contains: ["<b>Семья</b>", "Другие названия: нет"], buttons: ["Сделать основным", "Добавить название", "← Назад"] }
+        - { method: editMessageText, text_contains: ["<b>Семья</b>", "Это календарь по умолчанию."] }
+        - { text_contains: ["Как ещё называть календарь «Семья»?"] }
+    - telegram: { from: 1001, text: "Общий, семейный" }
+    - expect_telegram:
+        - { text_contains: ["«Семья» теперь также «общий», «семейный»"] }
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["🗓 Семья"] }
+    - telegram: { from: 1001, text: "Ужин в общем календаре в субботу в 19" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["<b>Ужин</b>", "🗓 Семья"] }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["🗓 Календарь по умолчанию: Семья"] }
+    - press: "🗓 Календари"
+    - press: "✓ Семья"
+    - press: "Убрать названия"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Календари"] }
+        - { method: editMessageText, text_contains: ["Другие названия: «общий», «семейный»"] }
+        - { method: editMessageText, text_contains: ["Другие названия: нет"] }
+
+- id: settings-alias-prompt-ignores-commands
+  story: US-06
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗓 Календари"
+    - press: "Семья"
+    - press: "Добавить название"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText }
+        - { method: editMessageText }
+        - { text_contains: ["Как ещё называть"] }
+        - { text_contains: ["Завтра"], text_not_contains: ["теперь также"] }
+
+- id: settings-timezone-preset-and-typed
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🌍 Пояс"
+    - press: "Тбилиси"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["Часовой пояс</b>", "Сейчас: Europe/Moscow"], buttons: ["✓ Москва", "Калининград", "Екатеринбург", "Новосибирск", "Тбилиси", "Ереван", "Белград", "Лиссабон", "Лондон", "Сан-Паулу", "Другой…", "← Назад"] }
+        - { method: editMessageText, text_contains: ["🌍 Часовой пояс: Asia/Tbilisi (сейчас 11:00)"] }
+    - press: "🌍 Пояс"
+    - press: "Другой…"
+    - telegram: { from: 1001, text: "Mars/Olympus" }
+    - press: "Другой…"
+    - telegram: { from: 1001, text: "UTC+4" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Сейчас: Asia/Tbilisi"], buttons: ["Москва", "Калининград", "Екатеринбург", "Новосибирск", "✓ Тбилиси", "Ереван", "Белград", "Лиссабон", "Лондон", "Сан-Паулу", "Другой…", "← Назад"] }
+        - { text_contains: ["Напишите пояс"] }
+        - { text_contains: ["Не узнал пояс «Mars/Olympus»"] }
+        - { text_contains: ["Напишите пояс"] }
+        - { text_contains: ["Часовой пояс: Etc/GMT-4, сейчас 11:00."] }
+    # Относительные даты — в новом поясе: в Москве ещё 23:30 среды, а в UTC+4 уже 00:30 четверга
+    - clock: "2026-10-07T20:30:00Z"
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["пт, 9 октября, 10:30–11:30"] }
+
+- id: settings-language
+  story: US-04
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗣 English"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["⚙️ <b>Settings</b>", "🗣 Language: English", "Reminders: as in Google"], buttons: ["🗓 Calendars", "🌍 Time zone", "⏱ Length", "🔔 Reminders", "🔔 All-day", "🗣 Русский"] }
+    - expect_callback_answer: { text_contains: ["Saved"] }

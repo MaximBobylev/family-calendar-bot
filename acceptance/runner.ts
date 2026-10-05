@@ -73,6 +73,8 @@ interface ExpectedEvent {
   location?: string;
   /** Правила повторения как в Google: ["RRULE:FREQ=WEEKLY;BYDAY=MO"]. */
   recurrence?: string[];
+  /** Напоминания как в Google: { useDefault: false, overrides: [{ method: popup, minutes: 60 }] }; null — поля нет. */
+  reminders?: unknown;
 }
 
 interface TelegramExpectation {
@@ -328,7 +330,8 @@ async function runScenario(s: Scenario): Promise<void> {
         want.includes("T") ? !!got.dateTime && Date.parse(got.dateTime) === Date.parse(want) : got.date === want;
       for (const want of e.events) {
         const found = events.find((g) => g.summary === want.summary && same(g.start, want.start) && same(g.end, want.end) && (!want.location || g.location === want.location)
-          && (!want.recurrence || JSON.stringify((g as { recurrence?: string[] }).recurrence) === JSON.stringify(want.recurrence)));
+          && (!want.recurrence || JSON.stringify((g as { recurrence?: string[] }).recurrence) === JSON.stringify(want.recurrence))
+          && (want.reminders === undefined || JSON.stringify((g as { reminders?: unknown }).reminders ?? null) === JSON.stringify(want.reminders)));
         if (!found) throw new AssertionError(`${where}: event ${JSON.stringify(want)} not found in ${e.calendar}: ${JSON.stringify(events.map((g) => [g.summary, g.start, g.end]))}`);
       }
     } else if ("connected_user" in step) {
