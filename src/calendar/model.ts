@@ -61,12 +61,14 @@ export interface NewEvent {
 export interface CreatedEvent {
   ref: EventRef;
   link?: string;
+  etag?: string;
 }
 
 /** Изменения события. Время — локальное в поясе `tz`. */
 export interface EventPatch {
   tz: string;
   title?: string;
+  /** Пустая строка — убрать место. */
   location?: string;
   start?: Moment;
   end?: Moment;
@@ -78,10 +80,10 @@ export interface CalendarProvider {
   /** События всех календарей пользователя в [fromUtc, toUtc), локальное время — в поясе `tz`. */
   listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<CalendarEvent[]>;
   createEvent(e: NewEvent): Promise<CreatedEvent>;
-  renameEvent(ref: EventRef, title: string): Promise<void>;
   getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null>;
   /** etag — защита от параллельных правок: если событие изменили, провайдер вернёт ошибку 412. */
-  updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<void>;
+  /** Возвращает новый etag — по нему отмена (US-61) поймёт, не изменили ли событие после нас. */
+  updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<{ etag?: string }>;
   /** «gone» — событие уже удалено кем-то: для пользователя это тоже успех. */
   deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone">;
   /** Отклонить приглашение (пользователь — участник, не организатор): организатор получит ответ. */

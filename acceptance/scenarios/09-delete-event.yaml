@@ -144,13 +144,25 @@
     - expect_telegram:
         - { text_contains: ["Удалить?", "<b>Планёрка</b>"] }
 
-- id: undo-not-yet
+- id: undo-nothing
   story: US-61
   steps:
     - *setup
     - telegram: { from: 1001, text: "Отмени последнее" }
     - expect_telegram:
-        - { text_contains: ["Отмену последнего действия пока не умею"] }
+        - { text_contains: ["Нечего отменять"] }
+
+- id: undo-after-delete-impossible
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Удали обед в пятницу" }
+    - press: "Удалить"
+    - telegram: { from: 1001, text: "Отмени последнее" }
+    - expect_telegram:
+        - { text_contains: ["Удалить?"] }
+        - { method: editMessageText, text_contains: ["Удалено"] }
+        - { text_contains: ["Удаление отменить нельзя"] }
 
 - id: plain-cancel-word-cancels-open-card
   story: US-05

@@ -1,0 +1,167 @@
+# US-61: отмена последнего действия. «Сейчас» — ср 7 октября 2026, 10:00 МСК. События — как в 07-modify-event.yaml.
+
+- id: undo-create-by-button
+  story: US-61
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+                - id: e2
+                  summary: "Созвон с Петей"
+                  start: { dateTime: "2026-10-08T15:00:00+03:00" }
+                  end: { dateTime: "2026-10-08T15:30:00+03:00" }
+                  organizer: { self: true }
+                  attendees: [{ self: true, responseStatus: accepted }, { email: "petya@example.com", responseStatus: accepted }]
+                - { id: e3, summary: "Обед", start: { dateTime: "2026-10-09T13:00:00+03:00" }, end: { dateTime: "2026-10-09T14:00:00+03:00" } }
+                - id: e4
+                  summary: "Встреча у клиента"
+                  start: { dateTime: "2026-10-08T12:00:00+03:00" }
+                  end: { dateTime: "2026-10-08T13:00:00+03:00" }
+                  organizer: { self: false, email: "client@example.com" }
+                  attendees: [{ self: true, responseStatus: accepted }, { email: "client@example.com" }]
+                - { id: e6, summary: "Созвон с Машей", start: { dateTime: "2026-10-09T16:00:00+03:00" }, end: { dateTime: "2026-10-09T16:30:00+03:00" } }
+                # Серия «Стендап» по понедельникам: мастер (5 окт) и экземпляр 12 окт
+                - { id: s1, summary: "Стендап", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO"], start: { dateTime: "2026-10-05T11:00:00+03:00" }, end: { dateTime: "2026-10-05T11:15:00+03:00" } }
+                - { id: s1_20261012, recurringEventId: s1, summary: "Стендап", start: { dateTime: "2026-10-12T11:00:00+03:00" }, end: { dateTime: "2026-10-12T11:15:00+03:00" } }
+      - llm:
+          "Созвон с Машей в четверг в 18": { tool: create_event, args: { start: "в четверг в 18", title: "Созвон с Машей" } }
+          "Сдвинь планёрку на час позже": { tool: modify_event, args: {} }
+          "Переименуй планёрку в Стендап команды": { tool: modify_event, args: {} }
+          "Перенеси стендап на 12": { tool: modify_event, args: {} }
+          "Поставь встречу в пятницу в 3": { tool: create_event, args: { start: "в пятницу в 3" } }
+          "Перенеси обед на завтра": { tool: modify_event, args: {} }
+    - telegram: { from: 1001, text: "Созвон с Машей в четверг в 18" }
+    - press: "Создать"
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText, text_contains: ["✅ Создано"], buttons: ["Открыть в календаре", "↩ Отменить"] }
+    - press: "↩ Отменить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["↩ Отменено", "Созвон с Машей"] }
+    - expect_google_deletes: { count: 1, sendUpdates: none }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 7 }
+
+- id: undo-modify-by-command
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сдвинь планёрку на час позже" }
+    - press: "Подтвердить"
+    - telegram: { from: 1001, text: "Отмени последнее" }
+    - expect_telegram:
+        - { text_contains: ["Перенести?"] }
+        - { method: editMessageText, text_contains: ["✅ Изменено"], buttons: ["↩ Отменить"] }
+        - { method: editMessageText, text_contains: ["↩ Отменено", "Планёрка"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", start: "2026-10-08T10:00:00+03:00", end: "2026-10-08T11:00:00+03:00" }]
+    - expect_google_patches: { count: 2, id: e1 }
+
+- id: undo-rename
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Переименуй планёрку в Стендап команды" }
+    - press: "Подтвердить"
+    - press: "↩ Отменить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", start: "2026-10-08T10:00:00+03:00", end: "2026-10-08T11:00:00+03:00" }]
+
+- id: undo-whole-series
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Перенеси стендап на 12" }
+    - press: "Всю серию"
+    - press: "↩ Отменить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Стендап", start: "2026-10-05T11:00:00+03:00", end: "2026-10-05T11:15:00+03:00" }]
+
+- id: undo-title-answer
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу в пятницу в 3" }
+    - press: "Создать"
+    - reply: { from: 1001, text: "Ревью дизайна" }
+    - press: "↩ Отменить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Встреча", start: "2026-10-09T15:00:00+03:00", end: "2026-10-09T16:00:00+03:00" }]
+
+- id: undo-only-last-action
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сдвинь планёрку на час позже" }
+    - press: "Подтвердить"
+    - telegram: { from: 1001, text: "Перенеси обед на завтра" }
+    - press: "Подтвердить"
+    # Кнопка «Отменить» под первым изменением — уже не последнее действие
+    - http_get: { path: "/health" }
+    - telegram: { from: 1001, text: "Отмени последнее" }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - { summary: "Обед", start: "2026-10-09T13:00:00+03:00", end: "2026-10-09T14:00:00+03:00" }
+          - { summary: "Планёрка", start: "2026-10-08T11:00:00+03:00", end: "2026-10-08T12:00:00+03:00" }
+
+- id: undo-refused-after-external-change
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сдвинь планёрку на час позже" }
+    - press: "Подтвердить"
+    - google_touch: { email: ivan@gmail.com, calendar: ivan@gmail.com, id: e1 }
+    - press: "↩ Отменить"
+    - expect_telegram:
+        - { text_contains: ["Перенести?"] }
+        - { method: editMessageText, text_contains: ["✅ Изменено"] }
+        - { text_contains: ["уже изменили после этого"] }
+    - expect_google_patches: { count: 1 }
+
+- id: undo-twice
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сдвинь планёрку на час позже" }
+    - press: "Подтвердить"
+    - press: "↩ Отменить"
+    - telegram: { from: 1001, text: "Отмени последнее" }
+    - expect_telegram:
+        - { text_contains: ["Перенести?"] }
+        - { method: editMessageText, text_contains: ["✅ Изменено"] }
+        - { method: editMessageText, text_contains: ["↩ Отменено"] }
+        - { text_contains: ["Нечего отменять"] }
+    - expect_google_patches: { count: 2 }
+
+- id: undo-expires
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сдвинь планёрку на час позже" }
+    - press: "Подтвердить"
+    - clock: "2026-10-07T07:16:00Z"
+    - telegram: { from: 1001, text: "Отмени последнее" }
+    - expect_telegram:
+        - { text_contains: ["Перенести?"] }
+        - { method: editMessageText, text_contains: ["✅ Изменено"] }
+        - { text_contains: ["Нечего отменять"] }
+    - expect_google_patches: { count: 1 }

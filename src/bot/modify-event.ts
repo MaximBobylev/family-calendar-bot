@@ -18,6 +18,7 @@ import type { AppContext } from "./context";
 import { locateEvent, type EventRequest } from "./find-event";
 import { escapeHtml, spanLabel } from "./format";
 import { callbackData } from "./keyboards";
+import { attachUndoMessage, recordUndo, type UndoRecord } from "./undo";
 import { t } from "./messages";
 
 export const MODIFY_CARD = "modify";
@@ -38,6 +39,7 @@ interface ModifyCardPayload {
   seriesId?: string;
   etag?: string;
   title: string;
+  oldLocation?: string;
   oldStart: Moment;
   oldEnd: Moment;
   notify: boolean;
@@ -147,7 +149,7 @@ export async function proposeChange(ctx: AppContext, provider: CalendarProvider,
   const askScope = e.recurring && req.scope === undefined && res.options.length === 1;
   const sameDay = res.options.every((o) => !o.start || o.start.day === e.start?.day);
   const payload: ModifyCardPayload = {
-    chatId, tz, ref: e.ref, title: e.title, oldStart: e.start ?? { day: e.startDay, minutes: 0 }, oldEnd: e.end ?? { day: e.endDay, minutes: 0 },
+    chatId, tz, ref: e.ref, title: e.title, ...(e.location ? { oldLocation: e.location } : {}), oldStart: e.start ?? { day: e.startDay, minutes: 0 }, oldEnd: e.end ?? { day: e.endDay, minutes: 0 },
     notify: e.hasOtherAttendees, options: res.options, askScope: askScope && sameDay,
     ...(e.seriesId ? { seriesId: e.seriesId } : {}), ...(e.etag ? { etag: e.etag } : {}),
   };
@@ -204,6 +206,13 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
   const o = p.options[wholeSeries ? 0 : Number(choice.slice(1))];
   if (!o) return;
 
+  // Что вернуть при отмене (US-61): только изменённые поля
+  const beforeOf = (cur: { start?: Moment; end?: Moment; title: string; location?: string }) => ({
+    ...(o.start ? { start: cur.start!, end: cur.end! } : {}),
+    ...(o.title !== undefined ? { title: cur.title } : {}),
+    ...(o.location !== undefined ? { location: cur.location ?? "" } : {}),
+  });
+  let undoRecord: UndoRecord;
   try {
     if (wholeSeries && p.seriesId) {
       // Серия: тот же сдвиг и длительность применяются к мастер-событию (только в пределах дня)
@@ -213,9 +222,15 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
       const delta = o.start ? diff(o.start, p.oldStart) : 0;
       const length = o.start ? diff(o.end!, o.start) : diff(master.end!, master.start!);
       const ms = plus(master.start!, delta);
-      await provider.updateEvent(masterRef, { tz: p.tz, ...o, start: ms, end: plus(ms, length) }, { notify: p.notify });
+      const res = await provider.updateEvent(masterRef, { tz: p.tz, ...o, start: ms, end: plus(ms, length) }, { notify: p.notify });
+      undoRecord = { kind: "update", ref: masterRef, tz: p.tz, notify: p.notify, before: { start: master.start!, end: master.end!, ...beforeOf(master) }, ...(res.etag ? { etag: res.etag } : {}) };
     } else {
-      await provider.updateEvent(p.ref, { tz: p.tz, ...o }, { notify: p.notify, ...(p.etag ? { etag: p.etag } : {}) });
+      const res = await provider.updateEvent(p.ref, { tz: p.tz, ...o }, { notify: p.notify, ...(p.etag ? { etag: p.etag } : {}) });
+      undoRecord = {
+        kind: "update", ref: p.ref, tz: p.tz, notify: p.notify,
+        before: beforeOf({ start: p.oldStart, end: p.oldEnd, title: p.title, ...(p.oldLocation ? { location: p.oldLocation } : {}) }),
+        ...(res.etag ? { etag: res.etag } : {}),
+      };
     }
   } catch (e) {
     if (e instanceof GoogleApiError && e.status === 412) {
@@ -229,9 +244,13 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
     throw e;
   }
 
-  const lines = [t("modified", locale), "", `<b>${escapeHtml(o.title ?? p.title)}</b>`];
-  if (o.start) lines.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
-  if (wholeSeries) lines.push(t("wholeSeriesChanged", locale));
-  await edit(lines.join("\n"));
+  const details = [`<b>${escapeHtml(o.title ?? p.title)}</b>`];
+  if (o.start) details.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
+  if (wholeSeries) details.push(t("wholeSeriesChanged", locale));
+  const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
+  if (action.messageId) {
+    await ctx.telegram.editMessageText(p.chatId, action.messageId, `${t("modified", locale)}\n\n${details.join("\n")}`, { inline_keyboard: [[undo.button]] }, { html: true });
+    await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
+  }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
 }

@@ -39,7 +39,7 @@
     - press: "Создать"
     - expect_callback_answer: { empty: true }
     - expect_telegram:
-        - { method: editMessageText, text_contains: ["✅ Создано", "Созвон с Петей", "15:30–16:00"], buttons: ["Открыть в календаре"] }
+        - { method: editMessageText, text_contains: ["✅ Создано", "Созвон с Петей", "15:30–16:00"], buttons: ["Открыть в календаре", "↩ Отменить"] }
     - expect_google_events:
         email: ivan@gmail.com
         calendar: ivan@gmail.com

@@ -11,6 +11,7 @@ import type { AppContext } from "./context";
 import { locateEvent, type EventRequest } from "./find-event";
 import { escapeHtml, whenOf } from "./format";
 import { callbackData } from "./keyboards";
+import { markNotUndoable } from "./undo";
 import { t } from "./messages";
 
 export const DELETE_CARD = "delete";
@@ -115,6 +116,8 @@ export async function confirmDelete(ctx: AppContext, provider: CalendarProvider,
     }
     throw e;
   }
+  // Удаление и отклонение не отменяются (US-61) — «отмени последнее» не должно откатить предыдущее действие
+  await markNotUndoable(ctx, action.conversationId, user, choice === "decline" ? "decline" : "delete");
   // Удалённое событие больше не «её» для следующих команд (US-60)
   const state = await getDialogState(ctx.db, action.conversationId, user.id);
   if (state.lastEvent?.ref.providerEventId === p.ref.providerEventId) {

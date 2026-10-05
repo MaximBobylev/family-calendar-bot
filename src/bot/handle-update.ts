@@ -4,7 +4,7 @@ import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, looksAllDay } from "../dates/extract";
-import { DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
+import { BARE_CANCEL, DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
 import { hasGoogleAccount } from "../db/accounts";
 import {
   cancelOpenCards, claimPendingAction, ensureConversation, findOpenByMessage, getDialogState, mergeDialogState, type PendingAction,
@@ -25,7 +25,8 @@ import { PICK_CARD, confirmPick, type EventRequest } from "./find-event";
 import { MODIFY_CARD, confirmModify, proposeChange, startModify } from "./modify-event";
 import { connectKeyboard, parseCallbackData } from "./keyboards";
 import { t } from "./messages";
-import { escapeHtml } from "./format-events";
+import { escapeHtml } from "./format";
+import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
 import { isEmptySpeech, transcribe, type Transcript } from "../stt/whisper";
 
@@ -92,8 +93,14 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, message.reply_to_message.message_id, ctx.clock.now());
     if (q && (await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) {
       await withCalendar(ctx, user, chatId, async (provider) => {
-        await provider.renameEvent(q.payload.ref, text);
-        await ctx.telegram.sendMessage(chatId, t("renamed", user.locale, { title: text }));
+        const res = await provider.updateEvent(q.payload.ref, { tz: user.home_tz, title: text }, { notify: false });
+        const undo = await recordUndo(ctx, {
+          conversationId, user, chatId,
+          record: { kind: "update", ref: q.payload.ref, tz: user.home_tz, notify: false, before: { title: q.payload.title ?? t("defaultTitle", user.locale) }, ...(res.etag ? { etag: res.etag } : {}) },
+          summary: `<b>${escapeHtml(text)}</b> → <b>${escapeHtml(q.payload.title ?? t("defaultTitle", user.locale))}</b>`,
+        });
+        const sent = await ctx.telegram.sendMessage(chatId, t("renamed", user.locale, { title: text }), { inline_keyboard: [[undo.button]] });
+        await attachUndoMessage(ctx.db, undo.undoId, sent.message_id);
       });
       return;
     }
@@ -128,10 +135,12 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     if (c.kind !== TITLE_QUESTION && c.messageId && cardChat) await ctx.telegram.editMessageText(cardChat, c.messageId, t("cancelled", user.locale));
   }
 
-  // «Отмени последнее» — отмена действия (US-61, пока не реализована); голое «отмена» при открытой карточке — её отмена
+  // «Отмени последнее» — отмена действия (US-61); голое «отмена» при открытой карточке — отмена карточки
   if (UNDO_PHRASE.test(text)) {
     const hadCards = cancelled.some((c) => c.kind !== TITLE_QUESTION);
-    if (!hadCards) await ctx.telegram.sendMessage(chatId, t("undoUnsupported", user.locale));
+    if (!(BARE_CANCEL.test(text) && hadCards)) {
+      await withCalendar(ctx, user, chatId, (provider) => undoLast(ctx, provider, user, conversationId, chatId));
+    }
     return;
   }
 
@@ -295,6 +304,7 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   const ok = await withCalendar(ctx, user, chatId, async (provider) => {
     if (action.kind === CREATE_CARD) await confirmCreate(ctx, provider, user, action as PendingAction<CreateCardPayload>, parsed.choice);
     else if (action.kind === MODIFY_CARD) await confirmModify(ctx, provider, user, action as Parameters<typeof confirmModify>[3], parsed.choice);
+    else if (action.kind === UNDO_CARD) await performUndo(ctx, provider, user, action as Parameters<typeof performUndo>[3]);
     else if (action.kind === DELETE_CARD) await confirmDelete(ctx, provider, user, action as Parameters<typeof confirmDelete>[3], parsed.choice);
     else if (action.kind === PICK_CARD) {
       const picked = await confirmPick(ctx, provider, user, action as Parameters<typeof confirmPick>[3], parsed.choice);

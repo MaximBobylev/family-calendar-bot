@@ -14,6 +14,7 @@ import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
 import { dateLabel, escapeHtml, hhmm, whenOf } from "./format";
 import { callbackData } from "./keyboards";
+import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
 
 export const CREATE_CARD = "create";
@@ -53,6 +54,8 @@ export interface CreateCardPayload {
 
 export interface TitleQuestionPayload {
   ref: EventRef;
+  /** Текущее название — чтобы переименование можно было отменить (US-61). */
+  title: string;
 }
 
 export function draftFromIntent(i: CreateEventIntent): CreateDraft {
@@ -256,16 +259,23 @@ export async function confirmCreate(
   });
 
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
-  const text = `${t("created", locale)}\n\n${cardBody(o, today, locale, calendarsCount > 1)}`;
-  const markup = created.link ? { inline_keyboard: [[{ text: t("openInCalendar", locale), url: created.link }]] } : undefined;
-  if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, text, markup, { html: true });
+  const body = cardBody(o, today, locale, calendarsCount > 1);
+  const undo = await recordUndo(ctx, {
+    conversationId: action.conversationId, user, chatId,
+    record: { kind: "create", ref: created.ref, ...(created.etag ? { etag: created.etag } : {}) }, summary: body,
+  });
+  const row = [...(created.link ? [{ text: t("openInCalendar", locale), url: created.link }] : []), undo.button];
+  if (action.messageId) {
+    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}`, { inline_keyboard: [row] }, { html: true });
+    await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
+  }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
 
   // Название не задано — спросить; ответом считается только reply на этот вопрос (US-30)
   if (!o.titleGiven) {
     const qId = await createPendingAction(ctx.db, {
       conversationId: action.conversationId, userId: user.id, kind: TITLE_QUESTION,
-      payload: { ref: created.ref } satisfies TitleQuestionPayload, now: ctx.clock.now(),
+      payload: { ref: created.ref, title: o.title } satisfies TitleQuestionPayload, now: ctx.clock.now(),
     });
     const q = await ctx.telegram.sendMessage(chatId, t("askTitle", locale), { force_reply: true });
     await attachMessage(ctx.db, qId, q.message_id);

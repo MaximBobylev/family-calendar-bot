@@ -26,6 +26,8 @@ export interface DialogState {
   lastList?: { refs: StoredRef[]; at: number };
   /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */
   lastEvent?: { ref: StoredRef; at: number };
+  /** Последнее действие для «отмени последнее» (US-61): карточка отмены или причина, почему нельзя. */
+  lastUndo?: { actionId?: string; at: number; notUndoable?: "delete" | "decline" };
 }
 
 /** Окно контекста = окно отмены (US-60). */

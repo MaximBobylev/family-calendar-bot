@@ -122,12 +122,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
       ...(e.location ? { location: e.location } : {}),
       ...time,
     });
-    return { ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id }, ...(created.htmlLink ? { link: created.htmlLink } : {}) };
-  }
-
-  async renameEvent(ref: EventRef, title: string): Promise<void> {
-    const cal = await this.calendar(ref.calendarId);
-    await patchEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, { summary: title });
+    return {
+      ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id },
+      ...(created.htmlLink ? { link: created.htmlLink } : {}),
+      ...(created.etag ? { etag: created.etag } : {}),
+    };
   }
 
   async getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null> {
@@ -136,10 +135,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return raw ? toDomainEvent(raw, cal, tz) : null;
   }
 
-  async updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<void> {
+  async updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<{ etag?: string }> {
     const cal = await this.calendar(ref.calendarId);
     const time = (m: Moment) => ({ dateTime: `${formatMoment(m)}:00`, timeZone: patch.tz });
-    await patchEvent(
+    const updated = await patchEvent(
       this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId,
       {
         ...(patch.title !== undefined ? { summary: patch.title } : {}),
@@ -149,6 +148,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       },
       { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
     );
+    return updated.etag ? { etag: updated.etag } : {};
   }
 
   async deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone"> {
