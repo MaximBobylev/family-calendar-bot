@@ -19,7 +19,7 @@ import {
 import { recordUsage, usageWindow } from "../db/usage";
 import { checkLimit, HOUR_MS, llmCostMicroUsd, MINUTE_MS, sttCostMicroUsd } from "../limits";
 import { ensureTelegramUser, type User } from "../db/users";
-import { LlmChainError, parseIntentChain, type ParsedIntent } from "../nlu/intents";
+import { type Intent, LlmChainError, parseIntentChain, type ParsedIntent } from "../nlu/intents";
 import type { TgCallbackQuery, TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
 import {
@@ -43,6 +43,8 @@ import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from 
 import { readEvents } from "./read-events";
 import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, sendReconnect, showSettings } from "./settings";
 import { fixTranscript, isEmptySpeech, transcribeChain, type Transcript } from "../stt/whisper";
+import { isNotRight, NOT_RIGHT_WINDOW_MS, REPEAT_WINDOW_MS, similarTranscripts } from "../voice/signals";
+import { understandVoiceChain } from "../voice/understand";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
@@ -98,9 +100,12 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId);
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   let text = message.text?.trim();
+  let voice: { fileId: string; durationSec: number } | undefined;
   if (!text && (message.voice || message.audio)) {
     text = (await recognizeVoice(ctx, user, message)) ?? undefined;
     if (!text) return;
+    const v = (message.voice ?? message.audio)!;
+    voice = { fileId: v.file_id, durationSec: v.duration };
   }
   if (!text) {
     // Фото, файлы и прочее — позже (US-66)
@@ -184,23 +189,28 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     return;
   }
 
-  const calendarNames = await ctx.db
-    .prepare(
-      `SELECT c.title AS name
-       FROM calendars c
-       JOIN provider_accounts a ON a.id = c.account_id
-       WHERE a.user_id = ?1
-       UNION
-       SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
-    )
-    .bind(user.id)
-    .all<{ name: string }>();
+  // Голосовое, которое текстовый путь, похоже, не понял, — переслушать мультимодальной моделью (multimodal-voice, D)
+  const nowMs = ctx.clock.now();
+  const prevVoice = state.lastVoice;
+  if (voice) {
+    const current = { ...voice, transcript: text, at: nowMs };
+    await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: current }, nowMs);
+    // Повтор той же фразы — Whisper, скорее всего, снова ошибся
+    if (prevVoice && nowMs - prevVoice.at < REPEAT_WINDOW_MS && similarTranscripts(prevVoice.transcript, text)) {
+      if (await escalateVoice(ctx, user, chatId, conversationId, current)) return;
+    }
+  }
+  // «Не так» — переслушать предыдущее голосовое
+  if (isNotRight(text) && prevVoice && nowMs - prevVoice.at < NOT_RIGHT_WINDOW_MS) {
+    if (await escalateVoice(ctx, user, chatId, conversationId, prevVoice)) return;
+  }
 
+  const calendars = await calendarNamesOf(ctx, user);
   if (!(await withinLimit(ctx, user, "llm", chatId))) return;
   let parsed: ParsedIntent;
   try {
     // Команда — короткая фраза; длинный текст в LLM не шлём (стоимость, prompt injection)
-    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars: calendarNames.results.map((r) => r.name) });
+    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars });
     parsed = res.parsed;
     const via = res.via;
     const costs = {
@@ -239,7 +249,16 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     return;
   }
 
-  let intent = parsed.intent;
+  // Голосовое, на которое текстовый путь сказал бы «не понимаю», — сначала переслушать
+  if (voice && parsed.intent.name === "unsupported") {
+    if (await escalateVoice(ctx, user, chatId, conversationId, { ...voice, transcript: text, at: nowMs })) return;
+  }
+  await routeIntent(ctx, user, chatId, conversationId, text, parsed.intent);
+}
+
+/** Интент → действие. Общий путь для текста, голоса и переслушанного голосового. */
+async function routeIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, parsedIntent: Intent): Promise<void> {
+  let intent = parsedIntent;
   // Сильные глаголы — это изменение/удаление, даже если LLM решила иначе (замер Qwen3, 2026-10-04)
   if (intent.name !== "multiple") {
     if (DELETE_VERBS.test(text)) {
@@ -309,6 +328,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       return;
     }
     case "list_events":
+      // Список показан — повтор того же вопроса голосом не сигнал «не понял» (multimodal-voice, D)
+      await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
       await withCalendar(ctx, user, chatId, (provider) =>
         readEvents(ctx, provider, {
           userId: user.id,
@@ -459,6 +480,8 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   });
   // Карточка уже «done»: при сбое убираем кнопки, чтобы не было «Уже сделано» на несделанном (ревью 2026-10-05)
   if (!ok && action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale));
+  // Действие по голосовому подтверждено — его повтор дальше не сигнал «не понял» (multimodal-voice, D)
+  if (ok && parsed.choice !== "x") await mergeDialogState(ctx.db, action.conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
 }
 
 /**
@@ -498,4 +521,96 @@ function completeDraft(draft: CreateDraft, text: string, now: string, tz: string
   const combined = draft.startText ? `${draft.startText} ${text}` : text;
   const probe = parseDateFragment({ text: combined, kind: "point", now, tz });
   return !("error" in probe) || probe.error === "in_past" ? { ...draft, startText: combined } : undefined;
+}
+
+async function calendarNamesOf(ctx: AppContext, user: User): Promise<string[]> {
+  const { results } = await ctx.db
+    .prepare(
+      `SELECT c.title AS name
+       FROM calendars c
+       JOIN provider_accounts a ON a.id = c.account_id
+       WHERE a.user_id = ?1
+       UNION
+       SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
+    )
+    .bind(user.id)
+    .all<{ name: string }>();
+  return results.map((r) => r.name);
+}
+
+/**
+ * Переслушать голосовое мультимодальной моделью (multimodal-voice, вариант D): то же сообщение по file_id —
+ * Telegram отдаёт файл повторно, хранить аудио не нужно. false — эскалация не настроена (идём обычным путём).
+ * Одно голосовое переслушиваем не больше одного раза.
+ */
+async function escalateVoice(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  voice: { fileId: string; durationSec: number; transcript: string; at: number; reheard?: boolean },
+): Promise<boolean> {
+  if (ctx.config.voice.length === 0) return false;
+  if (voice.reheard) {
+    await ctx.telegram.sendMessage(chatId, t("reheardAlready", user.locale));
+    return true;
+  }
+  if (!(await withinLimit(ctx, user, "llm", chatId))) return true;
+  await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: { ...voice, reheard: true } }, ctx.clock.now());
+  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId);
+
+  let audio: ArrayBuffer;
+  try {
+    audio = await ctx.telegram.downloadFile(voice.fileId);
+  } catch (e) {
+    console.error("voice re-download failed", e);
+    await ctx.telegram.sendMessage(chatId, t("reheardFailed", user.locale));
+    return true;
+  }
+  const audioMs = voice.durationSec * 1000;
+  let res: Awaited<ReturnType<typeof understandVoiceChain>>;
+  try {
+    res = await understandVoiceChain(ctx.config.voice, audio, await calendarNamesOf(ctx, user));
+  } catch (e) {
+    console.error("voice understanding failed", e);
+    await recordUsage(ctx.db, {
+      userId: user.id,
+      kind: "llm",
+      provider: "voice-chain",
+      model: ctx.config.voice[0]?.model ?? "none",
+      audioMs,
+      text: voice.transcript,
+      result: { reheard: true, error: String(e).slice(0, 500) },
+      outcome: "error",
+      now: ctx.clock.now(),
+    });
+    await ctx.telegram.sendMessage(chatId, t("reheardFailed", user.locale));
+    return true;
+  }
+  const { result, via } = res;
+  await recordUsage(ctx.db, {
+    userId: user.id,
+    kind: "llm",
+    provider: via.name ?? via.baseUrl,
+    model: via.model,
+    audioMs,
+    tokensIn: result.tokensIn,
+    tokensOut: result.tokensOut,
+    costMicroUsd: llmCostMicroUsd({ ...ctx.config.costs, llmInPerM: via.inPerM ?? 0, llmOutPerM: via.outPerM ?? 0 }, result.tokensIn, result.tokensOut),
+    text: result.noSpeech ? voice.transcript : result.transcript,
+    // Что слышал Whisper и что услышала модель — расхождения видны в журнале (/admin)
+    result: result.noSpeech
+      ? { reheard: true, noSpeech: true, whisper: voice.transcript }
+      : { ...result.intent, reheard: true, whisper: voice.transcript, ...(res.failed.length ? { fallbackFrom: res.failed } : {}) },
+    outcome: "ok",
+    now: ctx.clock.now(),
+  });
+  if (result.noSpeech) {
+    await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
+    return true;
+  }
+  await ctx.telegram.sendMessage(chatId, t("reheard", user.locale, { text: escapeHtml(result.transcript) }), undefined, { html: true });
+  await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: { ...voice, transcript: result.transcript, reheard: true } }, ctx.clock.now());
+  await routeIntent(ctx, user, chatId, conversationId, result.transcript, result.intent);
+  return true;
 }

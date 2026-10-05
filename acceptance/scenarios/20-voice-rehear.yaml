@@ -1,0 +1,128 @@
+# Переслушать голосовое мультимодальной моделью, когда текстовый путь (Whisper → LLM), похоже, ошибся
+# (docs/tracks/multimodal-voice.md, вариант D). «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+# Транскрипты Whisper — как в спайке 2026-10-05 на синтетическом голосе.
+
+- id: rehear-when-voice-not-understood
+  story: US-10
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Рисование Аня", start: { dateTime: "2026-10-09T15:00:00+03:00" }, end: { dateTime: "2026-10-09T16:00:00+03:00" } }
+      - llm:
+          "Рисование Ани, а то мне.": { tool: unsupported }
+          "Созвон с пятизавтра в 15.30 на полчаса.": { tool: create_event, args: { start: "завтра в 15.30", title: "Созвон с пятизавтра", duration: "на полчаса" } }
+          "Ужин у Кирила и Ксюхи в субботу в 7 вечера.": { tool: create_event, args: { start: "в субботу в 7 вечера", title: "Ужин у Кирила и Ксюхи" } }
+          "Ммм эээ": { tool: unsupported }
+          "Неправильно": { tool: unsupported }
+    # Whisper исказил «отмени» так, что текстовый путь не понял, — переслушиваем сразу, без «не так» от человека
+    - voice:
+        from: 1001
+        transcript: "Рисование Ани, а то мне."
+        heard: { transcript: "Рисование Аня отмени", tool: delete_event, args: { event: "рисование Аня" } }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Рисование Ани, а то мне.</i>"] }
+        - { text_contains: ["🎙 Переслушал: <i>Рисование Аня отмени</i>"] }
+        - { text_contains: ["Удалить", "<b>Рисование Аня</b>", "пт, 9 октября, 15:00–16:00"] }
+    - expect_voice_rehearings: 1
+
+- id: rehear-previous-voice-on-not-right
+  story: US-10
+  steps:
+    - *setup
+    - voice:
+        from: 1001
+        transcript: "Созван с пятизавтра в 15.30 на полчаса."
+        heard: { transcript: "Созвон с Петей завтра в 15:30 на полчаса", tool: create_event, args: { start: "завтра в 15:30", title: "Созвон с Петей", duration: "на полчаса" } }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["<b>Созвон с пятизавтра</b>"] }
+    - expect_voice_rehearings: 0
+    # Человек видит ошибку и пишет «неправильно» — переслушиваем ПРЕДЫДУЩЕЕ голосовое, старая карточка отменяется
+    - telegram: { from: 1001, text: "Неправильно" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["🎙 Переслушал: <i>Созвон с Петей завтра в 15:30 на полчаса</i>"] }
+        - { text_contains: ["Создать событие?", "<b>Созвон с Петей</b>", "чт, 8 октября, 15:30–16:00"] }
+    - expect_voice_rehearings: 1
+    # Второй раз то же голосовое не переслушиваем
+    - telegram: { from: 1001, text: "не так" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Я уже переслушал это сообщение"] }
+    - expect_voice_rehearings: 1
+
+- id: rehear-repeated-voice
+  story: US-10
+  steps:
+    - *setup
+    - voice:
+        from: 1001
+        transcript: "Ужин у Кирила и Ксюхи в субботу в 7 вечера."
+        heard: { transcript: "Ужин у Кирилла и Ксюши в субботу в 7 вечера", tool: create_event, args: { start: "в субботу в 7 вечера", title: "Ужин у Кирилла и Ксюши" } }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["<b>Ужин у Кирила и Ксюхи</b>"] }
+    # Человек переговаривает ту же фразу — Whisper снова ошибся; переслушиваем НОВОЕ голосовое
+    - voice:
+        from: 1001
+        transcript: "Ужин у Кирила и Ксюхи в субботу в 7 вечера."
+        heard: { transcript: "Ужин у Кирилла и Ксюши в субботу в 7 вечера", tool: create_event, args: { start: "в субботу в 7 вечера", title: "Ужин у Кирилла и Ксюши" } }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["🎙 Переслушал: <i>Ужин у Кирилла и Ксюши в субботу в 7 вечера</i>"] }
+        - { text_contains: ["<b>Ужин у Кирилла и Ксюши</b>", "сб, 10 октября, 19:00–20:00"] }
+    - expect_voice_rehearings: 1
+
+- id: rehear-hears-nothing
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Ммм эээ", heard: { no_speech: true } }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Не расслышал, повторите"] }
+
+- id: rehear-provider-fails
+  story: US-14
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Рисование Ани, а то мне.", heard: { error: 503 } }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Не получилось переслушать"] }
+
+- id: not-right-without-recent-voice-is-a-normal-message
+  story: US-12
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Неправильно" }
+    - expect_telegram:
+        - { text_contains: ["Я умею только работать с календарём"] }
+    - expect_voice_rehearings: 0
+
+- id: repeat-after-success-is-not-a-signal
+  story: US-10
+  steps:
+    - *setup
+    - llm:
+        "Что у меня в пятницу?": { tool: list_events, args: { range: "в пятницу" } }
+    # Тот же вопрос дважды: список показан — переслушивать нечего
+    - voice: { from: 1001, transcript: "Что у меня в пятницу?" }
+    - voice: { from: 1001, transcript: "Что у меня в пятницу?" }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Рисование Аня"] }
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Рисование Аня"] }
+    - expect_voice_rehearings: 0

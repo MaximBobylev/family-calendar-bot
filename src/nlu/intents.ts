@@ -152,6 +152,8 @@ export interface ParsedIntent {
   tokensOut: number;
   /** Сырые вызовы от модели — для замеров. */
   toolCalls?: ToolCall[];
+  /** Заголовки лимитов провайдера — для замеров. */
+  rateHeaders?: Record<string, string>;
 }
 
 /** Подмена промпта/схем/параметров — только для замеров (scripts/eval-intents.ts); в проде не задаётся. */
@@ -173,7 +175,7 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
   const system = `${overrides.systemPrompt ?? SYSTEM_PROMPT}\nUser's calendars: ${calendars}.${noThink}`;
   const { systemPrompt: _p, tools, ...callOpts } = overrides;
   const res = await callTools(cfg, system, text, tools ?? TOOLS, callOpts);
-  return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls };
+  return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls, rateHeaders: res.rateHeaders };
 }
 
 /** Провайдер не ответил: статус/текст ошибки — для журнала. */

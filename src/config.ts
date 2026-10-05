@@ -3,6 +3,7 @@
 import type { CostEstimates, UsageLimits } from "./limits";
 import type { LlmConfig } from "./nlu/llm";
 import type { SttConfig } from "./stt/whisper";
+import type { VoiceConfig } from "./voice/understand";
 
 export interface Config {
   telegramApiBase: string;
@@ -25,6 +26,8 @@ export interface Config {
   llm: LlmConfig[];
   /** Цепочка STT: основной → запасные (STT_CHAIN; без него — один Workers AI из STT_BASE/STT_MODEL). */
   stt: SttConfig[];
+  /** Мультимодальный разбор голоса для эскалации (VOICE_CHAIN); пусто — эскалации нет. */
+  voice: VoiceConfig[];
   limits: UsageLimits;
   costs: CostEstimates;
 }
@@ -74,6 +77,7 @@ export function loadConfig(env: Env): Config {
     stt: parseChain<SttConfig>(env.STT_CHAIN, "STT_CHAIN") ?? [
       { name: "workers-ai", kind: "workers-ai", baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
     ],
+    voice: parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? [],
     limits: USAGE_LIMITS,
     costs: COST_ESTIMATES,
   };

@@ -8,14 +8,14 @@
 //     [--concurrency 4] [--delay-ms 8000] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { findCalendarByName } from "../src/calendar/match";
 import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from "../src/dates/extract";
 import { parseDateFragment } from "../src/dates";
 import { intentFromCalls, parseIntent, type Intent } from "../src/nlu/intents";
-import { safeParse } from "../src/nlu/llm";
+import { safeParse, LlmHttpError } from "../src/nlu/llm";
 import { DELETE_VERBS, MODIFY_VERBS } from "../src/nlu/modify-hints";
 import { VARIANTS } from "./nlu-variants";
 
@@ -184,15 +184,36 @@ interface Run {
   check?: Check;
 }
 
-async function withRetry<T>(f: () => Promise<T>): Promise<T> {
+// --- Живой журнал (--live файл): каждый вызов дописывается сразу, с заголовками лимитов провайдера ---
+const LIVE = arg("live");
+let liveDone = 0;
+let liveOk = 0;
+function live(line: string): void {
+  if (!LIVE) return;
+  mkdirSync(dirname(LIVE), { recursive: true });
+  appendFileSync(LIVE, `${new Date().toISOString().slice(11, 19)} ${line}\n`);
+}
+const headersText = (h: Record<string, string> | undefined) =>
+  h && Object.keys(h).length
+    ? ` | ${Object.entries(h)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(" ")}`
+    : "";
+
+async function withRetry<T>(f: () => Promise<T>, label: string): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await f();
     } catch (e) {
       const msg = String(e);
-      if (attempt < 3 && /llm (429|5\d\d)|timeout|aborted|fetch failed/i.test(msg)) {
-        // Квота (429) — ждём минуту: короткие повторы только сжигают лимит (урок 2026-10-05)
-        await new Promise((r) => setTimeout(r, /llm 429/.test(msg) ? 60_000 : 2000 * (attempt + 1)));
+      const retry = attempt < 3 && /llm (429|5\d\d)|timeout|aborted|fetch failed/i.test(msg);
+      // Квота (429) — ждём минуту: короткие повторы только сжигают лимит (урок 2026-10-05)
+      const waitMs = /llm 429/.test(msg) ? 60_000 : 2000 * (attempt + 1);
+      live(
+        `ERR  ${label} попытка ${attempt + 1}: ${msg.replace(/\s+/g, " ").slice(0, 220)}${headersText(e instanceof LlmHttpError ? e.rateHeaders : undefined)}${retry ? ` → ждём ${waitMs / 1000} с` : " → сдаёмся"}`,
+      );
+      if (retry) {
+        await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
       throw e;
@@ -225,13 +246,15 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
       : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
   let ms = 0;
+  let lastHeaders: Record<string, string> | undefined;
   try {
     const parsed = await withRetry(async () => {
       const t0 = Date.now();
       const p = await parseIntent(cfg, c.text, { calendars: calendarNames }, { systemPrompt: v.systemPrompt, tools: v.tools, ...MODEL_OPTS[model] });
       ms = Date.now() - t0;
+      lastHeaders = p.rateHeaders;
       return p;
-    });
+    }, `${c.id} «${c.text}»`);
     const calls = (parsed.toolCalls ?? []).map((k) => ({ name: k.name, raw: k.rawArguments }));
     const brokenJson = calls.some((k) => {
       if (k.raw === undefined || typeof k.raw !== "string") return false;
@@ -242,8 +265,18 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
         return true;
       }
     });
-    return grade({ ...base, ms, tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, calls, brokenJson });
+    const run = grade({ ...base, ms, tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, calls, brokenJson });
+    const ok = !!run.check && Object.values(run.check).every((x) => x !== false);
+    liveDone++;
+    if (ok) liveOk++;
+    live(
+      `${ok ? "OK  " : "FAIL"} ${c.id} ${ms} мс «${c.text}» → ${calls.map((k) => `${k.name} ${k.raw ?? ""}`).join(" + ") || "(нет вызова)"}` +
+        `${ok ? "" : ` | проверка: ${JSON.stringify(run.check)}`}${headersText(lastHeaders)} | итого ${liveOk}/${liveDone}`,
+    );
+    return run;
   } catch (e) {
+    liveDone++;
+    live(`GAVE ${c.id} «${c.text}» | итого ${liveOk}/${liveDone}`);
     return { ...base, ms, error: String(e).slice(0, 300) };
   }
 }

@@ -56,6 +56,7 @@
         "STT_MODEL": "fake-whisper",
         // Цепочки провайдеров, как в проде (scripts/deploy.ts): основной → запасной, оба — фейки
         "LLM_CHAIN": "[{\"name\":\"primary\",\"baseUrl\":\"http://fakes:9100/llm/v1\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-model\"},{\"name\":\"backup\",\"baseUrl\":\"http://fakes:9100/llm-backup/v1\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-backup\"}]",
+        "VOICE_CHAIN": "[{\"name\":\"gemini\",\"kind\":\"gemini\",\"baseUrl\":\"http://fakes:9100/gemini/v1beta\",\"apiKey\":\"test-gemini-key\",\"model\":\"fake-voice\"}]",
         "STT_CHAIN": "[{\"name\":\"groq\",\"kind\":\"openai\",\"baseUrl\":\"http://fakes:9100/stt-openai\",\"apiKey\":\"test-stt-key\",\"model\":\"whisper-large-v3-turbo\"},{\"name\":\"workers-ai\",\"kind\":\"workers-ai\",\"baseUrl\":\"http://fakes:9100/stt\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-whisper\"}]",
         "TEST_MODE": "true",
         "GOOGLE_CLIENT_ID": "test-client-id",

@@ -8,6 +8,7 @@
 //   /llm-backup/v1/chat/completions — запасной провайдер LLM: те же фикстуры (цепочка провайдеров)
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
 //   /stt-openai/audio/transcriptions — фейк OpenAI-совместимого STT (Groq), multipart: те же фикстуры
+//   /gemini/v1beta/models/<m>:generateContent — фейк мультимодального разбора голоса: ответ по содержимому аудио
 //   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые)
 //
 // Управление для раннера:
@@ -30,6 +31,8 @@
 //   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai, status}: провайдер отвечает
 //                                     этой ошибкой (0 — снова работает); проверка переключения на запасной
 //   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
+//   POST /__fake/voice/fixtures     — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
+//   GET  /__fake/voice/requests     — запросы мультимодального разбора: [{content}]
 //   POST /__fake/reset              — сброс состояния
 
 import { createHash } from "node:crypto";
@@ -81,6 +84,8 @@ let telegramFiles = new Map<string, string>();
 let sttFixtures = new Map<string, { text?: string; error?: number }>();
 let llmRequests: unknown[] = [];
 let sttRequests: { via: string }[] = [];
+let voiceFixtures = new Map<string, { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number }>();
+let voiceRequests: { content: string }[] = [];
 /** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
 let outages = new Map<string, number>();
 let revocations: { token: string; status: number }[] = [];
@@ -178,6 +183,8 @@ const server = createServer(async (req, res) => {
       llmFixtures = new Map();
       llmRequests = [];
       sttRequests = [];
+      voiceFixtures = new Map();
+      voiceRequests = [];
       outages = new Map();
       telegramFiles = new Map();
       sttFixtures = new Map();
@@ -236,6 +243,32 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/stt/requests") return send(res, 200, sttRequests);
+    if (url.pathname === "/__fake/voice/fixtures" && req.method === "POST") {
+      for (const [content, fx] of Object.entries(await readJson(req))) voiceFixtures.set(content, fx as never);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/voice/requests") return send(res, 200, voiceRequests);
+
+    // --- Мультимодальный разбор голоса (Gemini generateContent): аудио → transcript + functionCall ---
+    if (/^\/gemini\/v1beta\/models\/[^/]+:generateContent$/.test(url.pathname) && req.method === "POST") {
+      const outage = outages.get("gemini");
+      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
+      const body = (await readJson(req)) as { contents?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] }[] };
+      const part = body.contents?.[0]?.parts?.find((p) => p.inlineData);
+      if (part?.inlineData?.mimeType !== "audio/ogg") return send(res, 400, { error: { message: "fake voice: expected inlineData audio/ogg" } });
+      const content = Buffer.from(part.inlineData.data ?? "", "base64").toString("utf8");
+      voiceRequests.push({ content });
+      const fx = voiceFixtures.get(content);
+      if (!fx) return send(res, 400, { error: { message: `fake voice: no fixture for «${content}»` } });
+      if (fx.error) return send(res, fx.error, { error: { code: fx.error, message: "fake voice error" } });
+      const call = fx.no_speech
+        ? { name: "no_speech", args: {} }
+        : { name: fx.tool ?? "unsupported", args: { transcript: fx.transcript ?? "", ...(fx.args ?? {}) } };
+      return send(res, 200, {
+        candidates: [{ content: { role: "model", parts: [{ functionCall: call }] } }],
+        usageMetadata: { promptTokenCount: 2000, candidatesTokenCount: 50 },
+      });
+    }
 
     // --- STT, OpenAI-совместимый (Groq): multipart, аудио — файл в поле file ---
     if (url.pathname === "/stt-openai/audio/transcriptions" && req.method === "POST") {

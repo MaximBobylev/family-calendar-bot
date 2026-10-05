@@ -18,7 +18,7 @@
                 - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
       - llm:
           "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
-          "Созван спеть и завтра в 15.30 на полчаса.": { tool: create_event, args: { start: "завтра в 15.30", title: "Созван спеть и" } }
+          "Созвон спеть и завтра в 15.30 на полчаса.": { tool: create_event, args: { start: "завтра в 15.30", title: "Созвон спеть и" } }
           "Ревью дизайна": { tool: unsupported }
     - voice: { from: 1001, transcript: "Что у меня завтра?" }
     - expect_telegram:

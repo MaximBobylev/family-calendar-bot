@@ -39,6 +39,25 @@ export interface LlmResult {
   toolCalls: ToolCall[];
   tokensIn: number;
   tokensOut: number;
+  /** Заголовки лимитов провайдера (x-ratelimit-*, retry-after) — для замеров и журнала. */
+  rateHeaders?: Record<string, string>;
+}
+
+/** Ошибка провайдера с заголовками лимитов — чтобы замер видел, какой лимит сработал. */
+export class LlmHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly rateHeaders: Record<string, string>,
+  ) {
+    super(message);
+  }
+}
+
+function rateHeadersOf(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of res.headers) if (/^(x-ratelimit|retry-after)/i.test(k)) out[k] = v;
+  return out;
 }
 
 export async function callTools(cfg: LlmConfig, system: string, user: string, tools: ToolDefinition[], opts: CallOptions = {}): Promise<LlmResult> {
@@ -63,13 +82,14 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
     },
     TIMEOUTS.llm,
   );
-  if (!res.ok) throw new Error(`llm ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new LlmHttpError(`llm ${res.status}: ${await res.text()}`, res.status, rateHeadersOf(res));
   const json = (await res.json()) as {
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
   const calls = json.choices?.[0]?.message?.tool_calls ?? [];
   return {
+    rateHeaders: rateHeadersOf(res),
     toolCalls: calls.map((c) => ({ name: c.function.name, arguments: safeParse(c.function.arguments), rawArguments: c.function.arguments })),
     tokensIn: json.usage?.prompt_tokens ?? 0,
     tokensOut: json.usage?.completion_tokens ?? 0,

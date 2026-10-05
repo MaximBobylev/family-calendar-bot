@@ -92,12 +92,18 @@ async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Tra
 
 /**
  * Известные ошибки Whisper в командах — только явный список (как опечатки в парсере дат), без нечёткой правки:
- * «Рисование Аня от Мини» (голос, 2026-10-05) — «отмени», разрезанное на два слова.
+ * «Рисование Аня от Мини» (голос, 2026-10-05) — «отмени», разрезанное на два слова; «Созван с …» — «созвон»
+ * (спайк на синтетическом голосе, 2026-10-05).
  */
-const TRANSCRIPT_FIXES: [RegExp, string][] = [[/(?<!\p{L})от\s+м[еи]н[иь](?!\p{L})/giu, "отмени"]];
+const TRANSCRIPT_FIXES: [RegExp, string][] = [
+  [/(?<!\p{L})от\s+м[еи]н(и|ь|ей)(?!\p{L})/giu, "отмени"],
+  [/(?<!\p{L})созван(?!\p{L})/giu, "созвон"],
+];
 
 export function fixTranscript(text: string): string {
-  return TRANSCRIPT_FIXES.reduce((t, [re, to]) => t.replace(re, to), text);
+  // Заглавная буква исходного слова сохраняется: «Созван с …» → «Созвон с …»
+  const keepCase = (to: string) => (m: string) => (m[0] !== m[0]!.toLowerCase() ? to[0]!.toUpperCase() + to.slice(1) : to);
+  return TRANSCRIPT_FIXES.reduce((t, [re, to]) => t.replace(re, keepCase(to)), text);
 }
 
 /** Типичные «галлюцинации» Whisper на тишине и шуме — считаем, что ничего не сказано (US-10). */

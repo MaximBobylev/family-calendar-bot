@@ -21,6 +21,8 @@ interface Env {
   LLM_CHAIN?: string;
   /** Необязательно: JSON-цепочка STT [{name, kind, baseUrl, apiKey, model, perMin?}] (scripts/deploy.ts). */
   STT_CHAIN?: string;
+  /** Необязательно: JSON-цепочка мультимодального разбора голоса [{name, kind: gemini|openai-audio, baseUrl, apiKey, model}]. */
+  VOICE_CHAIN?: string;
   /** Вход на /admin (HTTP Basic). Пустой пароль — страница недоступна. */
   ADMIN_USER: string;
   ADMIN_PASSWORD: string;

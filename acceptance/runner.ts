@@ -50,7 +50,23 @@ type Step =
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
   /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
-  | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
+  /**
+   * Голосовое: Whisper распознаёт его в transcript; heard — что услышит мультимодальная модель, если бот решит
+   * переслушать (эскалация): {transcript, tool, args} | {no_speech: true} | {error: status}.
+   */
+  | {
+      voice: {
+        from: number;
+        transcript?: string;
+        duration?: number;
+        stt_error?: number;
+        download_fails?: boolean;
+        reply_to_question?: boolean;
+        heard?: { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number };
+      };
+    }
+  /** Сколько раз бот переслушивал голосовые мультимодальной моделью. */
+  | { expect_voice_rehearings: number }
   /**
    * HTTP-запрос к SUT. В path, значениях form и text_(not_)contains подставляются {{имя}} из capture предыдущих шагов;
    * capture: { имя: регэксп с одной группой } — запомнить кусок ответа (например, id из ссылки).
@@ -443,6 +459,7 @@ async function runScenario(s: Scenario): Promise<void> {
       const content = `audio-${voiceSeq}`;
       if (!v.download_fails) await post(`${FAKES}/__fake/telegram/files`, { file_id: fileId, content });
       await post(`${FAKES}/__fake/stt/fixtures`, { [content]: v.stt_error ? { error: v.stt_error } : { text: v.transcript ?? "" } });
+      if (v.heard) await post(`${FAKES}/__fake/voice/fixtures`, { [content]: v.heard });
       let replyTo: number | undefined;
       if (v.reply_to_question) {
         const q = [...(await allTelegramCalls())].reverse().find((c) => c.body.reply_markup?.force_reply && c.messageId);
@@ -579,6 +596,10 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("expect_llm_requests" in step) {
       const list = ((await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as { _via?: string }[]).filter((r) => r._via === "llm");
       if (list.length !== step.expect_llm_requests) throw new AssertionError(`${where}: ${list.length} LLM requests, expected ${step.expect_llm_requests}`);
+    } else if ("expect_voice_rehearings" in step) {
+      const list = (await (await fetch(`${FAKES}/__fake/voice/requests`)).json()) as unknown[];
+      if (list.length !== step.expect_voice_rehearings)
+        throw new AssertionError(`${where}: ${list.length} voice re-hearings, expected ${step.expect_voice_rehearings}`);
     } else if ("provider_outage" in step) {
       await post(`${FAKES}/__fake/outage`, step.provider_outage);
     } else if ("expect_provider_calls" in step) {

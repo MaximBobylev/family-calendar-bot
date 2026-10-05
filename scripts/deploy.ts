@@ -92,8 +92,27 @@ if (groqKey) {
   });
 }
 sttChain.push({ name: "workers-ai", kind: "workers-ai", baseUrl: workersAi, apiKey: need("LLM_API_KEY"), model: "@cf/openai/whisper-large-v3-turbo" });
+// Мультимодальный разбор голоса — эскалация, когда текстовый путь ошибся (docs/tracks/multimodal-voice.md, вариант D).
+// Спайк 2026-10-05: gemini-3.5-flash-lite напрямую — лучший (12/12, 1,4 с); запасной через OpenRouter — по желанию.
+const voiceChain: Record<string, unknown>[] = [];
+const geminiKey = env.GEMINI_API_KEY?.trim();
+if (geminiKey) {
+  voiceChain.push({
+    name: "gemini",
+    kind: "gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKey: geminiKey,
+    model: env.GEMINI_VOICE_MODEL?.trim() || "gemini-3.5-flash-lite",
+  });
+}
+const voiceOpenRouterModel = env.VOICE_OPENROUTER_MODEL?.trim();
+if (openrouterKey && voiceOpenRouterModel) {
+  voiceChain.push({ name: "openrouter", kind: "openai-audio", baseUrl: "https://openrouter.ai/api/v1", apiKey: openrouterKey, model: voiceOpenRouterModel });
+}
+
 console.log(`\nLLM: ${llmChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
 console.log(`STT: ${sttChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
+console.log(`Переслушивание голоса: ${voiceChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY)"}`);
 
 const secrets: Record<string, string> = {
   TELEGRAM_BOT_TOKEN: need("TELEGRAM_BOT_TOKEN"),
@@ -108,6 +127,7 @@ const secrets: Record<string, string> = {
   PUBLIC_BASE_URL: url,
   LLM_CHAIN: JSON.stringify(llmChain),
   STT_CHAIN: JSON.stringify(sttChain),
+  VOICE_CHAIN: JSON.stringify(voiceChain),
 };
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
   const v = env[name]?.trim();

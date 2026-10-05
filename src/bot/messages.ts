@@ -168,6 +168,15 @@ const messages = {
     en: "The voice message is longer than a minute — please record a shorter one.",
   },
   notHeard: { ru: "Не расслышал, повторите, пожалуйста.", en: "I didn't catch that, please repeat." },
+  reheard: { ru: "🎙 Переслушал: <i>{text}</i>", en: "🎙 Listened again: <i>{text}</i>" },
+  reheardFailed: {
+    ru: "Не получилось переслушать — скажите иначе или напишите текстом.",
+    en: "I couldn't listen again — please rephrase or type it.",
+  },
+  reheardAlready: {
+    ru: "Я уже переслушал это сообщение — скажите иначе или напишите текстом.",
+    en: "I've already listened to that one again — please rephrase or type it.",
+  },
   sttUnavailable: {
     ru: "Не могу распознать голос сейчас — напишите, пожалуйста, текстом.",
     en: "I can't recognize voice right now — please type it.",
