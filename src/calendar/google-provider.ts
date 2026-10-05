@@ -4,7 +4,7 @@ import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
 import { formatDate, formatMoment, makeDay, utcToLocal, type Moment } from "../dates/calendar";
 import { GoogleAuthError, refreshAccessToken } from "../google/auth";
-import { getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
+import { deleteEvent, getEvent, GoogleApiError, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
 import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventPatch, EventRef, NewEvent } from "./model";
 
 /** Типы событий, которые не показываем (US-20). */
@@ -149,5 +149,22 @@ export class GoogleCalendarProvider implements CalendarProvider {
       },
       { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
     );
+  }
+
+  async deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone"> {
+    const cal = await this.calendar(ref.calendarId);
+    return deleteEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, {
+      sendUpdates: opts.notify ? "all" : "none",
+      ...(opts.etag ? { etag: opts.etag } : {}),
+    });
+  }
+
+  async declineEvent(ref: EventRef, tz: string): Promise<void> {
+    const cal = await this.calendar(ref.calendarId);
+    const token = await this.token();
+    const raw = await getEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, tz);
+    if (!raw) throw new GoogleApiError("event not found", 404);
+    const attendees = (raw.attendees ?? []).map((a) => (a.self ? { ...a, responseStatus: "declined" } : a));
+    await patchEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, { attendees }, { sendUpdates: "all" });
   }
 }

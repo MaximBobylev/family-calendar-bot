@@ -74,6 +74,7 @@ export async function listEvents(
 
 export interface GoogleEventInput {
   id?: string;
+  attendees?: { email?: string; self?: boolean; responseStatus?: string }[];
   summary?: string;
   location?: string;
   description?: string;
@@ -138,4 +139,23 @@ export function patchEvent(
   const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
   if (opts.sendUpdates) url.searchParams.set("sendUpdates", opts.sendUpdates);
   return writeEvent(url, "PATCH", accessToken, body, opts.etag);
+}
+
+/** Удаление события. 404/410 — уже удалено: для пользователя это успех. */
+export async function deleteEvent(
+  apiBase: string,
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  opts: { sendUpdates?: "all" | "none"; etag?: string } = {},
+): Promise<"deleted" | "gone"> {
+  const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
+  if (opts.sendUpdates) url.searchParams.set("sendUpdates", opts.sendUpdates);
+  const res = await fetchWithTimeout(url, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${accessToken}`, ...(opts.etag ? { "if-match": opts.etag } : {}) },
+  }, TIMEOUTS.google);
+  if (res.status === 404 || res.status === 410) return "gone";
+  if (!res.ok) throw new GoogleApiError(`events.delete failed: ${res.status} ${await res.text()}`, res.status);
+  return "deleted";
 }

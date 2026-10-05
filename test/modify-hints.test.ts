@@ -44,3 +44,21 @@ describe("modifyQuery", () => {
     expect(MODIFY_VERBS.test("Поставь встречу на завтра")).toBe(false);
   });
 });
+
+import { DELETE_VERBS, MASS_DELETE, UNDO_PHRASE } from "../src/nlu/modify-hints";
+
+describe("delete hints", () => {
+  it("mass delete", () => {
+    expect(MASS_DELETE.test("Удали все встречи на завтра")).toBe(true);
+    expect(MASS_DELETE.test("Удали стендап")).toBe(false);
+  });
+  it("delete verbs", () => {
+    expect(DELETE_VERBS.test("Убери планёрку")).toBe(true);
+    expect(DELETE_VERBS.test("Перенеси планёрку")).toBe(false);
+  });
+  it("undo phrase", () => {
+    expect(UNDO_PHRASE.test("Отмени последнее")).toBe(true);
+    expect(UNDO_PHRASE.test("Отмена")).toBe(true);
+    expect(UNDO_PHRASE.test("Отмени встречу с Петей")).toBe(false);
+  });
+});

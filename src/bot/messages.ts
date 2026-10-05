@@ -147,6 +147,23 @@ const messages = {
   wholeSeriesChanged: { ru: "↻ Изменена вся серия.", en: "↻ The whole series was updated." },
   internalError: { ru: "Что-то пошло не так. Попробуйте ещё раз.", en: "Something went wrong. Please try again." },
   actionFailed: { ru: "⚠️ Не получилось — ничего не изменено. Повторите команду.", en: "⚠️ That failed — nothing was changed. Please repeat the command." },
+  deleteConfirm: { ru: "Удалить?", en: "Delete this event?" },
+  declineConfirm: { ru: "Отклонить приглашение?", en: "Decline the invitation?" },
+  declineExplain: {
+    ru: "Встреча не удаляется — вы отклоняете приглашение, организатор получит ответ.",
+    en: "The event is not deleted — you decline the invitation, the organizer will be notified.",
+  },
+  attendeesNotifiedCancel: { ru: "👥 Участники получат уведомление об отмене.", en: "👥 Attendees will be notified about the cancellation." },
+  deleteButton: { ru: "Удалить", en: "Delete" },
+  declineButton: { ru: "Отклонить", en: "Decline" },
+  deleted: { ru: "🗑 Удалено", en: "🗑 Deleted" },
+  deletedSeries: { ru: "🗑 Удалена вся серия", en: "🗑 The whole series was deleted" },
+  declined: { ru: "✅ Приглашение отклонено", en: "✅ Invitation declined" },
+  massDeleteUnsupported: {
+    ru: "Удалять сразу несколько встреч пока не умею — назовите одну.",
+    en: "I can't delete several events at once yet — please name one.",
+  },
+  undoUnsupported: { ru: "Отмену последнего действия пока не умею.", en: "I can't undo the last action yet." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

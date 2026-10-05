@@ -17,6 +17,7 @@
 //   POST /__fake/telegram/files     — {file_id, content}: файл для getFile и скачивания
 //   POST /__fake/stt/fixtures       — {"<содержимое аудио>": {text} | {error: status}}
 //   GET  /__fake/google/patches     — журнал PATCH событий: {calendar, id, sendUpdates, body}
+//   GET  /__fake/google/deletes     — журнал DELETE событий: {calendar, id, sendUpdates}
 //   POST /__fake/google/touch       — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
 //   POST /__fake/reset              — сброс состояния
@@ -97,6 +98,7 @@ function normalizeTimes(e: GoogleEvent, tz: string): GoogleEvent {
 let nextEventId = 1;
 let etagSeq = 1;
 let patches: { calendar: string; id: string; sendUpdates: string | null; body: unknown }[] = [];
+let deletes: { calendar: string; id: string; sendUpdates: string | null }[] = [];
 const newEtag = () => `"etag-${etagSeq++}"`;
 
 function eventBounds(e: GoogleEvent, tz: string): [number, number] {
@@ -158,6 +160,7 @@ const server = createServer(async (req, res) => {
       nextEventId = 1;
       etagSeq = 1;
       patches = [];
+      deletes = [];
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
@@ -208,6 +211,7 @@ const server = createServer(async (req, res) => {
       return res.end(content);
     }
     if (url.pathname === "/__fake/google/patches") return send(res, 200, patches);
+    if (url.pathname === "/__fake/google/deletes") return send(res, 200, deletes);
     if (url.pathname === "/__fake/google/touch" && req.method === "POST") {
       const { email, calendar, id } = (await readJson(req)) as { email: string; calendar: string; id: string };
       const ev = googleAccounts.get(email)?.calendars.find((c) => c.id === calendar)?.events?.find((e) => e.id === id);
@@ -265,6 +269,21 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, ...c }) => c) });
     }
     const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
+    if (evOne && req.method === "DELETE") {
+      const account = googleAccountByToken(req);
+      if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
+      const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
+      if (!cal || !ev || ev.status === "cancelled") return send(res, 410, { error: { code: 410, message: "Resource has been deleted" } });
+      if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
+      const ifMatch = req.headers["if-match"];
+      if (ifMatch && ifMatch !== ev.etag) return send(res, 412, { error: { code: 412, message: "Precondition Failed" } });
+      deletes.push({ calendar: cal.id, id: ev.id, sendUpdates: url.searchParams.get("sendUpdates") });
+      // Удаление серии убирает и её экземпляры
+      for (const e of cal.events ?? []) if (e.id === ev.id || e.recurringEventId === ev.id) e.status = "cancelled";
+      res.writeHead(204);
+      return res.end();
+    }
     if (evOne && (req.method === "PATCH" || req.method === "GET")) {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });

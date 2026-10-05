@@ -82,4 +82,8 @@ export interface CalendarProvider {
   getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null>;
   /** etag — защита от параллельных правок: если событие изменили, провайдер вернёт ошибку 412. */
   updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<void>;
+  /** «gone» — событие уже удалено кем-то: для пользователя это тоже успех. */
+  deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone">;
+  /** Отклонить приглашение (пользователь — участник, не организатор): организатор получит ответ. */
+  declineEvent(ref: EventRef, tz: string): Promise<void>;
 }

@@ -4,7 +4,7 @@ import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, looksAllDay } from "../dates/extract";
-import { MODIFY_VERBS, modifyHints, modifyQuery } from "../nlu/modify-hints";
+import { DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
 import { hasGoogleAccount } from "../db/accounts";
 import {
   cancelOpenCards, claimPendingAction, ensureConversation, findOpenByMessage, getDialogState, mergeDialogState, type PendingAction,
@@ -20,7 +20,9 @@ import {
   CREATE_CARD, TITLE_QUESTION, confirmCreate, draftFromIntent, startCreate,
   type CreateCardPayload, type CreateDraft, type TitleQuestionPayload,
 } from "./create-event";
-import { MODIFY_CARD, PICK_CARD, confirmModify, confirmPick, startModify } from "./modify-event";
+import { DELETE_CARD, confirmDelete, proposeDelete, startDelete } from "./delete-event";
+import { PICK_CARD, confirmPick, type EventRequest } from "./find-event";
+import { MODIFY_CARD, confirmModify, proposeChange, startModify } from "./modify-event";
 import { connectKeyboard, parseCallbackData } from "./keyboards";
 import { t } from "./messages";
 import { escapeHtml } from "./format-events";
@@ -120,10 +122,17 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   }
 
   // Новая команда аннулирует открытые карточки (US-05)
-  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION, MODIFY_CARD, PICK_CARD]);
+  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION, MODIFY_CARD, PICK_CARD, DELETE_CARD]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;
     if (c.kind !== TITLE_QUESTION && c.messageId && cardChat) await ctx.telegram.editMessageText(cardChat, c.messageId, t("cancelled", user.locale));
+  }
+
+  // «Отмени последнее» — отмена действия (US-61, пока не реализована); голое «отмена» при открытой карточке — её отмена
+  if (UNDO_PHRASE.test(text)) {
+    const hadCards = cancelled.some((c) => c.kind !== TITLE_QUESTION);
+    if (!hadCards) await ctx.telegram.sendMessage(chatId, t("undoUnsupported", user.locale));
+    return;
   }
 
   const calendarNames = await ctx.db
@@ -150,8 +159,12 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   });
 
   let intent = parsed.intent;
-  // Сильные глаголы изменения — это изменение, даже если LLM решила иначе (замер Qwen3, 2026-10-04)
-  if (intent.name !== "modify_event" && intent.name !== "multiple" && MODIFY_VERBS.test(text)) intent = { name: "modify_event" };
+  // Сильные глаголы — это изменение/удаление, даже если LLM решила иначе (замер Qwen3, 2026-10-04)
+  if (intent.name !== "multiple") {
+    if (DELETE_VERBS.test(text)) {
+      if (intent.name !== "delete_event") intent = { name: "delete_event" };
+    } else if (intent.name !== "modify_event" && MODIFY_VERBS.test(text)) intent = { name: "modify_event" };
+  }
   // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
   const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
   switch (intent.name) {
@@ -177,24 +190,35 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
       return;
     }
-    case "modify_event": {
+    case "modify_event":
+    case "delete_event": {
+      if (intent.name === "delete_event" && MASS_DELETE.test(text)) {
+        await ctx.telegram.sendMessage(chatId, t("massDeleteUnsupported", user.locale));
+        return;
+      }
       // От LLM — только сам интент; что и как менять, определяем по тексту детерминированно:
       // Qwen3 не заполняет «event» и выдумывает reference/scope (замер 2026-10-04)
       const hints = modifyHints(text);
       const spans = extractModifySpans(text, localNow, user.home_tz);
-      const newTitle = hints.newTitle ?? intent.newTitle;
+      const isModify = intent.name === "modify_event";
+      const llmModify = intent.name === "modify_event" ? intent : undefined;
+      const newTitle = isModify ? (hints.newTitle ?? llmModify?.newTitle) : undefined;
       const fragments = [spans.reference, spans.target, spans.shift, spans.duration].filter((x): x is string => !!x);
       const query = modifyQuery(text, fragments, newTitle) ?? intent.event;
-      const request = {
+      const request: EventRequest = {
         spans,
         ...(query ? { query } : {}),
         ...(hints.reference ? { reference: hints.reference } : {}),
         ...(hints.listIndex ? { listIndex: hints.listIndex } : {}),
         ...(newTitle ? { newTitle } : {}),
-        ...(intent.newLocation ? { newLocation: intent.newLocation } : {}),
+        ...(llmModify?.newLocation ? { newLocation: llmModify.newLocation } : {}),
         ...(hints.scope ? { scope: hints.scope } : {}),
       };
-      await withCalendar(ctx, user, chatId, (provider) => startModify(ctx, provider, { user, chatId, conversationId, request }));
+      await withCalendar(ctx, user, chatId, (provider) =>
+        isModify
+          ? startModify(ctx, provider, { user, chatId, conversationId, request })
+          : startDelete(ctx, provider, { user, chatId, conversationId, request }),
+      );
       return;
     }
     case "list_events":
@@ -271,7 +295,12 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   const ok = await withCalendar(ctx, user, chatId, async (provider) => {
     if (action.kind === CREATE_CARD) await confirmCreate(ctx, provider, user, action as PendingAction<CreateCardPayload>, parsed.choice);
     else if (action.kind === MODIFY_CARD) await confirmModify(ctx, provider, user, action as Parameters<typeof confirmModify>[3], parsed.choice);
-    else if (action.kind === PICK_CARD) await confirmPick(ctx, provider, user, action as Parameters<typeof confirmPick>[3], parsed.choice);
+    else if (action.kind === DELETE_CARD) await confirmDelete(ctx, provider, user, action as Parameters<typeof confirmDelete>[3], parsed.choice);
+    else if (action.kind === PICK_CARD) {
+      const picked = await confirmPick(ctx, provider, user, action as Parameters<typeof confirmPick>[3], parsed.choice);
+      if (picked?.purpose === "modify") await proposeChange(ctx, provider, user, picked.chatId, action.conversationId, picked.event, picked.request);
+      if (picked?.purpose === "delete") await proposeDelete(ctx, provider, user, picked.chatId, action.conversationId, picked.event, picked.request);
+    }
   });
   // Карточка уже «done»: при сбое убираем кнопки, чтобы не было «Уже сделано» на несделанном (ревью 2026-10-05)
   if (!ok && action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale));

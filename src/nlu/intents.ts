@@ -28,6 +28,7 @@ export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
   | CreateEventIntent
   | ModifyEventIntent
+  | { name: "delete_event"; event?: string }
   | { name: "unsupported" }
   | { name: "multiple" };
 
@@ -89,6 +90,19 @@ export const TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "delete_event",
+      description: "Delete or cancel an EXISTING event: «удали встречу с Петей», «отмени планёрку в пятницу», «убери обед».",
+      parameters: {
+        type: "object",
+        properties: {
+          event: str("Which event, without date/time words: «встречу с Петей», «планёрку». Omit if referred to only as «её», «следующую»."),
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "unsupported",
       description: "The request is not about the user's calendar, or no other tool fits.",
       parameters: { type: "object", properties: {} },
@@ -109,7 +123,8 @@ Examples:
 "Перенеси встречу с Петей на пятницу" → modify_event {"event":"встречу с Петей"}
 "Сдвинь следующую встречу на час позже" → modify_event {"reference":"next"}
 "Переименуй её в Ревью дизайна" → modify_event {"reference":"last","new_title":"Ревью дизайна"}
-"Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)`;
+"Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)
+"Отмени встречу с Петей в пятницу" → delete_event {"event":"встречу с Петей"}`;
 
 export interface ParsedIntent {
   intent: Intent;
@@ -150,6 +165,10 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
       } as CreateEventIntent,
       ...usage,
     };
+  }
+  if (call?.name === "delete_event") {
+    const event = typeof call.arguments.event === "string" && call.arguments.event.trim() ? call.arguments.event.trim() : undefined;
+    return { intent: { name: "delete_event", ...(event ? { event } : {}) }, ...usage };
   }
   if (call?.name === "modify_event") {
     const a = call.arguments;

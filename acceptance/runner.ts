@@ -27,6 +27,7 @@ type Step =
   | { google_revoke: string }
   | { google_touch: { email: string; calendar: string; id: string } }
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
+  | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
   /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
   | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
   | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string; basic_auth?: string } }
@@ -268,6 +269,13 @@ async function runScenario(s: Scenario): Promise<void> {
       const last = list.at(-1);
       if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last patch id ${last?.id}, expected ${e.id}`);
       if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
+    } else if ("expect_google_deletes" in step) {
+      const e = step.expect_google_deletes;
+      const list = (await (await fetch(`${FAKES}/__fake/google/deletes`)).json()) as { id: string; sendUpdates: string | null }[];
+      if (e.count !== undefined && list.length !== e.count) throw new AssertionError(`${where}: ${list.length} deletes, expected ${e.count}`);
+      const last = list.at(-1);
+      if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last delete id ${last?.id}, expected ${e.id}`);
+      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
     } else if ("google_revoke" in step) {
       await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
     } else if ("llm" in step) {
@@ -312,7 +320,7 @@ async function runScenario(s: Scenario): Promise<void> {
         id: string;
         events?: { summary?: string; location?: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string } }[];
       }[];
-      const events = cals.find((c) => c.id === e.calendar)?.events ?? [];
+      const events = (cals.find((c) => c.id === e.calendar)?.events ?? []).filter((g) => (g as { status?: string }).status !== "cancelled");
       if (e.count !== undefined && events.length !== e.count) throw new AssertionError(`${where}: ${events.length} events in ${e.calendar}, expected ${e.count}`);
       const same = (got: { dateTime?: string; date?: string }, want: string) =>
         want.includes("T") ? !!got.dateTime && Date.parse(got.dateTime) === Date.parse(want) : got.date === want;
