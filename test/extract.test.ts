@@ -59,6 +59,6 @@ describe("extractRecurrenceSpan", () => {
   it.each(rdoc.cases.map((c) => [c.text, c] as const))("%s", (_t, c) => {
     const got = extractRecurrenceSpan(c.text, rdoc.defaults.now, rdoc.defaults.tz);
     if (c.span === null) expect(got).toBeUndefined();
-    else expect(got).toEqual({ span: c.span, rest: c.rest });
+    else expect(got && { span: got.span, rest: got.rest }).toEqual({ span: c.span, rest: c.rest });
   });
 });

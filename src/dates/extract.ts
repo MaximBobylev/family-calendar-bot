@@ -4,7 +4,7 @@
 // Незнакомое слово («с Петей», «банк») обрывает кусок — названия в даты не попадают.
 
 import { parseDateFragment } from "./index";
-import { FILLERS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
+import { FILLERS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
 import type { ParseResult, ValueKind } from "./types";
 
 export interface ExtractedSpans {
@@ -181,8 +181,10 @@ export function extractModifySpans(text: string, now: string, tz: string): Modif
 // --- Повторения (US-32) -------------------------------------------------------
 
 export interface RecurrenceSpan {
-  /** «каждый понедельник в 10», «по будням до конца года». */
+  /** «каждый понедельник в 10», «по будням до конца года» — правило для парсера (kind=recurrence). */
   span: string;
+  /** Слова сообщения, вошедшие в правило, — убрать из названия (если span собран, а не вырезан как есть). */
+  remove?: string[];
   /** Текст без правила — из него берутся длительность и название. */
   rest: string;
 }
@@ -211,5 +213,23 @@ export function extractRecurrenceSpan(text: string, now: string, tz: string): Re
       if (ok(fragment)) return { span: fragment, rest: [...ws.slice(0, i), ...ws.slice(j)].join(" ") };
     }
   }
-  return undefined;
+  return regularWeekday(text, now, tz);
+}
+
+/** «регулярную», «повторяющуюся», «еженедельную» встречу — признак серии, хотя день назван разово. */
+const REGULAR = /(?<!\p{L})(регулярн\p{L}*|повторяющ\p{L}*|еженедельн\p{L}*|recurring|regular|weekly)(?!\p{L})/iu;
+
+/**
+ * «Создай регулярную встречу на понедельник в 3 часа дня» (голос, 2026-10-05): маркер серии отдельно от даты.
+ * Если дата — день недели (с временем или без), правило = «каждый <день> …». Иначе не угадываем.
+ */
+function regularWeekday(text: string, now: string, tz: string): RecurrenceSpan | undefined {
+  const marker = REGULAR.exec(text)?.[1];
+  if (!marker) return undefined;
+  const point = extractDateSpans(text.replace(marker, " "), now, tz, "point").point;
+  if (!point || !point.split(/\s+/).some((w) => WEEKDAYS.has(w.toLowerCase()))) return undefined;
+  const span = `каждый ${point.replace(/^(на|в|во|on)\s+/i, "")}`;
+  if (!("recurrence" in parseDateFragment({ text: span, kind: "recurrence", now, tz }))) return undefined;
+  const rest = text.replace(marker, " ").replace(point, " ").replace(/\s+/g, " ").trim();
+  return { span, rest, remove: [marker, point] };
 }

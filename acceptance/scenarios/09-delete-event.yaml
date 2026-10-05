@@ -35,6 +35,9 @@
                 - { id: s1, summary: "Стендап", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO"], start: { dateTime: "2026-10-05T11:00:00+03:00" }, end: { dateTime: "2026-10-05T11:15:00+03:00" } }
                 - { id: s1_20261012, recurringEventId: s1, summary: "Стендап", start: { dateTime: "2026-10-12T11:00:00+03:00" }, end: { dateTime: "2026-10-12T11:15:00+03:00" } }
       - llm:
+          "Отмени только сегодняшний обед": { tool: delete_event, args: { event: "обед", scope: "this" } }
+          # Голос: Whisper разрезал «отмени» на «от Мини» — бот исправляет до разбора (fixTranscript)
+          "Обед отмени": { tool: delete_event, args: { event: "обед" } }
           "Удали обед в пятницу": { tool: delete_event, args: { event: "обед" } }
           "Отмени созвон с Петей": { tool: delete_event, args: { event: "созвон с Петей" } }
           "Удали встречу у клиента": { tool: delete_event, args: { event: "встречу у клиента" } }
@@ -174,3 +177,25 @@
         - { text_contains: ["Удалить?"] }
         - { method: editMessageText, text_contains: ["Отменено"] }
     - expect_google_deletes: { count: 0 }
+
+- id: delete-named-day-empty-suggests-other-day
+  story: US-50
+  steps:
+    - *setup
+    # Сегодня (ср, 7 октября) обеда нет — бот находит его в пятницу и спрашивает, а не отвечает «не нашёл»
+    - telegram: { from: 1001, text: "Отмени только сегодняшний обед" }
+    - expect_telegram:
+        - { text_contains: ["В этот день «обед» нет. Нашёл в другие дни — эту?"], buttons: ["пт, 9 октября, 13:00–14:00 — Обед", "Отмена"] }
+    - press: "пт, 9 октября, 13:00–14:00 — Обед"
+    - expect_telegram:
+        - { method: editMessageText }
+        - { text_contains: ["Удалить", "<b>Обед</b>"] }
+
+- id: delete-by-voice-with-whisper-split-verb
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Обед от Мини" }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Обед отмени</i>"] }
+        - { text_contains: ["Удалить", "<b>Обед</b>"] }

@@ -42,7 +42,7 @@ import { escapeHtml, telegramName } from "./format";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
 import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, sendReconnect, showSettings } from "./settings";
-import { isEmptySpeech, transcribeChain, type Transcript } from "../stt/whisper";
+import { fixTranscript, isEmptySpeech, transcribeChain, type Transcript } from "../stt/whisper";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
@@ -263,7 +263,7 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       const durationText = spans.duration ?? intent.duration;
       const title = cleanTitle(
         intent.title,
-        [rec?.span, rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x),
+        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x),
       );
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
@@ -384,9 +384,11 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
     await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
     return null;
   }
+  // Известные ошибки Whisper («от Мини» → «отмени»); показываем уже исправленное — то, что бот понял
+  const heard = fixTranscript(transcript.text);
   // Показываем, что услышали, — до долгой обработки (US-10)
-  await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(transcript.text) }), undefined, { html: true });
-  return transcript.text;
+  await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(heard) }), undefined, { html: true });
+  return heard;
 }
 
 const LIMIT_MESSAGES = {

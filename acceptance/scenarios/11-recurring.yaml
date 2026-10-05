@@ -22,6 +22,8 @@
           "Каждый год 3 марта день рождения мамы": { tool: create_event, args: { start: "Каждый год 3 марта", title: "День рождения мамы", all_day: true } }
           "Отчёт в последнюю пятницу месяца в 17": { tool: create_event, args: { start: "в последнюю пятницу месяца в 17", title: "Отчёт" } }
           "Поставь встречу в понедельник в 10": { tool: create_event, args: { start: "в понедельник в 10" } }
+          # Голос, 2026-10-05: маркер серии отдельно от дня недели; так ответила живая модель
+          "Создай регулярную встречу на понедельник в 3 часа дня название «Рисование Аня».": { tool: create_event, args: { start: "понедельник в 3 часа дня", title: "Рисование Аня" } }
     - telegram: { from: 1001, text: "Каждый понедельник в 10 планёрка" }
     - expect_telegram:
         - text_contains: ["Создать повторяющееся событие?", "<b>Планёрка</b>", "🔁 Каждый понедельник, 10:00–11:00", "Ближайшие: пн, 12 октября · пн, 19 октября · пн, 26 октября"]
@@ -176,3 +178,18 @@
     - expect_telegram:
         - text_contains: ["Создать событие?", "🕒 пн, 12 октября, 10:00–11:00"]
           text_not_contains: ["🔁"]
+
+- id: recurring-regular-marker-with-weekday
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Создай регулярную встречу на понедельник в 3 часа дня название «Рисование Аня»." }
+    - expect_telegram:
+        - text_contains: ["Создать повторяющееся событие?", "<b>Рисование Аня</b>", "🔁 Каждый понедельник, 15:00–16:00", "Ближайшие: пн, 12 октября · пн, 19 октября · пн, 26 октября"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Рисование Аня", start: "2026-10-12T15:00:00+03:00", end: "2026-10-12T16:00:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO"] }]

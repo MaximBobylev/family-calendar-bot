@@ -90,6 +90,16 @@ async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Tra
   };
 }
 
+/**
+ * Известные ошибки Whisper в командах — только явный список (как опечатки в парсере дат), без нечёткой правки:
+ * «Рисование Аня от Мини» (голос, 2026-10-05) — «отмени», разрезанное на два слова.
+ */
+const TRANSCRIPT_FIXES: [RegExp, string][] = [[/(?<!\p{L})от\s+м[еи]н[иь](?!\p{L})/giu, "отмени"]];
+
+export function fixTranscript(text: string): string {
+  return TRANSCRIPT_FIXES.reduce((t, [re, to]) => t.replace(re, to), text);
+}
+
 /** Типичные «галлюцинации» Whisper на тишине и шуме — считаем, что ничего не сказано (US-10). */
 const HALLUCINATIONS = [
   /^продолжение следует/i,

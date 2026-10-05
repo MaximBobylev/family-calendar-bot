@@ -54,7 +54,7 @@ async function findCandidates(
   user: User,
   conversationId: string,
   req: EventRequest,
-): Promise<{ events: CalendarEvent[]; fuzzy: boolean }> {
+): Promise<{ events: CalendarEvent[]; fuzzy: boolean; elsewhere?: boolean }> {
   const tz = user.home_tz;
   const nowUtc = ctx.clock.now();
   const now = utcToLocal(nowUtc, tz);
@@ -100,6 +100,18 @@ async function findCandidates(
     if (events.length === 0 && req.spans.reference) {
       events = inWindow.filter((e) => !e.allDay);
       fuzzy = events.length > 0;
+      // В этот день вообще пусто — поискать по названию в ближайшие дни («сегодняшнее рисование», а оно в понедельник)
+      if (!fuzzy) {
+        const ahead = (await provider.listEvents(localToUtc({ day: now.day, minutes: 0 }, tz), localToUtc({ day: now.day + SEARCH_DAYS, minutes: 0 }, tz), tz))
+          .events;
+        const scored = ahead.map((e) => ({ e, s: titleScore(req.query!, e.title) })).filter((x) => x.s > 0);
+        const top = Math.max(0, ...scored.map((x) => x.s));
+        const found = scored.filter((x) => x.s === top).map((x) => x.e);
+        if (found.length) {
+          const key = (e: CalendarEvent) => (e.start ? localToUtc(e.start, tz) : e.startDay * DAY_MS);
+          return { events: found.sort((a, b) => key(a) - key(b)).slice(0, MAX_CANDIDATES), fuzzy: false, elsewhere: true };
+        }
+      }
     }
   }
   if (req.reference === "next" || (!req.spans.reference && !exact)) {
@@ -126,13 +138,14 @@ export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a
   const { user, chatId } = a;
   const locale = user.locale;
   const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
-  const { events: candidates, fuzzy } = await findCandidates(ctx, provider, user, a.conversationId, a.request);
+  const { events: candidates, fuzzy, elsewhere } = await findCandidates(ctx, provider, user, a.conversationId, a.request);
 
   if (candidates.length === 0) {
     await ctx.telegram.sendMessage(chatId, a.request.query ? t("eventNotFound", locale, { query: a.request.query }) : t("eventNotFoundGeneric", locale));
     return null;
   }
-  if (candidates.length === 1 && !fuzzy) return candidates[0]!;
+  // Найдено в другой день — только с подтверждением, даже если одно
+  if (candidates.length === 1 && !fuzzy && !elsewhere) return candidates[0]!;
   if (candidates.length > MAX_CANDIDATES) {
     await ctx.telegram.sendMessage(chatId, t("tooManyCandidates", locale, { n: String(candidates.length) }));
     return null;
@@ -148,7 +161,12 @@ export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a
     ...candidates.map((c, i) => [{ text: eventLabel(c, today, locale).slice(0, 60), callback_data: callbackData(id, `e${i}`) }]),
     [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
   ];
-  const header = fuzzy && a.request.query ? t("notFoundSuggest", locale, { query: a.request.query }) : t("whichEvent", locale);
+  const header =
+    elsewhere && a.request.query
+      ? t("foundOtherDay", locale, { query: a.request.query })
+      : fuzzy && a.request.query
+        ? t("notFoundSuggest", locale, { query: a.request.query })
+        : t("whichEvent", locale);
   const sent = await ctx.telegram.sendMessage(chatId, header, { inline_keyboard: buttons });
   await attachMessage(ctx.db, id, sent.message_id);
   return null;
