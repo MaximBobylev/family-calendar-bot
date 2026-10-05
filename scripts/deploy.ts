@@ -55,17 +55,24 @@ if (!url) throw new Error("could not find workers.dev URL in wrangler deploy out
 const workersAi = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`;
 const llmChain: Record<string, unknown>[] = [];
 const openrouterKey = env.OPENROUTER_API_KEY?.trim();
+// Бесплатные модели OpenRouter часто перегружены у провайдера (429 «rate-limited upstream», 2026-10-05) —
+// несколько моделей через запятую, каждая — звено цепочки
+const OPENROUTER_DEFAULT = "google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3-super-120b-a12b:free";
 if (openrouterKey) {
-  const model = env.OPENROUTER_MODEL?.trim() || "google/gemma-4-26b-a4b-it:free";
-  llmChain.push({
-    name: "openrouter",
-    baseUrl: "https://openrouter.ai/api/v1",
-    apiKey: openrouterKey,
-    model,
-    // Gemma 4 с «размышлением» отвечает 5–6 с (docs/research/llm-intents-eval.md)
-    extraBody: { reasoning: { enabled: false } },
-    ...(model.endsWith(":free") ? { inPerM: 0, outPerM: 0 } : {}),
-  });
+  for (const model of (env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT)
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean)) {
+    llmChain.push({
+      name: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      apiKey: openrouterKey,
+      model,
+      // Gemma 4 с «размышлением» отвечает 5–6 с (docs/research/llm-intents-eval.md)
+      extraBody: { reasoning: { enabled: false } },
+      ...(model.endsWith(":free") ? { inPerM: 0, outPerM: 0 } : {}),
+    });
+  }
 }
 llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8" });
 
