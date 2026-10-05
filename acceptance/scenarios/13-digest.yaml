@@ -1,0 +1,140 @@
+# US-70: утренний дайджест «Сегодня». По умолчанию — включён, 08:00 по поясу пользователя.
+# Подключение — ср 7 октября 2026, 10:00 МСК; первая сводка — чт 8 октября 08:00 МСК (05:00Z).
+
+- id: digest-sent-every-morning
+  story: US-70
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              events:
+                - { id: f1, summary: "Ужин у мамы", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+    - clock: "2026-10-08T04:59:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    # Страховка раз в час не создаёт вторую сводку
+    - hourly: true
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - text_contains: ["☀️ Доброе утро! Вот что сегодня:", "Сегодня, чт, 8 октября", "10:00–11:00  Планёрка", "19:00–21:00  Ужин у мамы", "Семья"]
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T05:00:30Z"
+    - tick: true
+    - expect_telegram:
+        - text_contains: ["Доброе утро", "Сегодня, пт, 9 октября", "Встреч нет"]
+
+- id: digest-custom-time-then-off
+  story: US-70
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "☀️ Сводка"
+    - press: "07:00"
+    - expect_telegram:
+        - { text_contains: ["☀️ Утренняя сводка: в 08:00"] }
+        - { method: editMessageText, text_contains: ["Утренняя сводка</b>", "(Europe/Moscow)"], buttons: ["06:00", "06:30", "07:00", "07:30", "✓ 08:00", "08:30", "09:00", "09:30", "10:00", "Другое время…", "Выключить", "← Назад"] }
+        - { method: editMessageText, text_contains: ["☀️ Утренняя сводка: в 07:00"] }
+    - clock: "2026-10-08T04:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Доброе утро", "Планёрка"] }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "☀️ Сводка"
+    - press: "Выключить"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, buttons: ["06:00", "06:30", "✓ 07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00", "Другое время…", "Выключить", "← Назад"] }
+        - { method: editMessageText, text_contains: ["☀️ Утренняя сводка: выключена"] }
+    - clock: "2026-10-09T04:00:00Z"
+    - tick: true
+    - clock: "2026-10-09T05:00:00Z"
+    - tick: true
+    - hourly: true
+    - tick: true
+    - expect_no_telegram: true
+
+- id: digest-time-typed
+  story: US-70
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "☀️ Сводка"
+    - press: "Другое время…"
+    - telegram: { from: 1001, text: "в восемь" }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "☀️ Сводка"
+    - press: "Другое время…"
+    - telegram: { from: 1001, text: "7:45" }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText }
+        - { text_contains: ["Во сколько присылать сводку?"] }
+        - { text_contains: ["Не понял время «в восемь»"] }
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText }
+        - { text_contains: ["Во сколько присылать сводку?"] }
+        - { text_contains: ["Утренняя сводка — каждый день в 07:45."] }
+    - clock: "2026-10-08T04:45:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Доброе утро"] }
+
+- id: digest-follows-time-zone
+  story: US-70
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🌍 Пояс"
+    - press: "Тбилиси"
+    # 08:00 в Тбилиси (UTC+4) — 04:00Z
+    - clock: "2026-10-08T04:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText }
+        - { method: editMessageText }
+        - { text_contains: ["Доброе утро", "Сегодня, чт, 8 октября"] }
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: digest-too-late-is-skipped
+  story: US-70
+  steps:
+    - *setup
+    # Воркер «лежал» 4 часа: утреннюю сводку в обед не шлём, завтрашняя — по расписанию
+    - clock: "2026-10-08T09:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Доброе утро", "Сегодня, пт, 9 октября"] }
+
+- id: digest-silent-when-access-revoked
+  story: US-70
+  steps:
+    - *setup
+    - google_revoke: ivan@gmail.com
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T05:00:00Z"
+    - tick: true
+    - expect_no_telegram: true

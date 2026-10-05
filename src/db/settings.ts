@@ -8,9 +8,14 @@ export interface UserSettings {
   reminders?: number[];
   /** Для событий на весь день, минуты до полуночи дня события. Нет — без напоминаний (US-04). */
   allDayReminders?: number[];
+  /** Утренний дайджест «Сегодня» (US-70) выключен. По умолчанию — включён. */
+  digestOff?: boolean;
+  /** Время дайджеста «ЧЧ:ММ» по поясу пользователя. Нет — 08:00. */
+  digestTime?: string;
 }
 
 export const DEFAULT_DURATION_MIN = 60;
+export const DEFAULT_DIGEST_TIME = "08:00";
 
 export function parseSettings(json: string | null | undefined): UserSettings {
   try {

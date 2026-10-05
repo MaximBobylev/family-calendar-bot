@@ -21,6 +21,12 @@ export async function findUserByTelegramId(db: D1Database, telegramId: number): 
   return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
 }
 
+export async function findUserById(db: D1Database, id: string): Promise<User | null> {
+  const row = await db.prepare("SELECT id, locale, home_tz, settings_json FROM users WHERE id = ?").bind(id)
+    .first<{ id: string; locale: string; home_tz: string; settings_json: string }>();
+  return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
+}
+
 /** Находит или создаёт пользователя для Telegram-аккаунта. Новому пользователю выдаётся entitlement `comp`. */
 export async function ensureTelegramUser(
   db: D1Database,

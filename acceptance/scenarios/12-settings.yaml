@@ -29,7 +29,8 @@
             - "🔔 Напоминания: как в Google"
             - "🔔 Для событий на весь день: без напоминаний"
             - "🗣 Язык: русский"
-          buttons: ["🗓 Календари", "🌍 Пояс", "⏱ Длительность", "🔔 Напоминания", "🔔 Весь день", "🗣 English"]
+            - "☀️ Утренняя сводка: в 08:00"
+          buttons: ["🗓 Календари", "🌍 Пояс", "⏱ Длительность", "🔔 Напоминания", "🔔 Весь день", "☀️ Сводка", "🗣 English"]
 
 - id: settings-default-duration
   story: US-04
@@ -177,5 +178,5 @@
     - press: "🗣 English"
     - expect_telegram:
         - { text_contains: ["Настройки"] }
-        - { method: editMessageText, text_contains: ["⚙️ <b>Settings</b>", "🗣 Language: English", "Reminders: as in Google"], buttons: ["🗓 Calendars", "🌍 Time zone", "⏱ Length", "🔔 Reminders", "🔔 All-day", "🗣 Русский"] }
+        - { method: editMessageText, text_contains: ["⚙️ <b>Settings</b>", "🗣 Language: English", "Reminders: as in Google"], buttons: ["🗓 Calendars", "🌍 Time zone", "⏱ Length", "🔔 Reminders", "🔔 All-day", "☀️ Summary", "🗣 Русский"] }
     - expect_callback_answer: { text_contains: ["Saved"] }

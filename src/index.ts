@@ -7,7 +7,8 @@ import { loadConfig } from "./config";
 import { acceptUpdate, isUnfinished, type InboxMessage } from "./inbox";
 import { gateUpdate, replyToOutsider } from "./bot/gate";
 import { processInboxUpdate } from "./process";
-import { cleanup, tick } from "./scheduler";
+import { cleanup, runQueuedJob, tick, type JobMessage } from "./scheduler";
+import { ensureDigests } from "./jobs/digest";
 import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
 import { adminPage, checkAdminAuth, timingSafeEqual } from "./admin";
@@ -83,6 +84,12 @@ export default {
   async queue(batch, env): Promise<void> {
     const ctx = await context(env);
     for (const msg of batch.messages) {
+      // Задачи планировщика (tech-debt #14): ошибки и повторы — внутри runQueuedJob, сообщение подтверждаем
+      if ("jobId" in msg.body) {
+        await runQueuedJob(ctx, msg.body.jobId).catch((e) => console.error("job run failed", msg.body, e));
+        msg.ack();
+        continue;
+      }
       try {
         const outcome = await processInboxUpdate(ctx, msg.body.updateId);
         // Ещё обрабатывается (waitUntil жив) — проверим позже, а не теряем молча (ревью 2026-10-05)
@@ -97,8 +104,13 @@ export default {
 
   async scheduled(_controller, env): Promise<void> {
     const ctx = await context(env);
-    await tick(ctx.db, ctx.clock.now());
-    // Ретеншн раз в час (privacy-политика, ADR-0005)
-    if (new Date(ctx.clock.now()).getUTCMinutes() === 7) await cleanup(ctx.db, ctx.clock.now());
+    await tick(ctx.db, ctx.clock.now(), async (jobs, delays) => {
+      await env.INBOX.sendBatch(jobs.map((j, i) => ({ body: { jobId: j.id } satisfies JobMessage, delaySeconds: delays[i]! })));
+    });
+    // Раз в час: ретеншн (privacy-политика, ADR-0005) и страховка дайджестов (US-70)
+    if (new Date(ctx.clock.now()).getUTCMinutes() === 7) {
+      await cleanup(ctx.db, ctx.clock.now());
+      await ensureDigests(ctx.db, ctx.clock.now());
+    }
   },
-} satisfies ExportedHandler<Env, InboxMessage>;
+} satisfies ExportedHandler<Env, InboxMessage | JobMessage>;

@@ -1,6 +1,7 @@
 // Тестовые эндпоинты (ADR-0006). Доступны только при TEST_MODE=true — в проде маршрутов нет.
 //   POST /__test/clock  {"now": "2026-10-07T07:00:00Z"} — установить «сейчас»
-//   POST /__test/tick   — выполнить планировщик до текущего «сейчас»
+//   POST /__test/tick   — выполнить планировщик до текущего «сейчас» (задачи — сразу, без очереди)
+//   POST /__test/hourly — часовые работы cron: ретеншн и страховка дайджестов
 //   POST /__test/drain  — синхронно обработать все апдейты из inbox
 //   POST /__test/reset  — очистить состояние
 
@@ -8,7 +9,8 @@ import type { AppContext } from "../bot/context";
 import { setTestClock } from "../clock";
 import { pendingUpdateIds } from "../inbox";
 import { processInboxUpdate } from "../process";
-import { cleanup, tick } from "../scheduler";
+import { ensureDigests } from "../jobs/digest";
+import { cleanup, runQueuedJob, tick } from "../scheduler";
 
 const TABLES = [
   "test_state", "feature_usage", "usage_events", "entitlements", "scheduled_jobs", "inbox", "pending_actions",
@@ -28,7 +30,16 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
       return Response.json({ ok: true, now: new Date(ms).toISOString() });
     }
     case "/__test/tick":
-      return Response.json({ ok: true, jobs: await tick(ctx.db, ctx.clock.now()) });
+      return Response.json({
+        ok: true,
+        jobs: await tick(ctx.db, ctx.clock.now(), async (jobs) => {
+          for (const j of jobs) await runQueuedJob(ctx, j.id);
+        }),
+      });
+    case "/__test/hourly":
+      await cleanup(ctx.db, ctx.clock.now());
+      await ensureDigests(ctx.db, ctx.clock.now());
+      return Response.json({ ok: true });
     case "/__test/cleanup":
       await cleanup(ctx.db, ctx.clock.now());
       return Response.json({ ok: true });

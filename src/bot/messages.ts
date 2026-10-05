@@ -189,6 +189,20 @@ const messages = {
     ru: "Отклонение приглашения отменить нельзя — примите приглашение в Google Календаре.",
     en: "Declining can't be undone here — accept the invitation in Google Calendar.",
   },
+  // --- Утренний дайджест (US-70) ---
+  digestGreeting: { ru: "☀️ Доброе утро! Вот что сегодня:", en: "☀️ Good morning! Here is your day:" },
+  settingsDigest: { ru: "☀️ Утренняя сводка: в {time}", en: "☀️ Morning summary: at {time}" },
+  settingsDigestOff: { ru: "☀️ Утренняя сводка: выключена", en: "☀️ Morning summary: off" },
+  settingsDigestButton: { ru: "☀️ Сводка", en: "☀️ Summary" },
+  settingsChooseDigest: {
+    ru: "☀️ <b>Утренняя сводка</b> — события на сегодня, каждый день в выбранное время ({tz}). Если встреч нет, так и напишу.",
+    en: "☀️ <b>Morning summary</b> — today's events, every day at the chosen time ({tz}). If the day is free, I'll say so.",
+  },
+  settingsDigestDisable: { ru: "Выключить", en: "Turn off" },
+  settingsOtherTime: { ru: "Другое время…", en: "Other time…" },
+  settingsAskDigestTime: { ru: "Во сколько присылать сводку? Например: 7:45", en: "What time should I send it? E.g. 7:45" },
+  settingsDigestSet: { ru: "Утренняя сводка — каждый день в {time}.", en: "Morning summary — every day at {time}." },
+  settingsTimeUnknown: { ru: "Не понял время «{value}». Напишите, например, 7:45 — или выберите в /settings.", en: "I didn't get the time “{value}”. Type e.g. 7:45, or pick one in /settings." },
   // --- /settings (US-04, US-06, US-07, US-42) ---
   settingsTitle: { ru: "⚙️ <b>Настройки</b>", en: "⚙️ <b>Settings</b>" },
   settingsCalendar: { ru: "🗓 Календарь по умолчанию: {value}", en: "🗓 Default calendar: {value}" },

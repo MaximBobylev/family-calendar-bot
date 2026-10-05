@@ -2,6 +2,7 @@
 //   GET /oauth/google/start?state=…     → редирект на экран согласия Google
 //   GET /oauth/google/callback?code|error&state → обмен кода, сохранение, сообщение в Telegram
 
+import { rescheduleDigest } from "./jobs/digest";
 import type { AppContext } from "./bot/context";
 import { connectKeyboard } from "./bot/keyboards";
 import { t } from "./bot/messages";
@@ -62,6 +63,8 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
         calendars,
         now: ctx.clock.now(),
       });
+      // Утренний дайджест — по поясу из Google (US-70)
+      await rescheduleDigest(ctx.db, userId, ctx.clock.now());
       if (chatId) await ctx.telegram.sendMessage(chatId, t("connected", locale, { email: linked.email, tz: linked.timeZone }));
       return page(t("oauthDonePage", locale));
     } catch (e) {
