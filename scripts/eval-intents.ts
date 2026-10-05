@@ -4,7 +4,7 @@
 //
 // Запуск (секреты есть только в сервисе deploy):
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-intents.ts \
-//     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8 --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
+//     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8,or:google/gemma-4-26b-a4b-it --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
 //     [--concurrency 4] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
 
@@ -201,11 +201,23 @@ async function withRetry<T>(f: () => Promise<T>): Promise<T> {
 
 async function runOne(variant: string, model: string, c: Case, rep: number): Promise<Run> {
   const v = VARIANTS[variant]!;
-  const cfg = {
-    baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`,
-    apiKey: process.env.LLM_API_KEY ?? "",
-    model,
-  };
+  // «or:<модель>» — OpenRouter (без «размышления», как в проде); «gg:<модель>» — Google AI Studio (OpenAI-совместимый
+  // эндпоинт Gemini API); иначе — Workers AI
+  const cfg = model.startsWith("gg:")
+    ? {
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+        apiKey: process.env.GEMINI_API_KEY ?? "",
+        model: model.slice(3),
+        ...(process.env.GG_EXTRA ? { extraBody: JSON.parse(process.env.GG_EXTRA) } : {}),
+      }
+    : model.startsWith("or:")
+      ? {
+          baseUrl: "https://openrouter.ai/api/v1",
+          apiKey: process.env.OPENROUTER_API_KEY ?? "",
+          model: model.slice(3),
+          extraBody: { reasoning: { enabled: false }, ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}) },
+        }
+      : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
   let ms = 0;
   try {

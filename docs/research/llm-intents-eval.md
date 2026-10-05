@@ -114,3 +114,17 @@ docker compose run --rm --entrypoint npx test tsx scripts/eval-intents.ts --repo
 ```
 
 Варианты промпта лежат в `scripts/nlu-variants.ts`. A — копия промпта до замера, E — ссылка на текущий `SYSTEM_PROMPT`. Учитывайте суточный лимит: прогон в 1000 вызовов на Qwen — это около 10 тыс. neurons, весь лимит Free.
+
+
+## Дополнение 2026-10-05: OpenRouter и Google AI Studio
+
+| Модель | Где | Прогонов | Все поля | Название | Календарь | p50 / p95, мс | Заметки |
+|---|---|---|---|---|---|---|---|
+| gemma-4-26b-a4b-it (платная) | OpenRouter, reasoning off | 124×3 | **97,3%** | 98,6% | 95,2% | 4 099 / 6 986 | ≈ $0.0002 за команду; `provider.sort` latency/throughput — p50 3,6–4,4 с, не лучше |
+| gemma-4-26b-a4b-it:free, gemma-4-31b-it:free | OpenRouter | — | — | — | — | — | 429 «rate-limited upstream» (общий пул бесплатной модели) |
+| nemotron-3-super-120b-a12b:free | OpenRouter | 1 | верно (вкл. календарь) | | | 1 442 | запасной в цепочке |
+| gemma-4-26b-a4b-it | Google AI Studio (OpenAI-совместимый) | — | — | — | — | > 15 000 (таймаут) | по умолчанию «думает»; затем 429 — квота бесплатного тарифа исчерпана |
+| gemini-3.1-flash-lite | Google AI Studio | 1 | верно (вкл. календарь) | | | 3 974 | затем 503 «high demand» |
+
+Решение: первой в цепочке — платная Gemma 4 26B через OpenRouter (качество), затем бесплатный Nemotron, затем Workers AI. Прямой Google — перемерить на платном тарифе (биллинг в проекте AI Studio: выше лимиты, данные не идут на обучение) с отключённым размышлением; для мультимодального трека — тот же ключ.
+Скрипт: `scripts/eval-intents.ts --models or:<модель>,gg:<модель>`; `OR_SORT`, `GG_EXTRA` — доп. параметры запроса.

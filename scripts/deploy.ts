@@ -57,7 +57,8 @@ const llmChain: Record<string, unknown>[] = [];
 const openrouterKey = env.OPENROUTER_API_KEY?.trim();
 // Бесплатные модели OpenRouter часто перегружены у провайдера (429 «rate-limited upstream», 2026-10-05) —
 // несколько моделей через запятую, каждая — звено цепочки
-const OPENROUTER_DEFAULT = "google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3-super-120b-a12b:free";
+// Платная Gemma 4 26B — лучшая в замерах (97,3% полей, 2026-10-05), ≈ $0.0002 за команду; бесплатный Nemotron — запасной
+const OPENROUTER_DEFAULT = "google/gemma-4-26b-a4b-it,nvidia/nemotron-3-super-120b-a12b:free";
 if (openrouterKey) {
   for (const model of (env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT)
     .split(",")
