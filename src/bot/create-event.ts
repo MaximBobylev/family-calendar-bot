@@ -276,6 +276,7 @@ export async function confirmCreate(
   if (!o) return;
 
   const created = await provider.createEvent({
+    idempotencyKey: `${action.id}${choice.slice(1)}`,
     calendarId: o.calendarId, title: o.title, tz: o.tz, allDay: o.allDay, startDay: o.startDay, endDay: o.endDay,
     ...(o.start ? { start: o.start } : {}), ...(o.end ? { end: o.end } : {}), ...(o.location ? { location: o.location } : {}),
   });

@@ -1,5 +1,6 @@
 // Google OAuth (US-02, ADR-0001): ссылка согласия и обмен кода на токены.
 
+import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
 
 /** Минимальные scopes (ADR-0001 п.4). */
@@ -35,7 +36,7 @@ export interface TokenResponse {
 }
 
 export async function exchangeCode(config: Config, code: string): Promise<TokenResponse> {
-  const res = await fetch(`${config.googleOAuthBase}/token`, {
+  const res = await fetchWithTimeout(`${config.googleOAuthBase}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -45,7 +46,7 @@ export async function exchangeCode(config: Config, code: string): Promise<TokenR
       redirect_uri: redirectUri(config),
       grant_type: "authorization_code",
     }),
-  });
+  }, TIMEOUTS.google);
   if (!res.ok) throw new Error(`google token exchange failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as TokenResponse;
 }

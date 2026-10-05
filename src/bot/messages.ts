@@ -145,6 +145,8 @@ const messages = {
   eventChangedMeanwhile: { ru: "Встречу уже изменили — проверьте и повторите команду.", en: "The event was changed meanwhile — please check and try again." },
   modified: { ru: "✅ Изменено", en: "✅ Updated" },
   wholeSeriesChanged: { ru: "↻ Изменена вся серия.", en: "↻ The whole series was updated." },
+  internalError: { ru: "Что-то пошло не так. Попробуйте ещё раз.", en: "Something went wrong. Please try again." },
+  actionFailed: { ru: "⚠️ Не получилось — ничего не изменено. Повторите команду.", en: "⚠️ That failed — nothing was changed. Please repeat the command." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

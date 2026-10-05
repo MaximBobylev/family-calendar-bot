@@ -10,7 +10,7 @@ const PRICE = {
   sttPerMin: 0.0005, // Whisper large-v3-turbo
 };
 
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a);
   const y = new TextEncoder().encode(b);
   let diff = x.length ^ y.length;
@@ -139,5 +139,5 @@ ${table(["Время", "update_id", "Попыток", "Ошибка"], failures.
 <h2>Журнал распознанного (последние 50)</h2>
 ${table(["Время", "Тип", "Текст", "Результат", "Итог"], journal.results.map((j) => [fmtTime(j.created_at), j.kind, j.text ?? "", { html: `<code>${esc((j.result_json ?? "").slice(0, 300))}</code>` }, j.outcome]))}
 </body></html>`;
-  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex" } });
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex", "x-frame-options": "DENY", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'" } });
 }

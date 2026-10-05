@@ -1,4 +1,4 @@
-// Деплой в Cloudflare. Запуск: docker compose run --rm test npm run deploy:prod
+// Деплой в Cloudflare. Запуск: docker compose run --rm deploy
 // Значения берутся из окружения (.env подключается compose). Секреты в вывод не печатаются.
 //
 // 1. Миграции D1 (remote)
@@ -29,6 +29,13 @@ function wrangler(args: string[], opts: { capture?: boolean } = {}): string {
 
 const accountId = need("CLOUDFLARE_ACCOUNT_ID");
 need("CLOUDFLARE_API_TOKEN");
+
+// 0. Проверки до выкладки
+for (const [cmd, args] of [["npm", ["run", "-s", "typecheck"]], ["npx", ["vitest", "run"]]] as const) {
+  console.log(`\n$ ${cmd} ${args.join(" ")}`);
+  const r = spawnSync(cmd, [...args], { stdio: "inherit" });
+  if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed — deploy aborted`);
+}
 
 // 1. Миграции
 wrangler(["d1", "migrations", "apply", "DB", "--remote"]);
@@ -72,8 +79,10 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
   body: JSON.stringify({
     url: `${url}/telegram/webhook`,
     secret_token: secrets.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "edited_message", "callback_query"],
-    drop_pending_updates: true,
+    // edited_message не подписываем: игнорируется, но тратил бы квоты
+    allowed_updates: ["message", "callback_query"],
+    // Не сбрасываем: после неудачного деплоя там как раз ждут сообщения пользователей
+    drop_pending_updates: false,
   }),
 });
 const tg = (await res.json()) as { ok: boolean; description?: string };

@@ -22,9 +22,9 @@ docker compose up dev                             # wrangler dev (окружен
 
 ## Эксплуатация
 
-- Деплой: `docker compose run --rm test npm run deploy` (миграции, код, секреты из `.env`, webhook).
+- Деплой: `docker compose run --rm deploy` (проверки, миграции, код, секреты из `.env`, webhook). Боевые секреты видит только сервис `deploy`.
 - Статистика: `https://<воркер>/admin` — логин/пароль `ADMIN_USER` / `ADMIN_PASSWORD` из `.env`.
-- Проверка интентов на реальной модели: `docker compose run --rm test npx tsx scripts/probe-intents.ts "фраза" …`.
+- Проверка интентов на реальной модели: `docker compose run --rm deploy npx tsx scripts/probe-intents.ts "фраза" …`.
 
 ## Структура
 

@@ -18,8 +18,8 @@ export interface TgMessage {
   chat: TgChat;
   from?: TgUser;
   text?: string;
-  voice?: { file_id: string; duration: number; mime_type?: string };
-  audio?: { file_id: string; duration: number; mime_type?: string };
+  voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
+  audio?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   reply_to_message?: { message_id: number };
   forward_origin?: unknown;
 }

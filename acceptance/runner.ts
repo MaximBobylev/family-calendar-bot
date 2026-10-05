@@ -129,8 +129,10 @@ const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatActi
 class AssertionError extends Error {}
 
 async function runScenario(s: Scenario): Promise<void> {
-  await post(`${SUT}/__test/reset`, {});
-  await post(`${FAKES}/__fake/reset`, {});
+  for (const url of [`${SUT}/__test/reset`, `${FAKES}/__fake/reset`]) {
+    const res = await post(url, {});
+    if (!res.ok) throw new AssertionError(`reset ${url} → ${res.status}`);
+  }
   let updateId = 1000;
   let seen = 0; // сколько вызовов Telegram уже проверено
 
@@ -332,6 +334,9 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);
+    } else {
+      // Опечатка в YAML не должна давать зелёный тест
+      throw new AssertionError(`${where}: unknown step ${JSON.stringify(Object.keys(step))}`);
     }
   }
 }

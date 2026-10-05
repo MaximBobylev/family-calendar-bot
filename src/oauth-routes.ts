@@ -9,12 +9,13 @@ import { encryptSecret, sha256Hex } from "./crypto";
 import { consumeOAuthState, saveGoogleAccount, telegramChatOf, userLocale } from "./db/accounts";
 import { listCalendars } from "./google/calendar-api";
 import { consentUrl, exchangeCode } from "./google/oauth";
+import { SECURITY_HEADERS } from "./pages";
 
 function page(text: string, status = 200): Response {
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Calendar Assist Bot</title></head><body style="font:18px system-ui;margin:3em auto;max-width:28em;padding:0 1em">
 <p>${text.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]!)}</p></body></html>`;
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", ...SECURITY_HEADERS } });
 }
 
 export async function handleOAuthRoute(ctx: AppContext, request: Request, url: URL): Promise<Response> {

@@ -1,7 +1,13 @@
 // Публичные страницы для экрана согласия Google: домашняя, политика конфиденциальности, условия.
 // ЗАГЛУШКИ на время закрытой беты — перед публичным релизом заменить полноценными (roadmap.md, R3).
 
-const UPDATED = "4 октября 2026";
+const UPDATED = "5 октября 2026";
+
+export const SECURITY_HEADERS = {
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+};
 
 function layout(title: string, body: string): Response {
   const html = `<!doctype html>
@@ -25,7 +31,7 @@ function layout(title: string, body: string): Response {
 ${body}
 </body>
 </html>`;
-  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" } });
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600", ...SECURITY_HEADERS } });
 }
 
 const homepage = () =>
@@ -58,6 +64,7 @@ const privacy = () =>
 <h2>Как мы используем данные</h2>
 <ul>
   <li>Только чтобы выполнять ваши команды: показывать расписание, создавать, изменять и удалять события, присылать дайджесты и напоминания.</li>
+  <li>Голосовые сообщения распознаются моделью речи (Cloudflare Workers AI, Whisper); аудио после распознавания не хранится.</li>
   <li>Текст команды обрабатывается языковой моделью (Cloudflare Workers AI), чтобы понять, что нужно сделать.</li>
   <li>Мы не продаём данные, не используем их для рекламы и не передаём третьим лицам, кроме перечисленных ниже обработчиков.</li>
 </ul>
@@ -66,7 +73,9 @@ const privacy = () =>
 <ul>
   <li>Токен доступа Google — в зашифрованном виде.</li>
   <li>Настройки, список календарей и их псевдонимы.</li>
-  <li>Распознанный текст команд и результат их разбора — до 90 дней, для отладки.</li>
+  <li>Распознанный текст команд и результат их разбора — до 90 дней, для отладки; доступ к нему есть только у владельца бота.</li>
+  <li>Входящие сообщения в служебной очереди — до 7 дней.</li>
+  <li>Черновики карточек подтверждения (название и время события) — до суток после истечения.</li>
   <li>Содержимое календаря целиком не копируется и не хранится.</li>
 </ul>
 

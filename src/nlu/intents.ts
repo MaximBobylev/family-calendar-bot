@@ -125,7 +125,9 @@ export interface IntentContext {
 export async function parseIntent(cfg: LlmConfig, text: string, context: IntentContext): Promise<ParsedIntent> {
   // Qwen3 по умолчанию «думает»: медленно, дорого и ломает JSON аргументов — отключаем
   const noThink = /qwen3/i.test(cfg.model) ? "\n/no_think" : "";
-  const system = `${SYSTEM_PROMPT}\nUser's calendars: ${context.calendars.map((c) => `"${c}"`).join(", ")}.${noThink}`;
+  // Названия календарей задают третьи лица (подписки) — как данные, экранированно и коротко
+  const calendars = context.calendars.map((c) => JSON.stringify(c.slice(0, 100))).join(", ");
+  const system = `${SYSTEM_PROMPT}\nUser's calendars: ${calendars}.${noThink}`;
   const res = await callTools(cfg, system, text, TOOLS);
   const usage = { tokensIn: res.tokensIn, tokensOut: res.tokensOut };
   // В MVP — одна команда на сообщение (US-12)

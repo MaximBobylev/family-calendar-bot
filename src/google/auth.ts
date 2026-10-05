@@ -1,5 +1,6 @@
 // Access token Google из refresh token. Живёт ~1 час; пока получаем на каждую обработку апдейта.
 
+import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
 
 export class GoogleAuthError extends Error {
@@ -13,7 +14,7 @@ export class GoogleAuthError extends Error {
 }
 
 export async function refreshAccessToken(config: Config, refreshToken: string): Promise<string> {
-  const res = await fetch(`${config.googleOAuthBase}/token`, {
+  const res = await fetchWithTimeout(`${config.googleOAuthBase}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -22,7 +23,7 @@ export async function refreshAccessToken(config: Config, refreshToken: string): 
       client_secret: config.googleClientSecret,
       grant_type: "refresh_token",
     }),
-  });
+  }, TIMEOUTS.google);
   if (!res.ok) {
     const body = await res.text();
     throw new GoogleAuthError(`google token refresh failed: ${res.status} ${body}`, body.includes("invalid_grant"));

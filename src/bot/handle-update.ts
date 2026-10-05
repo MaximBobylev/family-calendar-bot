@@ -12,6 +12,7 @@ import {
 import { recordUsage } from "../db/usage";
 import { ensureTelegramUser, type User } from "../db/users";
 import { GoogleAuthError } from "../google/auth";
+import { GoogleApiError } from "../google/calendar-api";
 import { parseIntent, type ParsedIntent } from "../nlu/intents";
 import type { TgCallbackQuery, TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -71,7 +72,7 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
 async function handleCommand(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
   const chatId = message.chat.id;
   // «печатает…» сразу: дальше LLM и Google (US-10). Не критично — ошибку игнорируем
-  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId).catch(() => undefined);
+  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId);
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   let text = message.text?.trim();
   if (!text && (message.voice || message.audio)) {
@@ -135,7 +136,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
 
   let parsed: ParsedIntent;
   try {
-    parsed = await parseIntent(ctx.config.llm, text, { calendars: calendarNames.results.map((r) => r.name) });
+    // Команда — короткая фраза; длинный текст в LLM не шлём (стоимость, prompt injection)
+    parsed = await parseIntent(ctx.config.llm, text.slice(0, 500), { calendars: calendarNames.results.map((r) => r.name) });
   } catch (e) {
     console.error("llm failed", e);
     await recordUsage(ctx.db, { userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model, text, result: String(e), outcome: "error", now: ctx.clock.now() });
@@ -209,13 +211,15 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
 }
 
 const MAX_VOICE_SEC = 60;
+/** duration указывает отправитель; размер ограничиваем отдельно (≈1 мин Opus — ~200 КБ). */
+const MAX_VOICE_BYTES = 2 * 1024 * 1024;
 
 /** Голосовое → текст (US-10). null — уже ответили пользователю (слишком длинное, не расслышал, ошибка). */
 async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): Promise<string | null> {
   const chatId = message.chat.id;
   const voice = (message.voice ?? message.audio)!;
   // Длинное — отказ без скачивания и без затрат на STT
-  if (voice.duration > MAX_VOICE_SEC) {
+  if (voice.duration > MAX_VOICE_SEC || (voice.file_size ?? 0) > MAX_VOICE_BYTES) {
     await ctx.telegram.sendMessage(chatId, t("voiceTooLong", user.locale));
     return null;
   }
@@ -264,28 +268,38 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   await ctx.telegram.answerCallbackQuery(cq.id);
   const chatId = cq.message?.chat.id ?? cq.from.id;
   const action = claim.action;
-  await withCalendar(ctx, user, chatId, async (provider) => {
+  const ok = await withCalendar(ctx, user, chatId, async (provider) => {
     if (action.kind === CREATE_CARD) await confirmCreate(ctx, provider, user, action as PendingAction<CreateCardPayload>, parsed.choice);
     else if (action.kind === MODIFY_CARD) await confirmModify(ctx, provider, user, action as Parameters<typeof confirmModify>[3], parsed.choice);
     else if (action.kind === PICK_CARD) await confirmPick(ctx, provider, user, action as Parameters<typeof confirmPick>[3], parsed.choice);
   });
+  // Карточка уже «done»: при сбое убираем кнопки, чтобы не было «Уже сделано» на несделанном (ревью 2026-10-05)
+  if (!ok && action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale));
 }
 
-/** Ошибки Google — понятным текстом (US-14); отозванный доступ — предложить переподключить (US-02). */
+/**
+ * Ошибки календаря — понятным текстом (US-14); отозванный доступ — предложить переподключить (US-02).
+ * Прочие ошибки (Telegram, D1, баги) не выдаём за «Google не отвечает» (ревью 2026-10-05).
+ * Возвращает false, если действие не удалось.
+ */
 async function withCalendar(
   ctx: AppContext,
   user: User,
   chatId: number,
   action: (provider: GoogleCalendarProvider) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id));
+    return true;
   } catch (e) {
-    console.error("calendar action failed", e);
+    console.error("calendar action failed", e instanceof Error ? e.message : e);
     if (e instanceof GoogleAuthError && e.revoked) {
       await ctx.telegram.sendMessage(chatId, t("googleRevoked", user.locale), await connectKeyboard(ctx, user.id, user.locale));
-    } else {
+    } else if (e instanceof GoogleAuthError || e instanceof GoogleApiError) {
       await ctx.telegram.sendMessage(chatId, t("googleUnavailable", user.locale));
+    } else {
+      await ctx.telegram.sendMessage(chatId, t("internalError", user.locale)).catch(() => undefined);
     }
+    return false;
   }
 }

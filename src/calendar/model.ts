@@ -54,6 +54,8 @@ export interface NewEvent {
   start?: Moment;
   end?: Moment;
   location?: string;
+  /** Ключ идемпотентности: повтор с тем же ключом не создаёт второе событие. */
+  idempotencyKey?: string;
 }
 
 export interface CreatedEvent {

@@ -2,6 +2,8 @@
 // Один протокол у Workers AI, Groq, OpenRouter, DeepInfra — fallback-провайдеры отличаются только адресом
 // и ключом (ADR-0002); в тестах адрес указывает на фейк (ADR-0006).
 
+import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
+
 export interface LlmConfig {
   baseUrl: string;
   apiKey: string;
@@ -30,7 +32,7 @@ export async function callTools(
   user: string,
   tools: ToolDefinition[],
 ): Promise<LlmResult> {
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+  const res = await fetchWithTimeout(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
     body: JSON.stringify({
@@ -44,7 +46,7 @@ export async function callTools(
       tool_choice: "required",
       max_tokens: 300,
     }),
-  });
+  }, TIMEOUTS.llm);
   if (!res.ok) throw new Error(`llm ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as {
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];

@@ -3,7 +3,7 @@
 import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
 import { formatDate, formatMoment, makeDay, utcToLocal, type Moment } from "../dates/calendar";
-import { refreshAccessToken } from "../google/auth";
+import { GoogleAuthError, refreshAccessToken } from "../google/auth";
 import { getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
 import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventPatch, EventRef, NewEvent } from "./model";
 
@@ -80,7 +80,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
       .bind(this.userId)
       .first<{ credentials_enc: string }>();
     if (!row) throw new Error("no google account");
-    const refresh = await decryptSecret(row.credentials_enc, this.config.tokenEncryptionKey);
+    // Не расшифровался (сменили ключ) — для пользователя это как отозванный доступ: переподключить
+    const refresh = await decryptSecret(row.credentials_enc, this.config.tokenEncryptionKey).catch(() => {
+      throw new GoogleAuthError("refresh token cannot be decrypted", true);
+    });
     this.accessToken = await refreshAccessToken(this.config, refresh);
     return this.accessToken;
   }
@@ -108,10 +111,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
   async createEvent(e: NewEvent): Promise<CreatedEvent> {
     const cal = await this.calendar(e.calendarId);
+    // Собственный id (base32hex) — повтор той же вставки даёт 409, а не дубль события (ревью 2026-10-05)
+    const id = e.idempotencyKey ? `cab${e.idempotencyKey.toLowerCase().replace(/[^0-9a-v]/g, "")}` : undefined;
     const time = e.allDay
       ? { start: { date: formatDate(e.startDay) }, end: { date: formatDate(e.endDay + 1) } } // end.date — исключающая
       : { start: { dateTime: `${formatMoment(e.start!)}:00`, timeZone: e.tz }, end: { dateTime: `${formatMoment(e.end!)}:00`, timeZone: e.tz } };
     const created = await insertEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, {
+      ...(id ? { id } : {}),
       summary: e.title,
       ...(e.location ? { location: e.location } : {}),
       ...time,

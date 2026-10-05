@@ -288,8 +288,10 @@ const server = createServer(async (req, res) => {
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
-      const id = `new${nextEventId++}`;
       const input = (await readJson(req)) as unknown as GoogleEvent;
+      // Свой id клиента (идемпотентность): повтор → 409, как у Google
+      if (input.id && cal.events?.some((e) => e.id === input.id)) return send(res, 409, { error: { code: 409, message: "The requested identifier already exists." } });
+      const id = input.id ?? `new${nextEventId++}`;
       const ev = normalizeTimes({ ...input, id, status: "confirmed", etag: newEtag(), htmlLink: `https://calendar.google.com/event?eid=${id}` }, cal.timeZone ?? "UTC");
       (cal.events ??= []).push(ev);
       return send(res, 200, ev);

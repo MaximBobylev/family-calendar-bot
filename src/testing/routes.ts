@@ -8,7 +8,7 @@ import type { AppContext } from "../bot/context";
 import { setTestClock } from "../clock";
 import { pendingUpdateIds } from "../inbox";
 import { processInboxUpdate } from "../process";
-import { tick } from "../scheduler";
+import { cleanup, tick } from "../scheduler";
 
 const TABLES = [
   "test_state", "feature_usage", "usage_events", "entitlements", "scheduled_jobs", "inbox", "pending_actions",
@@ -29,6 +29,9 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
     }
     case "/__test/tick":
       return Response.json({ ok: true, jobs: await tick(ctx.db, ctx.clock.now()) });
+    case "/__test/cleanup":
+      await cleanup(ctx.db, ctx.clock.now());
+      return Response.json({ ok: true });
     case "/__test/drain": {
       const ids = await pendingUpdateIds(ctx.db);
       for (const id of ids) await processInboxUpdate(ctx, id);

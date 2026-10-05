@@ -1,6 +1,8 @@
 // Клиент Google Calendar API. Базовый URL — из конфига (в тестах — фейк).
 // Позже обернётся интерфейсом CalendarProvider (ADR-0003); пока используется только при привязке.
 
+import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
+
 export interface GoogleCalendarListEntry {
   id: string;
   summary: string;
@@ -16,7 +18,7 @@ export async function listCalendars(apiBase: string, accessToken: string): Promi
     const url = new URL(`${apiBase}/calendar/v3/users/me/calendarList`);
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
     if (!res.ok) throw new Error(`calendarList failed: ${res.status} ${await res.text()}`);
     const page = (await res.json()) as { items?: GoogleCalendarListEntry[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
@@ -61,7 +63,7 @@ export async function listEvents(
     url.searchParams.set("timeZone", timeZone);
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+    const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
     if (!res.ok) throw new Error(`events.list failed: ${res.status} ${await res.text()}`);
     const page = (await res.json()) as { items?: GoogleEvent[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
@@ -71,6 +73,7 @@ export async function listEvents(
 }
 
 export interface GoogleEventInput {
+  id?: string;
   summary?: string;
   location?: string;
   description?: string;
@@ -93,11 +96,11 @@ async function writeEvent(
   body: GoogleEventInput,
   etag?: string,
 ): Promise<GoogleEvent & { htmlLink?: string }> {
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method,
     headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...(etag ? { "if-match": etag } : {}) },
     body: JSON.stringify(body),
-  });
+  }, TIMEOUTS.google);
   if (!res.ok) throw new GoogleApiError(`events.${method === "POST" ? "insert" : "patch"} failed: ${res.status} ${await res.text()}`, res.status);
   return (await res.json()) as GoogleEvent & { htmlLink?: string };
 }
@@ -105,14 +108,23 @@ async function writeEvent(
 export async function getEvent(apiBase: string, accessToken: string, calendarId: string, eventId: string, timeZone: string): Promise<GoogleEvent | null> {
   const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
   url.searchParams.set("timeZone", timeZone);
-  const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
   if (res.status === 404 || res.status === 410) return null;
   if (!res.ok) throw new GoogleApiError(`events.get failed: ${res.status} ${await res.text()}`, res.status);
   return (await res.json()) as GoogleEvent;
 }
 
-export function insertEvent(apiBase: string, accessToken: string, calendarId: string, body: GoogleEventInput) {
-  return writeEvent(new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`), "POST", accessToken, body);
+export async function insertEvent(apiBase: string, accessToken: string, calendarId: string, body: GoogleEventInput) {
+  try {
+    return await writeEvent(new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`), "POST", accessToken, body);
+  } catch (e) {
+    // 409 с нашим id — событие уже создано прошлой попыткой: это успех
+    if (e instanceof GoogleApiError && e.status === 409 && body.id) {
+      const existing = await getEvent(apiBase, accessToken, calendarId, body.id, body.start?.timeZone ?? "UTC");
+      if (existing) return existing as GoogleEvent & { htmlLink?: string };
+    }
+    throw e;
+  }
 }
 
 export function patchEvent(

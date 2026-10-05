@@ -3,7 +3,7 @@
 #   docker compose run --rm test npm run typecheck
 #   docker compose up dev                 — wrangler dev на http://localhost:8787 (+ фейки)
 #   docker compose run --rm acceptance    — приёмочные сценарии (поднимет dev и fakes)
-#   docker compose run --rm dev npx wrangler deploy   (нужен CLOUDFLARE_API_TOKEN в .env)
+#   docker compose run --rm deploy        — деплой (секреты из .env)
 # После изменения package.json: docker compose build && docker compose run --rm dev npm ci
 
 x-app: &app
@@ -14,6 +14,8 @@ x-app: &app
     - .:/app
     # node_modules — отдельный том: бинарники workerd/esbuild для Linux, а не для macOS хоста
     - node_modules:/app/node_modules
+    # Файл .env с боевыми секретами в контейнеры не попадает (ревью безопасности 2026-10-05)
+    - /dev/null:/app/.env:ro
 
 services:
   dev:
@@ -30,10 +32,14 @@ services:
       interval: 3s
       retries: 40
 
-  # Тесты и служебные команды; .env (боевые секреты) — только здесь, для деплоя
   test:
     <<: *app
     command: ["npm", "test"]
+
+  # Деплой и команды, которым нужны боевые секреты: только здесь .env передаётся как окружение
+  deploy:
+    <<: *app
+    command: ["npm", "run", "-s", "deploy"]
     env_file:
       - path: .env
         required: false

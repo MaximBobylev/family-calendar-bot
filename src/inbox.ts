@@ -18,11 +18,16 @@ export async function acceptUpdate(db: D1Database, update: TgUpdate, now: number
   return res.meta.changes > 0;
 }
 
-/** Обработка, «зависшая» дольше этого (Worker оборвался), может быть забрана снова. */
-const STALE_PROCESSING_MS = 2 * 60 * 1000;
+/**
+ * Обработка, «зависшая» дольше этого (Worker оборвался), может быть забрана снова.
+ * Меньше задержки страховки (60 с) и больше лимита waitUntil (30 с) — иначе страховка не подхватит обрыв.
+ */
+export const STALE_PROCESSING_MS = 45 * 1000;
 
-/** Атомарно забирает апдейт в обработку. null — уже обработан или обрабатывается. */
-export async function claimUpdate(db: D1Database, updateId: number, now: number): Promise<TgUpdate | null> {
+export type ClaimOutcome = { status: "claimed"; update: TgUpdate } | { status: "done" } | { status: "busy" };
+
+/** Атомарно забирает апдейт в обработку: claimed / done (уже обработан) / busy (обрабатывается сейчас). */
+export async function claimUpdate(db: D1Database, updateId: number, now: number): Promise<ClaimOutcome> {
   const row = await db
     .prepare(
       `UPDATE inbox SET status = 'processing', attempts = attempts + 1, processed_at = ?
@@ -31,7 +36,15 @@ export async function claimUpdate(db: D1Database, updateId: number, now: number)
     )
     .bind(now, updateId, now - STALE_PROCESSING_MS)
     .first<{ payload_json: string }>();
-  return row ? (JSON.parse(row.payload_json) as TgUpdate) : null;
+  if (row) return { status: "claimed", update: JSON.parse(row.payload_json) as TgUpdate };
+  const current = await db.prepare("SELECT status FROM inbox WHERE update_id = ?").bind(updateId).first<{ status: string }>();
+  return current?.status === "processing" ? { status: "busy" } : { status: "done" };
+}
+
+/** Апдейт сохранён, но не доведён (повторная доставка Telegram после сбоя) — его стоит запустить снова. */
+export async function isUnfinished(db: D1Database, updateId: number): Promise<boolean> {
+  const row = await db.prepare("SELECT status FROM inbox WHERE update_id = ?").bind(updateId).first<{ status: string }>();
+  return row?.status === "pending" || row?.status === "failed";
 }
 
 export async function completeUpdate(db: D1Database, updateId: number, now: number, error?: string): Promise<void> {
