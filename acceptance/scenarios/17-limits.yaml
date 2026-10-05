@@ -1,0 +1,54 @@
+# tech-debt #4, ADR-0004: лимиты вызовов LLM и STT на пользователя (скользящие час и сутки).
+# Превышение — вежливый ответ без внешнего вызова. Лимиты по умолчанию: LLM 60/ч, 300/сутки; STT 30/ч, 120/сутки.
+
+- id: llm-hourly-limit
+  story: US-13
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - llm: { "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } } }
+    - repeat:
+        times: 60
+        steps:
+          - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram_count: 60
+    - expect_llm_requests: 60
+    - clock: "2026-10-07T07:30:00Z"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Слишком много команд за последний час", "лимит 60", "через 30 мин"] }
+    - expect_llm_requests: 60
+    # Лимит не мешает командам без LLM
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+    # Через час окно освободилось
+    - clock: "2026-10-07T08:00:01Z"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра"] }
+    - expect_llm_requests: 61
+
+- id: stt-hourly-limit
+  story: US-10
+  steps:
+    - *setup
+    - repeat:
+        times: 30
+        steps:
+          - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    # На каждое: «услышал» и список
+    - expect_telegram_count: 60
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Слишком много голосовых за последний час", "лимит 30", "Напишите текстом"] }
+    - expect_llm_requests: 30
+    # Текстом — можно
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра"] }

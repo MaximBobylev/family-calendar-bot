@@ -3,15 +3,15 @@
 // пользователей без задачи (новые, после сбоев). Сильно опоздавшую сводку (сбой дольше MAX_LATE_MS) не шлём.
 
 import type { AppContext } from "../bot/context";
-import { formatEvents } from "../bot/format-events";
+import { appendFailedNote, formatEvents } from "../bot/format-events";
 import { t } from "../bot/messages";
 import { GoogleCalendarProvider } from "../calendar/google-provider";
+import { AuthRevoked } from "../calendar/model";
 import { localToUtc, utcToLocal } from "../dates/calendar";
 import { nextDailyAt, parseHhmm } from "../dates/daily";
 import { hasGoogleAccount, telegramChatOf } from "../db/accounts";
 import { DEFAULT_DIGEST_TIME } from "../db/settings";
 import { findUserById, type User } from "../db/users";
-import { GoogleAuthError } from "../google/auth";
 import type { DueJob } from "../scheduler";
 
 export const DIGEST_JOB = "digest";
@@ -70,18 +70,19 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   const tz = user.home_tz;
   const today = utcToLocal(job.fire_at, tz).day;
   const provider = new GoogleCalendarProvider(ctx.config, ctx.db, user.id);
-  let events;
+  let list;
   let calendars;
   try {
     calendars = await provider.calendars();
-    events = await provider.listEvents(localToUtc({ day: today, minutes: 0 }, tz), localToUtc({ day: today + 1, minutes: 0 }, tz), tz);
+    list = await provider.listEvents(localToUtc({ day: today, minutes: 0 }, tz), localToUtc({ day: today + 1, minutes: 0 }, tz), tz);
   } catch (e) {
     // Доступ отозван — молчим: о переподключении скажем, когда пользователь напишет сам (не каждое утро)
-    if (e instanceof GoogleAuthError && e.revoked) return;
+    if (e instanceof AuthRevoked) return;
     throw e;
   }
   const defaultId = calendars.find((c) => c.isDefault)?.id;
-  const parts = formatEvents(events, today, today, today, user.locale, (id) => calendars.length > 1 && id !== defaultId);
+  const parts = formatEvents(list.events, today, today, today, user.locale, (id) => calendars.length > 1 && id !== defaultId);
   parts[0] = `${t("digestGreeting", user.locale)}\n\n${parts[0]}`;
+  appendFailedNote(parts, list.failed, user.locale);
   for (const text of parts) await ctx.telegram.sendMessage(Number(chatId), text, undefined, { html: true });
 }

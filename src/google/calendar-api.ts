@@ -1,7 +1,8 @@
 // Клиент Google Calendar API. Базовый URL — из конфига (в тестах — фейк).
-// Позже обернётся интерфейсом CalendarProvider (ADR-0003); пока используется только при привязке.
+// За интерфейсом CalendarProvider (ADR-0003): calendar/google-provider.ts.
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
+import { GoogleApiError } from "./errors";
 
 export interface GoogleCalendarListEntry {
   id: string;
@@ -19,7 +20,7 @@ export async function listCalendars(apiBase: string, accessToken: string): Promi
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
-    if (!res.ok) throw new Error(`calendarList failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new GoogleApiError(`calendarList failed: ${res.status} ${await res.text()}`, res.status);
     const page = (await res.json()) as { items?: GoogleCalendarListEntry[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
     pageToken = page.nextPageToken;
@@ -64,7 +65,7 @@ export async function listEvents(
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
     const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
-    if (!res.ok) throw new Error(`events.list failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new GoogleApiError(`events.list failed: ${res.status} ${await res.text()}`, res.status);
     const page = (await res.json()) as { items?: GoogleEvent[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
     pageToken = page.nextPageToken;
@@ -82,13 +83,6 @@ export interface GoogleEventInput {
   end?: { dateTime?: string; date?: string; timeZone?: string };
   recurrence?: string[];
   reminders?: { useDefault: boolean; overrides?: { method: "popup" | "email"; minutes: number }[] };
-}
-
-/** Ошибка Calendar API с HTTP-статусом: 404/410 — удалено, 403 — нет прав, 412 — событие изменили (etag). */
-export class GoogleApiError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-  }
 }
 
 async function writeEvent(

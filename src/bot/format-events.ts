@@ -44,6 +44,13 @@ function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: st
  * Тексты сообщений со списком событий периода [fromDay, toDay].
  * `showCalendarFor` — для каких календарей показывать метку (не по умолчанию, если календарей > 1).
  */
+/** Приписать к последнему сообщению, какие календари не загрузились. */
+export function appendFailedNote(messages: string[], failed: { title: string }[], locale: string): void {
+  if (failed.length === 0 || messages.length === 0) return;
+  const list = failed.map((f) => `«${escapeHtml(f.title)}»`).join(", ");
+  messages[messages.length - 1] += `\n\n${t(failed.length === 1 ? "calendarFailed" : "calendarsFailed", locale, { list })}`;
+}
+
 export function formatEvents(
   events: CalendarEvent[],
   fromDay: Day,

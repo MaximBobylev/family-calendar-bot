@@ -2,6 +2,7 @@
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
+import { decryptSecret } from "../crypto";
 
 /** Минимальные scopes (ADR-0001 п.4). */
 export const GOOGLE_SCOPES = [
@@ -49,4 +50,31 @@ export async function exchangeCode(config: Config, code: string): Promise<TokenR
   }, TIMEOUTS.google);
   if (!res.ok) throw new Error(`google token exchange failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as TokenResponse;
+}
+
+/**
+ * Отозвать доступ (US-03): Google снимает всё разрешение приложения для этого аккаунта, не только этот токен.
+ * 400 invalid_token — токен уже недействителен (отозван в Google): для пользователя это тоже успех.
+ */
+export async function revokeToken(config: Config, token: string): Promise<void> {
+  const res = await fetchWithTimeout(`${config.googleOAuthBase}/revoke`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ token }),
+  }, TIMEOUTS.google);
+  if (res.ok) return;
+  const body = await res.text();
+  if (res.status === 400 && body.includes("invalid_token")) return;
+  throw new Error(`google revoke failed: ${res.status} ${body}`);
+}
+
+/** Расшифровать сохранённый refresh token и отозвать. false — не получилось (сеть, Google, сменился ключ). */
+export async function revokeStoredToken(config: Config, credentialsEnc: string): Promise<boolean> {
+  try {
+    await revokeToken(config, await decryptSecret(credentialsEnc, config.tokenEncryptionKey));
+    return true;
+  } catch (e) {
+    console.error("token revoke failed", e instanceof Error ? e.message : e);
+    return false;
+  }
 }

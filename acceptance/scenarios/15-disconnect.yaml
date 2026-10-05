@@ -1,0 +1,149 @@
+# US-03: /disconnect — подтверждение, отзыв доступа в Google, удаление всех данных. После этого человек — как новый.
+
+- id: disconnect-revokes-and-forgets-everything
+  story: US-03
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Ужин в общем календаре в субботу в 19": { tool: create_event, args: { start: "в субботу в 19", title: "Ужин", calendar: "общем календаре" } }
+    # Настройки, которые должны исчезнуть: другое название календаря и длительность
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗓 Календари"
+    - press: "Семья"
+    - press: "Добавить название"
+    - telegram: { from: 1001, text: "общий" }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "⏱ Длительность"
+    - press: "30 мин"
+    - expect_telegram:
+        - { text_contains: ["Настройки", "/disconnect"] }
+        - { method: editMessageText }
+        - { method: editMessageText }
+        - { text_contains: ["Как ещё называть"] }
+        - { text_contains: ["теперь также «общий»"] }
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText }
+        - { method: editMessageText, text_contains: ["30 мин"] }
+    - telegram: { from: 1001, text: "/disconnect" }
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные", "Google Календаре останутся"], buttons: ["Отключить и удалить", "Отмена"] }
+    - expect_token_revocations: { count: 0 }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["доступ к Google Календарю отозван", "данные удалены", "/start"] }
+    - expect_token_revocations: { count: 1, last: "rt-ivan@gmail.com" }
+    # Повторное нажатие — карточки уже нет
+    - press: { button: "Отключить и удалить", again: true }
+    - expect_token_revocations: { count: 1 }
+    # Утренней сводки больше нет
+    - clock: "2026-10-08T05:00:00Z"
+    - hourly: true
+    - tick: true
+    # Как новый пользователь: приветствие и предложение подключить
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["устарела"] }
+        - { text_contains: ["Привет", "подключите Google Календарь"], buttons: ["Подключить Google Календарь"] }
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["ivan@gmail.com", "подключён"] }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["Календарь по умолчанию: Иван", "Длительность встречи: 1 ч"] }
+    - telegram: { from: 1001, text: "Ужин в общем календаре в субботу в 19" }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл календарь"] }
+
+- id: disconnect-cancel-keeps-everything
+  story: US-03
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отмена"
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+    - expect_token_revocations: { count: 0 }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра"] }
+
+- id: disconnect-card-cancelled-by-new-command
+  story: US-03
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/disconnect" }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Завтра"] }
+        - { method: editMessageText, text_contains: ["устарела"] }
+    - expect_token_revocations: { count: 0 }
+
+- id: disconnect-revoke-fails-still-deletes
+  story: US-03
+  steps:
+    - *setup
+    - token_revoke_fails: 503
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["данные удалены", "не получилось", "myaccount.google.com/permissions"] }
+    - expect_token_revocations: { count: 1 }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["подключите Google Календарь"], buttons: ["Подключить Google Календарь"] }
+
+- id: disconnect-already-revoked-in-google
+  story: US-03
+  steps:
+    - *setup
+    - google_revoke: ivan@gmail.com
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["доступ к Google Календарю отозван", "данные удалены"] }
+
+- id: disconnect-without-calendar
+  story: US-03
+  steps:
+    - telegram: { from: 1001, text: "/start" }
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { text_contains: ["подключите Google Календарь"] }
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["все ваши данные удалены"], text_not_contains: ["отозван"] }
+    - expect_token_revocations: { count: 0 }
+
+# US-02: один Google-аккаунт у двух пользователей бота — привязки независимы. Отзыв в Google снял бы доступ обоим.
+- id: disconnect-shared-google-account-is-not-revoked
+  story: US-03
+  steps:
+    - *setup
+    - connected_user:
+        from: 1002
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { text_contains: ["удалить все ваши данные"] }
+        - { method: editMessageText, text_contains: ["данные удалены", "другого пользователя"] }
+    - expect_token_revocations: { count: 0 }
+    - telegram: { from: 1002, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Завтра"] }

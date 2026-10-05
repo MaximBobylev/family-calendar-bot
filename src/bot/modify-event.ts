@@ -2,7 +2,7 @@
 // Поиск события по описанию → расчёт изменений (детерминированно, по фрагментам из текста) →
 // карточка «Было → Стало» → подтверждение. Повторяющиеся — «только эту / все».
 
-import type { CalendarEvent, CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
+import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventRef } from "../calendar/model";
 import { parseDateFragment } from "../dates";
 import { addMinutes, formatMoment, minutesBetween, parseLocal, utcToLocal, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
@@ -12,7 +12,6 @@ import {
   attachMessage, createPendingAction, mergeDialogState, type PendingAction,
 } from "../db/conversations";
 import type { User } from "../db/users";
-import { GoogleApiError } from "../google/calendar-api";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
 import { locateEvent, type EventRequest } from "./find-event";
@@ -218,7 +217,7 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
       // Серия: тот же сдвиг и длительность применяются к мастер-событию (только в пределах дня)
       const masterRef = { ...p.ref, providerEventId: p.seriesId };
       const master = await provider.getEvent(masterRef, p.tz);
-      if (!master || master.allDay) throw new GoogleApiError("series not found", 404);
+      if (!master || master.allDay) throw new EventGone("series not found");
       const delta = o.start ? diff(o.start, p.oldStart) : 0;
       const length = o.start ? diff(o.end!, o.start) : diff(master.end!, master.start!);
       const ms = plus(master.start!, delta);
@@ -233,11 +232,11 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
       };
     }
   } catch (e) {
-    if (e instanceof GoogleApiError && e.status === 412) {
+    if (e instanceof EventConflict) {
       await edit(t("eventChangedMeanwhile", locale));
       return;
     }
-    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) {
+    if (e instanceof EventGone) {
       await edit(t("eventGone", locale));
       return;
     }

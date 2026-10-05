@@ -1,11 +1,10 @@
 // US-50: удаление события. Всегда подтверждение (US-05). Свою встречу удаляем (участники получат отмену),
 // чужую — не удаляем, а отклоняем приглашение. Повторяющиеся — «только эту / всю серию».
 
-import type { CalendarEvent, CalendarProvider, EventRef } from "../calendar/model";
+import { EventConflict, EventGone, type CalendarEvent, type CalendarProvider, type EventRef } from "../calendar/model";
 import { utcToLocal } from "../dates/calendar";
 import { attachMessage, createPendingAction, getDialogState, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
-import { GoogleApiError } from "../google/calendar-api";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
 import { locateEvent, type EventRequest } from "./find-event";
@@ -106,11 +105,11 @@ export async function confirmDelete(ctx: AppContext, provider: CalendarProvider,
       await edit(`${t(whole ? "deletedSeries" : "deleted", locale)}\n\n${details}`);
     }
   } catch (e) {
-    if (e instanceof GoogleApiError && e.status === 412) {
+    if (e instanceof EventConflict) {
       await edit(t("eventChangedMeanwhile", locale));
       return;
     }
-    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) {
+    if (e instanceof EventGone) {
       await edit(t("eventGone", locale));
       return;
     }

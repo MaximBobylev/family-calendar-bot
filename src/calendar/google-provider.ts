@@ -3,9 +3,13 @@
 import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
 import { formatDate, formatMoment, makeDay, utcToLocal, type Moment } from "../dates/calendar";
-import { GoogleAuthError, refreshAccessToken } from "../google/auth";
-import { deleteEvent, getEvent, GoogleApiError, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
-import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventPatch, EventRef, NewEvent } from "./model";
+import { refreshAccessToken } from "../google/auth";
+import { deleteEvent, getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
+import { toCalendarError } from "./google-errors";
+import {
+  AuthRevoked, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type CreatedEvent, type EventList, type EventPatch,
+  type EventRef, type NewEvent,
+} from "./model";
 
 /** Типы событий, которые не показываем (US-20). */
 const HIDDEN_EVENT_TYPES = new Set(["workingLocation", "focusTime"]);
@@ -42,6 +46,15 @@ export function toDomainEvent(e: GoogleEvent, cal: CalendarInfo, tz: string): Ca
   const start = utcToLocal(Date.parse(e.start.dateTime), tz);
   const end = utcToLocal(Date.parse(e.end.dateTime), tz);
   return { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day };
+}
+
+/** Вызов Google: его ошибки — в ошибки календаря (tech-debt #12). */
+async function google<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    throw toCalendarError(e);
+  }
 }
 
 export class GoogleCalendarProvider implements CalendarProvider {
@@ -81,33 +94,48 @@ export class GoogleCalendarProvider implements CalendarProvider {
       .prepare("SELECT credentials_enc FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
       .bind(this.userId)
       .first<{ credentials_enc: string }>();
-    if (!row) throw new Error("no google account");
+    // Аккаунта уже нет (отключили в параллельном апдейте) — как отозванный доступ: предложить подключить
+    if (!row) throw new AuthRevoked("no google account");
     // Не расшифровался (сменили ключ) — для пользователя это как отозванный доступ: переподключить
     const refresh = await decryptSecret(row.credentials_enc, this.config.tokenEncryptionKey).catch(() => {
-      throw new GoogleAuthError("refresh token cannot be decrypted", true);
+      throw new AuthRevoked("refresh token cannot be decrypted");
     });
-    this.accessToken = await refreshAccessToken(this.config, refresh);
+    this.accessToken = await google(() => refreshAccessToken(this.config, refresh));
     return this.accessToken;
   }
 
-  async listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<CalendarEvent[]> {
+  /** Календари читаются независимо: удалённый или недоступный календарь не роняет всё чтение (tech-debt #12). */
+  async listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<EventList> {
     const token = await this.token();
     const calendars = await this.calendars();
-    const perCalendar = await Promise.all(
+    const settled = await Promise.allSettled(
       calendars.map(async (cal) => {
-        const raw = await listEvents(
+        const raw = await google(() => listEvents(
           this.config.googleApiBase, token, cal.providerCalendarId,
           new Date(fromUtcMs).toISOString(), new Date(toUtcMs).toISOString(), tz,
-        );
+        ));
         return raw.map((e) => toDomainEvent(e, cal, tz)).filter((e): e is CalendarEvent => e !== null);
       }),
     );
-    return perCalendar.flat();
+    const result: EventList = { events: [], failed: [] };
+    settled.forEach((r, i) => {
+      const cal = calendars[i]!;
+      if (r.status === "fulfilled") result.events.push(...r.value);
+      else {
+        console.warn("calendar list failed", cal.id, r.reason instanceof Error ? r.reason.message : r.reason);
+        result.failed.push({ id: cal.id, title: cal.title });
+      }
+    });
+    const firstError = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    // Не загрузился ни один — это не «встреч нет», а ошибка
+    if (firstError && result.failed.length === calendars.length) throw firstError.reason;
+    return result;
   }
 
   private async calendar(id: string): Promise<CalendarInfo> {
     const cal = (await this.calendars()).find((c) => c.id === id);
-    if (!cal) throw new Error(`unknown calendar ${id}`);
+    // Календаря больше нет (переподключение без него, tech-debt #19)
+    if (!cal) throw new EventGone(`unknown calendar ${id}`);
     return cal;
   }
 
@@ -118,14 +146,15 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const time = e.allDay
       ? { start: { date: formatDate(e.startDay) }, end: { date: formatDate(e.endDay + 1) } } // end.date — исключающая
       : { start: { dateTime: `${formatMoment(e.start!)}:00`, timeZone: e.tz }, end: { dateTime: `${formatMoment(e.end!)}:00`, timeZone: e.tz } };
-    const created = await insertEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, {
+    const token = await this.token();
+    const created = await google(() => insertEvent(this.config.googleApiBase, token, cal.providerCalendarId, {
       ...(id ? { id } : {}),
       summary: e.title,
       ...(e.location ? { location: e.location } : {}),
       ...(e.recurrence ? { recurrence: e.recurrence } : {}),
       ...(e.reminders ? { reminders: { useDefault: false, overrides: e.reminders.map((minutes) => ({ method: "popup" as const, minutes })) } } : {}),
       ...time,
-    });
+    }));
     return {
       ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id },
       ...(created.htmlLink ? { link: created.htmlLink } : {}),
@@ -135,15 +164,17 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
   async getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null> {
     const cal = await this.calendar(ref.calendarId);
-    const raw = await getEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, tz);
+    const token = await this.token();
+    const raw = await google(() => getEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, tz));
     return raw ? toDomainEvent(raw, cal, tz) : null;
   }
 
   async updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<{ etag?: string }> {
     const cal = await this.calendar(ref.calendarId);
     const time = (m: Moment) => ({ dateTime: `${formatMoment(m)}:00`, timeZone: patch.tz });
-    const updated = await patchEvent(
-      this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId,
+    const token = await this.token();
+    const updated = await google(() => patchEvent(
+      this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId,
       {
         ...(patch.title !== undefined ? { summary: patch.title } : {}),
         ...(patch.location !== undefined ? { location: patch.location } : {}),
@@ -151,24 +182,25 @@ export class GoogleCalendarProvider implements CalendarProvider {
         ...(patch.end ? { end: time(patch.end) } : {}),
       },
       { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
-    );
+    ));
     return updated.etag ? { etag: updated.etag } : {};
   }
 
   async deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone"> {
     const cal = await this.calendar(ref.calendarId);
-    return deleteEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, {
+    const token = await this.token();
+    return google(() => deleteEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, {
       sendUpdates: opts.notify ? "all" : "none",
       ...(opts.etag ? { etag: opts.etag } : {}),
-    });
+    }));
   }
 
   async declineEvent(ref: EventRef, tz: string): Promise<void> {
     const cal = await this.calendar(ref.calendarId);
     const token = await this.token();
-    const raw = await getEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, tz);
-    if (!raw) throw new GoogleApiError("event not found", 404);
+    const raw = await google(() => getEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, tz));
+    if (!raw) throw new EventGone("event not found");
     const attendees = (raw.attendees ?? []).map((a) => (a.self ? { ...a, responseStatus: "declined" } : a));
-    await patchEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, { attendees }, { sendUpdates: "all" });
+    await google(() => patchEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, { attendees }, { sendUpdates: "all" }));
   }
 }

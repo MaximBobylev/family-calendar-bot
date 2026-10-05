@@ -25,10 +25,20 @@ type Step =
   | { webhook_raw: { body: unknown; secret?: string | null; expect_status: number } }
   | { expect_telegram: TelegramExpectation[] }
   | { expect_no_telegram: true }
+  /** Сколько сообщений бот отправил с прошлой проверки (без проверки содержимого) — для длинных серий. */
+  | { expect_telegram_count: number }
+  /** Повторить шаги N раз (лимиты, серии запросов). */
+  | { repeat: { times: number; steps: Step[] } }
+  /** Сколько всего запросов получила LLM с начала сценария. */
+  | { expect_llm_requests: number }
   | { google_account: { email: string; calendars: unknown[] } }
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
   | { google_revoke: string }
+  /** Отзывы токена ботом (US-03): сколько было и какой токен отозван последним. */
+  | { expect_token_revocations: { count: number; last?: string } }
+  /** Эндпоинт отзыва токена у Google отвечает ошибкой. */
+  | { token_revoke_fails: number }
   | { google_touch: { email: string; calendar: string; id: string } }
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
@@ -53,6 +63,10 @@ interface OAuthStep {
   consent?: string;
   deny?: boolean;
   expect_status?: number;
+  /** Страница перед экраном согласия (tech-debt #1): «подключаете к Telegram-аккаунту …». */
+  page_contains?: string[];
+  /** Отправить форму страницы без её cookie — как чужой сайт (CSRF). */
+  without_cookie?: boolean;
 }
 
 interface TelegramInput {
@@ -67,6 +81,8 @@ interface TelegramInput {
   /** message_id сообщения бота, на которое это reply. */
   reply_to?: number;
   voice?: { file_id: string; duration: number };
+  first_name?: string;
+  username?: string;
 }
 
 interface ExpectedEvent {
@@ -130,6 +146,30 @@ async function lastConnectUrl(): Promise<string> {
   return `${SUT}${u.pathname}${u.search}`;
 }
 
+/**
+ * Ссылка «Подключить» → страница «подключаете к Telegram-аккаунту …» → кнопка «Продолжить» (POST формы с cookie)
+ * → редирект на экран согласия Google. status — первый ответ не по пути (страница или форма).
+ */
+async function openConnectLink(startUrl: string, opts: { withoutCookie?: boolean } = {}): Promise<{ status: number; page: string; consent?: URL }> {
+  const start = await fetch(startUrl, { redirect: "manual" });
+  const page = await start.text();
+  if (start.status !== 200) return { status: start.status, page };
+  const field = (name: string) => new RegExp(`name="${name}" value="([^"]*)"`).exec(page)?.[1];
+  const action = /<form method="post" action="([^"]+)"/.exec(page)?.[1];
+  const state = field("state");
+  const csrf = field("csrf");
+  if (!action || state === undefined || csrf === undefined) throw new AssertionError(`connect page has no form: ${page}`);
+  const cookie = (start.headers.get("set-cookie") ?? "").split(";")[0]!;
+  const res = await fetch(`${SUT}${action}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", ...(opts.withoutCookie ? {} : { cookie }) },
+    body: new URLSearchParams({ state, csrf }),
+  });
+  if (res.status !== 302 && res.status !== 303) return { status: res.status, page };
+  return { status: res.status, page, consent: new URL(res.headers.get("location") ?? "") };
+}
+
 // --- Выполнение --------------------------------------------------------------
 
 /** Служебные вызовы Telegram — не сообщения пользователю; в expect_telegram не учитываются. */
@@ -153,7 +193,7 @@ async function runScenario(s: Scenario): Promise<void> {
       message_id: updateId,
       date: 0,
       chat: { id: t.chat_id ?? t.from, type: t.chat_type ?? "private" },
-      from: { id: t.from, is_bot: false, first_name: "Test", language_code: t.language ?? "ru" },
+      from: { id: t.from, is_bot: false, first_name: t.first_name ?? "Test", ...(t.username ? { username: t.username } : {}), language_code: t.language ?? "ru" },
       ...(t.text !== undefined ? { text: t.text } : {}),
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
       ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
@@ -194,8 +234,11 @@ async function runScenario(s: Scenario): Promise<void> {
     if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
   };
 
-  // Общая подготовка подключается YAML-якорем как вложенный список шагов
-  const steps = (s.steps as unknown[]).flat(Infinity) as Step[];
+  // Общая подготовка подключается YAML-якорем как вложенный список шагов; repeat разворачивается
+  const expand = (list: unknown[]): Step[] =>
+    (list.flat(Infinity) as Step[]).flatMap((st) =>
+      "repeat" in st ? Array.from({ length: st.repeat.times }, () => expand(st.repeat.steps)).flat() : [st]);
+  const steps = expand(s.steps);
   for (const [n, step] of steps.entries()) {
     const where = `step ${n + 1}`;
     if ("tick" in step || "hourly" in step) {
@@ -221,13 +264,16 @@ async function runScenario(s: Scenario): Promise<void> {
       await post(`${FAKES}/__fake/google/accounts`, step.google_account);
     } else if ("oauth" in step) {
       const startUrl = await lastConnectUrl();
-      const start = await fetch(startUrl, { redirect: "manual" });
-      if (start.status !== 302) {
-        // Плохая/протухшая ссылка может быть отвергнута уже на старте
-        if (step.oauth.expect_status === start.status) continue;
-        throw new AssertionError(`${where}: oauth start → ${start.status}, expected 302`);
+      const start = await openConnectLink(startUrl, { withoutCookie: step.oauth.without_cookie });
+      for (const part of step.oauth.page_contains ?? []) {
+        if (!start.page.includes(part)) throw new AssertionError(`${where}: connect page does not contain «${part}»:\n${start.page}`);
       }
-      const consent = new URL(start.headers.get("location") ?? "");
+      if (!start.consent) {
+        // Плохая/протухшая ссылка или чужая форма отвергаются ещё до Google
+        if (step.oauth.expect_status === start.status) continue;
+        throw new AssertionError(`${where}: oauth start → ${start.status}, expected redirect to Google`);
+      }
+      const consent = start.consent;
       const p = consent.searchParams;
       for (const [k, v] of [["access_type", "offline"], ["prompt", "consent"], ["response_type", "code"]] as const) {
         if (p.get(k) !== v) throw new AssertionError(`${where}: consent URL ${k}=${p.get(k)}, expected ${v}`);
@@ -287,6 +333,13 @@ async function runScenario(s: Scenario): Promise<void> {
       const last = list.at(-1);
       if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last delete id ${last?.id}, expected ${e.id}`);
       if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
+    } else if ("expect_token_revocations" in step) {
+      const e = step.expect_token_revocations;
+      const list = (await (await fetch(`${FAKES}/__fake/google/revocations`)).json()) as { token: string }[];
+      if (list.length !== e.count) throw new AssertionError(`${where}: ${list.length} token revocations, expected ${e.count}`);
+      if (e.last && list.at(-1)?.token !== e.last) throw new AssertionError(`${where}: last revoked token ${list.at(-1)?.token}, expected ${e.last}`);
+    } else if ("token_revoke_fails" in step) {
+      await post(`${FAKES}/__fake/google/revoke-fails`, { status: step.token_revoke_fails });
     } else if ("google_revoke" in step) {
       await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
     } else if ("llm" in step) {
@@ -345,13 +398,19 @@ async function runScenario(s: Scenario): Promise<void> {
       const c = step.connected_user;
       await post(`${FAKES}/__fake/google/accounts`, { email: c.email, calendars: c.calendars });
       await sendUpdate({ from: c.from, text: "/start", ...(c.language ? { language: c.language } : {}) });
-      const startUrl = await lastConnectUrl();
-      const start = await fetch(startUrl, { redirect: "manual" });
-      const consent = new URL(start.headers.get("location") ?? "");
+      const start = await openConnectLink(await lastConnectUrl());
+      if (!start.consent) throw new AssertionError(`${where}: connect ${c.email}: start → ${start.status}`);
+      const consent = start.consent;
       const callback = new URL(consent.searchParams.get("redirect_uri") ?? "");
       const res = await fetch(`${SUT}${callback.pathname}?${new URLSearchParams({ code: `code-${c.email}`, state: consent.searchParams.get("state") ?? "" })}`);
       if (res.status !== 200) throw new AssertionError(`${where}: connect ${c.email} → ${res.status}`);
       await newCalls(); // приветствие и «календарь подключён» — проверены отдельными сценариями
+    } else if ("expect_telegram_count" in step) {
+      const calls = await newCalls();
+      if (calls.length !== step.expect_telegram_count) throw new AssertionError(`${where}: expected ${step.expect_telegram_count} Telegram call(s), got ${calls.length}`);
+    } else if ("expect_llm_requests" in step) {
+      const list = (await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as unknown[];
+      if (list.length !== step.expect_llm_requests) throw new AssertionError(`${where}: ${list.length} LLM requests, expected ${step.expect_llm_requests}`);
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

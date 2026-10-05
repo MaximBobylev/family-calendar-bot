@@ -26,6 +26,7 @@
 
 **Поток**
 1. Пользователь жмёт кнопку → получает одноразовую ссылку `https://<worker>/oauth/start?state=<подписанный токен с внутренним user_id, TTL 10 мин>`.
+   Ссылка открывает страницу «Вы подключаете Google Календарь к Telegram-аккаунту <имя (@username)>. Если это не вы — закройте страницу» с кнопкой «Продолжить» — защита от пересланной ссылки (tech-debt #1).
 2. Стандартный экран согласия Google (scopes — см. [ADR-0001](adr/0001-audience-and-google-oauth.md)), `access_type=offline`, `prompt=consent` — иначе при повторной привязке Google не выдаст refresh token.
 3. Callback на Worker → обмен code на refresh token → сохранение (зашифрованно) → страница «Готово, вернитесь в Telegram» с deep-link в бота.
 4. Бот сам пишет в чат: «Календарь `ivan@gmail.com` подключён. Часовой пояс: Europe/Moscow» (email = id основного календаря из `calendarList`).

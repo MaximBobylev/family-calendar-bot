@@ -39,6 +39,19 @@ const messages = {
     ru: "Ссылка устарела или уже использована. Вернитесь в Telegram и нажмите «Подключить» ещё раз.",
     en: "This link has expired or was already used. Go back to Telegram and tap “Connect” again.",
   },
+  oauthConfirmPage: {
+    ru: "Вы подключаете Google Календарь к Telegram-аккаунту {name}.",
+    en: "You are connecting Google Calendar to the Telegram account {name}.",
+  },
+  oauthConfirmNoName: {
+    ru: "Вы подключаете Google Календарь к Telegram-аккаунту, который получил эту ссылку от бота.",
+    en: "You are connecting Google Calendar to the Telegram account that received this link from the bot.",
+  },
+  oauthConfirmWarning: {
+    ru: "Если это не вы — закройте страницу: эту ссылку вам переслали, и календарь получил бы чужой человек.",
+    en: "If this isn't you, close this page: the link was forwarded to you, and someone else would get your calendar.",
+  },
+  oauthConfirmButton: { ru: "Продолжить", en: "Continue" },
   oauthFailedPage: {
     ru: "Не получилось подключить календарь. Вернитесь в Telegram и попробуйте ещё раз.",
     en: "Couldn't connect the calendar. Go back to Telegram and try again.",
@@ -62,10 +75,33 @@ const messages = {
     ru: "Не могу разобрать команду сейчас, попробуйте чуть позже.",
     en: "I can't process commands right now, please try again a bit later.",
   },
+  // --- Лимиты на пользователя (tech-debt #4) ---
+  llmLimitHour: {
+    ru: "Слишком много команд за последний час — лимит {limit}. Продолжим через {minutes} мин.",
+    en: "Too many commands in the last hour — the limit is {limit}. Let's continue in {minutes} min.",
+  },
+  llmLimitDay: {
+    ru: "Слишком много команд за сутки — лимит {limit}. Продолжим через {hours} ч.",
+    en: "Too many commands in the last 24 hours — the limit is {limit}. Let's continue in {hours} h.",
+  },
+  sttLimitHour: {
+    ru: "Слишком много голосовых за последний час — лимит {limit}. Напишите текстом или подождите {minutes} мин.",
+    en: "Too many voice messages in the last hour — the limit is {limit}. Please type, or wait {minutes} min.",
+  },
+  sttLimitDay: {
+    ru: "Слишком много голосовых за сутки — лимит {limit}. Напишите текстом или подождите {hours} ч.",
+    en: "Too many voice messages in the last 24 hours — the limit is {limit}. Please type, or wait {hours} h.",
+  },
   googleUnavailable: {
     ru: "Google Календарь не отвечает, попробуйте позже.",
     en: "Google Calendar isn't responding, please try again later.",
   },
+  calendarForbidden: {
+    ru: "Google Календарь не разрешил это действие — похоже, нет прав на этот календарь или встречу.",
+    en: "Google Calendar didn't allow this — looks like you have no permission for this calendar or event.",
+  },
+  calendarFailed: { ru: "⚠️ Календарь {list} не загрузился — его встречи не показаны.", en: "⚠️ Calendar {list} didn't load — its events are not shown." },
+  calendarsFailed: { ru: "⚠️ Календари {list} не загрузились — их встречи не показаны.", en: "⚠️ Calendars {list} didn't load — their events are not shown." },
   googleRevoked: {
     ru: "Доступ к Google Календарю отозван. Подключите его заново.",
     en: "Access to Google Calendar was revoked. Please connect it again.",
@@ -264,6 +300,29 @@ const messages = {
   reminderBefore: { ru: "за {value}", en: "{value} before" },
   reminderDayBefore: { ru: "накануне в {time}", en: "the day before at {time}" },
   reminderDaysBefore: { ru: "за {days} дн. в {time}", en: "{days} days before at {time}" },
+  // --- /disconnect (US-03) ---
+  disconnectConfirm: {
+    ru: "Отключить Google Календарь и удалить все ваши данные?\n\nЯ отзову доступ к календарю и удалю настройки, названия календарей, черновики и журнал команд. События в самом Google Календаре останутся как есть.",
+    en: "Disconnect Google Calendar and delete all your data?\n\nI'll revoke calendar access and delete your settings, calendar names, drafts and command log. Events in Google Calendar itself stay as they are.",
+  },
+  disconnectButton: { ru: "Отключить и удалить", en: "Disconnect and delete" },
+  disconnectDone: {
+    ru: "✅ Готово: доступ к Google Календарю отозван, все ваши данные удалены.\n\nЧтобы начать заново — /start.",
+    en: "✅ Done: Google Calendar access is revoked and all your data is deleted.\n\nTo start over, send /start.",
+  },
+  disconnectDoneNoAccount: {
+    ru: "✅ Готово: все ваши данные удалены.\n\nЧтобы начать заново — /start.",
+    en: "✅ Done: all your data is deleted.\n\nTo start over, send /start.",
+  },
+  disconnectRevokeFailed: {
+    ru: "Ваши данные удалены, но отозвать доступ в Google не получилось. Уберите его вручную: https://myaccount.google.com/permissions\n\nЧтобы начать заново — /start.",
+    en: "Your data is deleted, but I couldn't revoke access in Google. Please remove it manually: https://myaccount.google.com/permissions\n\nTo start over, send /start.",
+  },
+  disconnectRevokeShared: {
+    ru: "✅ Ваши данные удалены. Доступ в Google не отзывал: этот Google-аккаунт подключён и у другого пользователя бота — отзыв отключил бы и его. Убрать доступ совсем: https://myaccount.google.com/permissions\n\nЧтобы начать заново — /start.",
+    en: "✅ Your data is deleted. I didn't revoke Google access: this Google account is also connected by another bot user, and revoking would disconnect them too. To remove access completely: https://myaccount.google.com/permissions\n\nTo start over, send /start.",
+  },
+  settingsDisconnectHint: { ru: "Отключить календарь и удалить данные — /disconnect.", en: "Disconnect the calendar and delete your data: /disconnect." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

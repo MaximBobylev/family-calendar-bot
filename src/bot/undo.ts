@@ -4,11 +4,10 @@
 // Не отменяются (US-61): удаление (новое событие было бы с другим id, участники получили бы приглашения заново)
 // и отклонение приглашения.
 
-import type { CalendarProvider, EventRef } from "../calendar/model";
+import { EventConflict, EventGone, type CalendarProvider, type EventRef } from "../calendar/model";
 import type { Moment } from "../dates/calendar";
 import { attachMessage, CONTEXT_TTL_MS, claimPendingAction, createPendingAction, getDialogState, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
-import { GoogleApiError } from "../google/calendar-api";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
 import { callbackData } from "./keyboards";
@@ -79,11 +78,11 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
       await provider.updateEvent(record.ref, { tz: record.tz, ...record.before }, { notify: record.notify, ...(record.etag ? { etag: record.etag } : {}) });
     }
   } catch (e) {
-    if (e instanceof GoogleApiError && e.status === 412) {
+    if (e instanceof EventConflict) {
       await ctx.telegram.sendMessage(chatId, t("undoChangedAfter", locale));
       return;
     }
-    if (e instanceof GoogleApiError && (e.status === 404 || e.status === 410)) {
+    if (e instanceof EventGone) {
       await ctx.telegram.sendMessage(chatId, t("eventGone", locale));
       return;
     }

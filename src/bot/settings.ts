@@ -87,6 +87,7 @@ function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[]): Scr
     s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
     t("settingsLanguage", l), "",
     `<i>${t("settingsHint", l)}</i>`,
+    `<i>${t("settingsDisconnectHint", l)}</i>`,
   ].join("\n");
   return {
     text,

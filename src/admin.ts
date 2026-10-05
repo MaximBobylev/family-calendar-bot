@@ -2,13 +2,10 @@
 // Только чтение. Показывает журнал распознанного (US-13) — доступ только у владельца.
 
 import type { AppContext } from "./bot/context";
+import { COST_ESTIMATES } from "./config";
 
-/** Цены Workers AI (docs/research/hosting-economics.md) — для оценки, $ за единицу. */
-const PRICE = {
-  llmInPerM: 0.051, // Qwen3-30B-A3B, $ за 1M входных токенов
-  llmOutPerM: 0.335,
-  sttPerMin: 0.0005, // Whisper large-v3-turbo
-};
+/** Цены Workers AI (docs/research/hosting-economics.md) — для оценки; одни на учёт и админку (config.ts). */
+const PRICE = COST_ESTIMATES;
 
 export function timingSafeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a);

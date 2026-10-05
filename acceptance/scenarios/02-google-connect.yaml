@@ -61,3 +61,30 @@
     - telegram: { from: 1001, text: "/start" }
     - clock: "2026-10-07T07:11:00Z"
     - oauth: { consent: ivan@gmail.com, expect_status: 400 }
+
+# tech-debt #1: ссылку «Подключить» могут переслать. Перед экраном согласия — страница с Telegram-аккаунтом,
+# к которому подключается календарь; дальше — только кнопкой с этой страницы.
+- id: connect-page-names-telegram-account
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start", first_name: "Иван <b>", username: "ivan_tg" }
+    - oauth:
+        consent: ivan@gmail.com
+        page_contains: ["Telegram-аккаунту <b>Иван &lt;b&gt; (@ivan_tg)</b>", "Если это не вы — закройте страницу", "Продолжить"]
+    - expect_telegram:
+        - { text_contains: ["Подключите", "Google Календарь"] }
+        - { text_contains: ["ivan@gmail.com", "подключён"] }
+
+- id: connect-form-from-another-site-is-rejected
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    # Форма без cookie нашей страницы — как автоотправка с чужого сайта сразу на экран согласия
+    - oauth: { consent: ivan@gmail.com, without_cookie: true, expect_status: 403 }
+    # Ссылка при этом не сгорела: открытая как обычно, она работает
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["подключите Google Календарь"] }
+        - { text_contains: ["ivan@gmail.com", "подключён"] }

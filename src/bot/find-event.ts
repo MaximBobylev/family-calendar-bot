@@ -81,7 +81,7 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
     }
   }
 
-  const inWindow = await provider.listEvents(from, to, tz);
+  const { events: inWindow } = await provider.listEvents(from, to, tz);
   let events = exact ? inWindow.filter((e) => !e.allDay && e.start!.day === exact!.day && e.start!.minutes === exact!.minutes) : inWindow;
   let fuzzy = false;
   if (req.query && queryWords(req.query).length) {

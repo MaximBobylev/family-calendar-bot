@@ -1,6 +1,7 @@
 // Обработка одного апдейта: доступ, регистрация, привязка календаря, команды.
 
 import { GoogleCalendarProvider } from "../calendar/google-provider";
+import { AuthRevoked, CalendarError, PermissionDenied } from "../calendar/model";
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractRecurrenceSpan, extractModifySpans, looksAllDay } from "../dates/extract";
@@ -9,10 +10,9 @@ import { hasGoogleAccount } from "../db/accounts";
 import {
   cancelOpenCards, claimPendingAction, ensureConversation, findOpenByMessage, getDialogState, mergeDialogState, type PendingAction,
 } from "../db/conversations";
-import { recordUsage } from "../db/usage";
+import { recordUsage, usageWindow } from "../db/usage";
+import { checkLimit, llmCostMicroUsd, sttCostMicroUsd } from "../limits";
 import { ensureTelegramUser, type User } from "../db/users";
-import { GoogleAuthError } from "../google/auth";
-import { GoogleApiError } from "../google/calendar-api";
 import { parseIntent, type ParsedIntent } from "../nlu/intents";
 import type { TgCallbackQuery, TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -21,11 +21,12 @@ import {
   type CreateCardPayload, type CreateDraft, type TitleQuestionPayload,
 } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete, startDelete } from "./delete-event";
+import { DISCONNECT_CARD, confirmDisconnect, isDisconnectCommand, proposeDisconnect } from "./disconnect";
 import { PICK_CARD, confirmPick, type EventRequest } from "./find-event";
 import { MODIFY_CARD, confirmModify, proposeChange, startModify } from "./modify-event";
 import { connectKeyboard, parseCallbackData } from "./keyboards";
 import { t } from "./messages";
-import { escapeHtml } from "./format";
+import { escapeHtml, telegramName } from "./format";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
 import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, showSettings } from "./settings";
@@ -51,7 +52,7 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     return;
   }
 
-  const { user } = await ensureTelegramUser(ctx.db, from.id, ctx.clock.now());
+  const user: User = { ...(await ensureTelegramUser(ctx.db, from.id, ctx.clock.now())).user, tgName: telegramName(from) };
   if (update.callback_query) {
     await handleCallback(ctx, user, update.callback_query);
     return;
@@ -59,10 +60,16 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
   if (!message) return;
   const isStart = message.text?.trim() === "/start";
 
+  // Удалить свои данные можно всегда, даже без подключённого календаря (US-03)
+  if (isDisconnectCommand(message.text)) {
+    await proposeDisconnect(ctx, user, message.chat.id);
+    return;
+  }
+
   // Без привязанного календаря интент не распознаём — только предлагаем подключить (US-01)
   if (!(await hasGoogleAccount(ctx.db, user.id))) {
     const text = isStart ? `${t("welcome", user.locale)}\n\n${t("connectPrompt", user.locale)}` : t("connectPrompt", user.locale);
-    await ctx.telegram.sendMessage(message.chat.id, text, await connectKeyboard(ctx, user.id, user.locale));
+    await ctx.telegram.sendMessage(message.chat.id, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
     return;
   }
 
@@ -130,7 +137,7 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   }
 
   // Новая команда аннулирует открытые карточки (US-05)
-  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION, MODIFY_CARD, PICK_CARD, DELETE_CARD]);
+  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION, MODIFY_CARD, PICK_CARD, DELETE_CARD, DISCONNECT_CARD]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;
     if (c.kind !== TITLE_QUESTION && c.messageId && cardChat) await ctx.telegram.editMessageText(cardChat, c.messageId, t("cancelled", user.locale));
@@ -153,6 +160,7 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     .bind(user.id)
     .all<{ name: string }>();
 
+  if (!(await withinLimit(ctx, user, "llm", chatId))) return;
   let parsed: ParsedIntent;
   try {
     // Команда — короткая фраза; длинный текст в LLM не шлём (стоимость, prompt injection)
@@ -165,7 +173,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   }
   await recordUsage(ctx.db, {
     userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model,
-    tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, text, result: parsed.intent, outcome: "ok", now: ctx.clock.now(),
+    tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, costMicroUsd: llmCostMicroUsd(ctx.config.costs, parsed.tokensIn, parsed.tokensOut),
+    text, result: parsed.intent, outcome: "ok", now: ctx.clock.now(),
   });
 
   let intent = parsed.intent;
@@ -260,6 +269,7 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
     await ctx.telegram.sendMessage(chatId, t("voiceTooLong", user.locale));
     return null;
   }
+  if (!(await withinLimit(ctx, user, "stt", chatId))) return null;
   let audio: ArrayBuffer;
   try {
     audio = await ctx.telegram.downloadFile(voice.file_id);
@@ -278,7 +288,9 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
     await ctx.telegram.sendMessage(chatId, t("sttUnavailable", user.locale));
     return null;
   }
-  await recordUsage(ctx.db, { ...usage, text: transcript.text, result: { language: transcript.language }, outcome: "ok", now: ctx.clock.now() });
+  await recordUsage(ctx.db, {
+    ...usage, costMicroUsd: sttCostMicroUsd(ctx.config.costs, usage.audioMs), text: transcript.text, result: { language: transcript.language }, outcome: "ok", now: ctx.clock.now(),
+  });
   if (isEmptySpeech(transcript.text)) {
     await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
     return null;
@@ -286,6 +298,20 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
   // Показываем, что услышали, — до долгой обработки (US-10)
   await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(transcript.text) }), undefined, { html: true });
   return transcript.text;
+}
+
+/** Лимит вызовов LLM/STT на пользователя (tech-debt #4): исчерпан — вежливый ответ и никакого внешнего вызова. */
+async function withinLimit(ctx: AppContext, user: User, kind: "llm" | "stt", chatId: number): Promise<boolean> {
+  const now = ctx.clock.now();
+  const verdict = checkLimit(ctx.config.limits[kind], await usageWindow(ctx.db, user.id, kind, now), now);
+  if (verdict.ok) return true;
+  console.warn("usage limit reached", user.id, kind, verdict.window);
+  const params: Record<string, string> = verdict.window === "hour"
+    ? { minutes: String(Math.max(1, Math.ceil(verdict.retryInMs / 60_000))) }
+    : { hours: String(Math.max(1, Math.ceil(verdict.retryInMs / 3_600_000))) };
+  const key = kind === "llm" ? (verdict.window === "hour" ? "llmLimitHour" : "llmLimitDay") : verdict.window === "hour" ? "sttLimitHour" : "sttLimitDay";
+  await ctx.telegram.sendMessage(chatId, t(key, user.locale, { limit: String(verdict.limit), ...params }));
+  return false;
 }
 
 /** Нажатие кнопки на карточке: атомарно «забираем» карточку — повторное нажатие ничего не делает (US-05). */
@@ -313,6 +339,16 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   await ctx.telegram.answerCallbackQuery(cq.id);
   const chatId = cq.message?.chat.id ?? cq.from.id;
   const action = claim.action;
+  if (action.kind === DISCONNECT_CARD) {
+    try {
+      await confirmDisconnect(ctx, user, cq.from.id, action as Parameters<typeof confirmDisconnect>[3], parsed.choice);
+    } catch (e) {
+      // Карточка уже «done» — не оставлять кнопки на несделанном; повторить можно новой командой
+      console.error("disconnect failed", e instanceof Error ? e.message : e);
+      if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale)).catch(() => undefined);
+    }
+    return;
+  }
   const ok = await withCalendar(ctx, user, chatId, async (provider) => {
     if (action.kind === CREATE_CARD) await confirmCreate(ctx, provider, user, action as PendingAction<CreateCardPayload>, parsed.choice);
     else if (action.kind === MODIFY_CARD) await confirmModify(ctx, provider, user, action as Parameters<typeof confirmModify>[3], parsed.choice);
@@ -344,9 +380,11 @@ async function withCalendar(
     return true;
   } catch (e) {
     console.error("calendar action failed", e instanceof Error ? e.message : e);
-    if (e instanceof GoogleAuthError && e.revoked) {
-      await ctx.telegram.sendMessage(chatId, t("googleRevoked", user.locale), await connectKeyboard(ctx, user.id, user.locale));
-    } else if (e instanceof GoogleAuthError || e instanceof GoogleApiError) {
+    if (e instanceof AuthRevoked) {
+      await ctx.telegram.sendMessage(chatId, t("googleRevoked", user.locale), await connectKeyboard(ctx, user.id, user.locale, user.tgName));
+    } else if (e instanceof PermissionDenied) {
+      await ctx.telegram.sendMessage(chatId, t("calendarForbidden", user.locale));
+    } else if (e instanceof CalendarError) {
       await ctx.telegram.sendMessage(chatId, t("googleUnavailable", user.locale));
     } else {
       await ctx.telegram.sendMessage(chatId, t("internalError", user.locale)).catch(() => undefined);

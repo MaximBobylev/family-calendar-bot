@@ -1,0 +1,102 @@
+# US-02, tech-debt #19: переподключение Google. Тот же аккаунт — календари обновляются на месте: другие названия
+# и выбранный календарь по умолчанию сохраняются. Другой аккаунт — заменяет прежний, алиасы старого удаляются.
+# Переподключение здесь — после отзыва доступа: бот сам предлагает кнопку «Подключить».
+
+- id: relink-same-account-keeps-aliases-and-default
+  story: US-02
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+            - { id: work@group.calendar.google.com, summary: "Работа", accessRole: writer, timeZone: Europe/Moscow }
+            - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Ужин в общем календаре в субботу в 19": { tool: create_event, args: { start: "в субботу в 19", title: "Ужин", calendar: "общем календаре" } }
+      # «Семья» — основной и ещё называется «общий»
+      - telegram: { from: 1001, text: "/settings" }
+      - press: "🗓 Календари"
+      - press: "Семья"
+      - press: "Сделать основным"
+      - press: "Добавить название"
+      - telegram: { from: 1001, text: "общий" }
+      - expect_telegram:
+          - { text_contains: ["Настройки"] }
+          - { method: editMessageText }
+          - { method: editMessageText }
+          - { method: editMessageText, text_contains: ["Это календарь по умолчанию."] }
+          - { text_contains: ["Как ещё называть"] }
+          - { text_contains: ["теперь также «общий»"] }
+      # Доступ отозван в Google — бот предлагает подключить заново
+      - google_revoke: ivan@gmail.com
+      - telegram: { from: 1001, text: "Что у меня завтра?" }
+      - expect_telegram:
+          - { text_contains: ["отозван"], buttons: ["Подключить Google Календарь"] }
+    # Тот же аккаунт: «Семья» переименована, «Работа» исчезла, появился «Спорт»
+    - google_account:
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Наша семья", accessRole: writer, timeZone: Europe/Moscow }
+          - { id: sport@group.calendar.google.com, summary: "Спорт", accessRole: writer, timeZone: Europe/Moscow }
+          - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["ivan@gmail.com", "подключён", "Europe/Moscow"] }
+    # Тот же аккаунт: отзыв снял бы и новый доступ — не отзываем
+    - expect_token_revocations: { count: 0 }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗓 Календари"
+    - expect_telegram:
+        - { text_contains: ["🗓 Календарь по умолчанию: Наша семья"] }
+        - { method: editMessageText, buttons: ["✓ Наша семья", "Иван", "Спорт", "← Назад"] }
+    - telegram: { from: 1001, text: "Ужин в общем календаре в субботу в 19" }
+    - expect_telegram:
+        - { text_contains: ["<b>Ужин</b>", "🗓 Наша семья"] }
+
+- id: relink-default-calendar-gone-falls-back-to-primary
+  story: US-02
+  steps:
+    - *setup
+    - google_account:
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: work@group.calendar.google.com, summary: "Работа", accessRole: writer, timeZone: Europe/Moscow }
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["ivan@gmail.com", "подключён"] }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["🗓 Календарь по умолчанию: Иван"] }
+    # Алиас исчез вместе с календарём
+    - telegram: { from: 1001, text: "Ужин в общем календаре в субботу в 19" }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл календарь"] }
+
+- id: relink-other-account-replaces-old-one
+  story: US-02
+  steps:
+    - *setup
+    - google_account:
+        email: maria@gmail.com
+        calendars:
+          - { id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Berlin }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+    - oauth: { consent: maria@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["maria@gmail.com", "подключён", "Europe/Berlin"] }
+    # Токен прежнего аккаунта отозван (US-03)
+    - expect_token_revocations: { count: 1, last: "rt-ivan@gmail.com" }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["🗓 Календарь по умолчанию: Мария"] }
+    # Алиасы старого аккаунта удалены (US-02), даже если календарь с тем же id есть и в новом
+    - telegram: { from: 1001, text: "Ужин в общем календаре в субботу в 19" }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл календарь"] }

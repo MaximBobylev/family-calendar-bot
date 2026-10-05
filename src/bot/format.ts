@@ -8,6 +8,12 @@ import { t } from "./messages";
 /** Сообщения уходят с parse_mode=HTML — пользовательский и календарный текст экранируем. */
 export const escapeHtml = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
+/** «Иван Петров (@ivan)» — кто в Telegram (страница привязки, tech-debt #1). */
+export function telegramName(u: { first_name: string; last_name?: string; username?: string }): string {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  return `${name}${u.username ? ` (@${u.username})` : ""}`.slice(0, 120);
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 export const hhmm = (minutes: number) => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
 

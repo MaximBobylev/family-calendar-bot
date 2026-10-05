@@ -2,16 +2,7 @@
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
-
-export class GoogleAuthError extends Error {
-  constructor(
-    message: string,
-    /** invalid_grant — доступ отозван пользователем, нужно переподключить (US-02). */
-    readonly revoked: boolean,
-  ) {
-    super(message);
-  }
-}
+import { GoogleAuthError } from "./errors";
 
 export async function refreshAccessToken(config: Config, refreshToken: string): Promise<string> {
   const res = await fetchWithTimeout(`${config.googleOAuthBase}/token`, {

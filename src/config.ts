@@ -1,5 +1,6 @@
 // Конфигурация из Env. Все внешние URL — отсюда (ADR-0006: в тестах указывают на фейки).
 
+import type { CostEstimates, UsageLimits } from "./limits";
 import type { LlmConfig } from "./nlu/llm";
 import type { SttConfig } from "./stt/whisper";
 
@@ -22,7 +23,29 @@ export interface Config {
   admin: { user: string; password: string };
   llm: LlmConfig;
   stt: SttConfig;
+  limits: UsageLimits;
+  costs: CostEstimates;
 }
+
+/**
+ * Лимиты вызовов на пользователя (tech-debt #4), скользящие час и сутки по usage_events. Превышение — вежливый
+ * ответ без внешнего вызова. Щедрые для нас двоих: обычный день — десятки команд; лимит ловит зацикливание,
+ * спам и утёкший доступ, а не живого человека. Голосовое тратит и STT, и LLM.
+ */
+export const USAGE_LIMITS: UsageLimits = {
+  llm: { perHour: 60, perDay: 300 },
+  stt: { perHour: 30, perDay: 120 },
+};
+
+/**
+ * ОЦЕНКА стоимости (прайс Workers AI на 2026-10, без бесплатных 10k neurons/сутки) — для cost_micro_usd и /admin.
+ * Сменили модель (LLM_MODEL, STT_MODEL) — обновить.
+ */
+export const COST_ESTIMATES: CostEstimates = {
+  llmInPerM: 0.051, // Qwen3-30B-A3B, $ за 1M входных токенов
+  llmOutPerM: 0.335, // $ за 1M выходных токенов
+  sttPerMin: 0.0005, // Whisper large-v3-turbo, $ за минуту аудио
+};
 
 export function loadConfig(env: Env): Config {
   return {
@@ -44,5 +67,7 @@ export function loadConfig(env: Env): Config {
     llm: { baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL },
     // Тот же API-токен Cloudflare, что и для LLM
     stt: { baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
+    limits: USAGE_LIMITS,
+    costs: COST_ESTIMATES,
   };
 }

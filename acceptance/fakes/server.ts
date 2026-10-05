@@ -20,6 +20,9 @@
 //   GET  /__fake/google/deletes     — журнал DELETE событий: {calendar, id, sendUpdates}
 //   POST /__fake/google/touch       — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
+//   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой
+//   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
+//   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
 //   POST /__fake/reset              — сброс состояния
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -48,6 +51,8 @@ interface GoogleCalendar {
   primary?: boolean;
   timeZone?: string;
   events?: GoogleEvent[];
+  /** events.list этого календаря отвечает этой ошибкой (удалён, нет доступа, 5xx). */
+  list_error?: number;
 }
 
 type LlmFixture =
@@ -66,6 +71,8 @@ let llmFixtures = new Map<string, LlmFixture>();
 let telegramFiles = new Map<string, string>();
 let sttFixtures = new Map<string, { text?: string; error?: number }>();
 let llmRequests: unknown[] = [];
+let revocations: { token: string; status: number }[] = [];
+let revokeFailStatus = 0;
 
 /** Полночь даты `date` в поясе `tz`, мс UTC — для событий на весь день. */
 function zonedMidnight(date: string, tz: string): number {
@@ -161,6 +168,8 @@ const server = createServer(async (req, res) => {
       etagSeq = 1;
       patches = [];
       deletes = [];
+      revocations = [];
+      revokeFailStatus = 0;
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
@@ -171,6 +180,11 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/google/token-requests") return send(res, 200, tokenRequests);
+    if (url.pathname === "/__fake/google/revocations") return send(res, 200, revocations);
+    if (url.pathname === "/__fake/google/revoke-fails" && req.method === "POST") {
+      revokeFailStatus = Number((await readJson(req)).status ?? 0);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/__fake/google/revoke" && req.method === "POST") {
       const { email } = (await readJson(req)) as { email: string };
       const acc = googleAccounts.get(email);
@@ -253,6 +267,8 @@ const server = createServer(async (req, res) => {
       if (form.grant_type !== "authorization_code" || !email || !googleAccounts.has(email)) {
         return send(res, 400, { error: "invalid_grant" });
       }
+      // Новое согласие — новый действующий доступ
+      googleAccounts.get(email)!.revoked = false;
       return send(res, 200, {
         access_token: `at-${email}`,
         refresh_token: `rt-${email}`,
@@ -262,11 +278,26 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    // Отзыв токена (как oauth2.googleapis.com/revoke): снимает доступ аккаунта целиком
+    if (url.pathname === "/google-oauth/revoke" && req.method === "POST") {
+      const { token = "" } = await readForm(req);
+      if (revokeFailStatus) {
+        revocations.push({ token, status: revokeFailStatus });
+        return send(res, revokeFailStatus, { error: "backend_error" });
+      }
+      const acc = googleAccounts.get(/^(?:rt|at)-(.+)$/.exec(token)?.[1] ?? "");
+      const status = acc && !acc.revoked ? 200 : 400;
+      revocations.push({ token, status });
+      if (!acc || acc.revoked) return send(res, 400, { error: "invalid_token", error_description: "Token expired or revoked" });
+      acc.revoked = true;
+      return send(res, 200, {});
+    }
+
     // --- Google Calendar API ---
     if (url.pathname === "/google/calendar/v3/users/me/calendarList") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
-      return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, ...c }) => c) });
+      return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, list_error: _l, ...c }) => c) });
     }
     const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
     if (evOne && req.method === "DELETE") {
@@ -320,6 +351,7 @@ const server = createServer(async (req, res) => {
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      if (cal.list_error) return send(res, cal.list_error, { error: { code: cal.list_error, message: "fake calendar error" } });
       const tz = url.searchParams.get("timeZone") ?? cal.timeZone ?? "UTC";
       const min = Date.parse(url.searchParams.get("timeMin") ?? "1970-01-01T00:00:00Z");
       const max = Date.parse(url.searchParams.get("timeMax") ?? "2100-01-01T00:00:00Z");

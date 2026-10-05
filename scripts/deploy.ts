@@ -89,7 +89,10 @@ const tg = (await res.json()) as { ok: boolean; description?: string };
 if (!tg.ok) throw new Error(`setWebhook failed: ${tg.description}`);
 
 // 5. Меню команд Telegram (кнопка «/» в чате)
-const commands = { ru: [{ command: "settings", description: "Настройки" }], en: [{ command: "settings", description: "Settings" }] };
+const commands = {
+  ru: [{ command: "settings", description: "Настройки" }, { command: "disconnect", description: "Отключить календарь и удалить данные" }],
+  en: [{ command: "settings", description: "Settings" }, { command: "disconnect", description: "Disconnect calendar and delete data" }],
+};
 for (const [lang, list] of [["", commands.ru], ["ru", commands.ru], ["en", commands.en]] as const) {
   const r = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
     method: "POST",

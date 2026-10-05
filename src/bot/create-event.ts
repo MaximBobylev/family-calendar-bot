@@ -323,7 +323,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
 async function findOverlaps(provider: CalendarProvider, o: CreateOption, calendars: CalendarInfo[]): Promise<string[]> {
   if (o.allDay) return [];
   const relevant = new Set([o.calendarId, calendars.find((c) => c.isDefault)?.id]);
-  const events = await provider.listEvents(localToUtc(o.start!, o.tz), localToUtc(o.end!, o.tz), o.tz);
+  const { events } = await provider.listEvents(localToUtc(o.start!, o.tz), localToUtc(o.end!, o.tz), o.tz);
   return events
     .filter((e) => !e.allDay && !e.free && relevant.has(e.ref.calendarId))
     .map((e) => `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}${e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, "ru")})` : ""} ${escapeHtml(e.title)}`);

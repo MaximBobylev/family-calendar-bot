@@ -80,11 +80,14 @@ export interface EventPatch {
   end?: Moment;
 }
 
-/** Интерфейс провайдера календаря (ADR-0003). Реализация — Google. */
+/** Интерфейс провайдера календаря (ADR-0003). Реализация — Google. Ошибки — классы ниже (CalendarError). */
 export interface CalendarProvider {
   calendars(): Promise<CalendarInfo[]>;
-  /** События всех календарей пользователя в [fromUtc, toUtc), локальное время — в поясе `tz`. */
-  listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<CalendarEvent[]>;
+  /**
+   * События всех календарей пользователя в [fromUtc, toUtc), локальное время — в поясе `tz`.
+   * Один календарь не загрузился — он в `failed`, остальные события есть; не загрузился ни один — ошибка.
+   */
+  listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<EventList>;
   createEvent(e: NewEvent): Promise<CreatedEvent>;
   getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null>;
   /** etag — защита от параллельных правок: если событие изменили, провайдер вернёт ошибку 412. */
@@ -95,3 +98,23 @@ export interface CalendarProvider {
   /** Отклонить приглашение (пользователь — участник, не организатор): организатор получит ответ. */
   declineEvent(ref: EventRef, tz: string): Promise<void>;
 }
+
+/** События всех календарей; календари, которые не загрузились, — отдельно: показываем остальное (tech-debt #12). */
+export interface EventList {
+  events: CalendarEvent[];
+  failed: { id: string; title: string }[];
+}
+
+// --- Ошибки провайдера (tech-debt #12): бот не знает про Google, адаптер переводит свои ошибки в эти ---
+
+export class CalendarError extends Error {}
+/** Событие (или календарь) уже удалено. */
+export class EventGone extends CalendarError {}
+/** Событие изменили после того, как мы его прочитали (etag). */
+export class EventConflict extends CalendarError {}
+/** Нет прав на действие: календарь только для чтения, чужое событие. */
+export class PermissionDenied extends CalendarError {}
+/** Доступ отозван (или токен не расшифровать) — нужно переподключить (US-02). */
+export class AuthRevoked extends CalendarError {}
+/** Провайдер не отвечает: сеть, таймаут, 5xx, 429, лимиты. */
+export class ProviderUnavailable extends CalendarError {}

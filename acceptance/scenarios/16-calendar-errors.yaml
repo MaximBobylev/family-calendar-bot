@@ -1,0 +1,75 @@
+# tech-debt #12, US-14: один календарь не читается (удалён, нет доступа, сбой) — показываем остальное и говорим,
+# какого календаря нет. Не читается ни один — «Google не отвечает». «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: read-one-calendar-fails-shows-the-rest
+  story: US-14
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, list_error: 404 }
+            - { id: work@group.calendar.google.com, summary: "Работа", accessRole: reader, timeZone: Europe/Moscow }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка", "Календарь «Семья» не загрузился"], text_not_contains: ["не отвечает"] }
+
+- id: read-several-calendars-fail
+  story: US-14
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, list_error: 403 }
+          - { id: work@group.calendar.google.com, summary: "Работа", accessRole: reader, list_error: 500 }
+    - llm: { "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Встреч нет", "Календари «Работа», «Семья» не загрузились"] }
+
+- id: read-all-calendars-fail-is-an-error
+  story: US-14
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, list_error: 503 }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, list_error: 503 }
+    - llm: { "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Google Календарь не отвечает"], text_not_contains: ["Встреч нет"] }
+
+- id: create-works-when-other-calendar-fails
+  story: US-30
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "10:30"], buttons: ["Создать", "Отмена"] }
+
+- id: digest-shows-what-loaded
+  story: US-70
+  steps:
+    - *setup
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Доброе утро", "Планёрка", "Календарь «Семья» не загрузился"] }
