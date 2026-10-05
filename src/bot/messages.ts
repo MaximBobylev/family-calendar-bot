@@ -19,6 +19,11 @@ const messages = {
     ru: "Чтобы начать, подключите Google Календарь — это займёт пару кликов.",
     en: "To get started, connect your Google Calendar — it takes a couple of clicks.",
   },
+  reconnectPrompt: {
+    ru: "Сейчас подключён {email}. Переподключить тот же аккаунт можно в любой момент — настройки, названия календарей и календарь по умолчанию сохранятся. Другой аккаунт заменит текущий.",
+    en: "Connected: {email}. You can reconnect the same account any time — settings, calendar names and the default calendar are kept. Another account replaces the current one.",
+  },
+  settingsGoogleButton: { ru: "🔗 Google", en: "🔗 Google" },
   connectButton: {
     ru: "Подключить Google Календарь",
     en: "Connect Google Calendar",

@@ -29,7 +29,7 @@ import { t } from "./messages";
 import { escapeHtml, telegramName } from "./format";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
-import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, showSettings } from "./settings";
+import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, sendReconnect, showSettings } from "./settings";
 import { isEmptySpeech, transcribe, type Transcript } from "../stt/whisper";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
@@ -96,6 +96,10 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     return;
   }
 
+  if (/^\/connect(@\w+)?$/i.test(text)) {
+    await sendReconnect(ctx, user, chatId);
+    return;
+  }
   if (/^\/settings(@\w+)?$/i.test(text) || /^(настройки|settings)$/i.test(text)) {
     await showSettings(ctx, user, chatId);
     return;

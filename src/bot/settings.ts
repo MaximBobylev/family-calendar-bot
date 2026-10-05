@@ -16,6 +16,7 @@ import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
 import { escapeHtml, hhmm } from "./format";
+import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
 
 const AWAIT_TTL_MS = 15 * 60 * 1000;
@@ -95,7 +96,7 @@ function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[]): Scr
       [btn(t("settingsCalendarsButton", l), "cals"), btn(t("settingsTzButton", l), "tz")],
       [btn(t("settingsDurationButton", l), "dur"), btn(t("settingsRemindersButton", l), "rem")],
       [btn(t("settingsAllDayButton", l), "rad"), btn(t("settingsDigestButton", l), "dig")],
-      [btn(t("settingsLanguageButton", l), `lang:${l === "en" ? "ru" : "en"}`)],
+      [btn(t("settingsLanguageButton", l), `lang:${l === "en" ? "ru" : "en"}`), btn(t("settingsGoogleButton", l), "conn")],
     ],
   };
 }
@@ -207,6 +208,9 @@ export async function handleSettingsCallback(
 
   switch (cb.section) {
     case "menu": break;
+    case "conn":
+      await sendReconnect(ctx, user, chatId);
+      return undefined;
     case "cals": screen = calendarsScreen(u, calendars); break;
     case "cal": if (cal) screen = calendarScreen(u, cal); break;
     case "cdef":
@@ -349,4 +353,11 @@ export async function handleSettingsInput(
   }
   await ctx.telegram.sendMessage(chatId, t("settingsAliasesAdded", l, { name: cal.title, aliases: added.map((a) => `«${a}»`).join(", "), first: added[0]! }));
   return true;
+}
+
+/** Ссылка «Подключить» для уже подключённого: переподключение того же аккаунта сохраняет настройки (tech-debt #19). */
+export async function sendReconnect(ctx: AppContext, user: User, chatId: number): Promise<void> {
+  const row = await ctx.db.prepare("SELECT email FROM provider_accounts WHERE user_id = ? AND provider = 'google'").bind(user.id).first<{ email: string | null }>();
+  const text = row ? t("reconnectPrompt", user.locale, { email: row.email ?? "Google" }) : t("connectPrompt", user.locale);
+  await ctx.telegram.sendMessage(chatId, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
 }

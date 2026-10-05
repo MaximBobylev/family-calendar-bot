@@ -30,7 +30,7 @@
             - "🔔 Для событий на весь день: без напоминаний"
             - "🗣 Язык: русский"
             - "☀️ Утренняя сводка: в 08:00"
-          buttons: ["🗓 Календари", "🌍 Пояс", "⏱ Длительность", "🔔 Напоминания", "🔔 Весь день", "☀️ Сводка", "🗣 English"]
+          buttons: ["🗓 Календари", "🌍 Пояс", "⏱ Длительность", "🔔 Напоминания", "🔔 Весь день", "☀️ Сводка", "🗣 English", "🔗 Google"]
 
 - id: settings-default-duration
   story: US-04
@@ -178,5 +178,21 @@
     - press: "🗣 English"
     - expect_telegram:
         - { text_contains: ["Настройки"] }
-        - { method: editMessageText, text_contains: ["⚙️ <b>Settings</b>", "🗣 Language: English", "Reminders: as in Google"], buttons: ["🗓 Calendars", "🌍 Time zone", "⏱ Length", "🔔 Reminders", "🔔 All-day", "☀️ Summary", "🗣 Русский"] }
+        - { method: editMessageText, text_contains: ["⚙️ <b>Settings</b>", "🗣 Language: English", "Reminders: as in Google"], buttons: ["🗓 Calendars", "🌍 Time zone", "⏱ Length", "🔔 Reminders", "🔔 All-day", "☀️ Summary", "🗣 Русский", "🔗 Google"] }
     - expect_callback_answer: { text_contains: ["Saved"] }
+
+- id: reconnect-when-already-connected
+  story: US-02
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "/connect" }
+    - expect_telegram:
+        - { text_contains: ["Сейчас подключён ivan@gmail.com", "настройки, названия календарей и календарь по умолчанию сохранятся"], buttons: ["Подключить Google Календарь"] }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🔗 Google"
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { text_contains: ["Сейчас подключён ivan@gmail.com"] }
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { text_contains: ["ivan@gmail.com"] }
