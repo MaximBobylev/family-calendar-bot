@@ -30,7 +30,12 @@ type Step =
   /** Повторить шаги N раз (лимиты, серии запросов). */
   | { repeat: { times: number; steps: Step[] } }
   /** Сколько всего запросов получила LLM с начала сценария. */
+  /** Запросы к основному LLM (запасной считается отдельно — expect_provider_calls). */
   | { expect_llm_requests: number }
+  /** Провайдер отвечает ошибкой (0 — снова работает): llm | llm-backup | stt | stt-openai. */
+  | { provider_outage: { provider: string; status: number } }
+  /** Сколько раз вызывался каждый провайдер с последнего сброса: {llm: 1, llm-backup: 1, stt-openai: 1, stt: 0}. */
+  | { expect_provider_calls: Record<string, number> }
   | { google_account: { email: string; calendars: unknown[] } }
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
@@ -572,8 +577,19 @@ async function runScenario(s: Scenario): Promise<void> {
       if (calls.length !== step.expect_telegram_count)
         throw new AssertionError(`${where}: expected ${step.expect_telegram_count} Telegram call(s), got ${calls.length}`);
     } else if ("expect_llm_requests" in step) {
-      const list = (await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as unknown[];
+      const list = ((await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as { _via?: string }[]).filter((r) => r._via === "llm");
       if (list.length !== step.expect_llm_requests) throw new AssertionError(`${where}: ${list.length} LLM requests, expected ${step.expect_llm_requests}`);
+    } else if ("provider_outage" in step) {
+      await post(`${FAKES}/__fake/outage`, step.provider_outage);
+    } else if ("expect_provider_calls" in step) {
+      const llm = (await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as { _via?: string }[];
+      const stt = (await (await fetch(`${FAKES}/__fake/stt/requests`)).json()) as { via: string }[];
+      const got: Record<string, number> = {};
+      for (const r of [...llm.map((x) => x._via ?? "llm"), ...stt.map((x) => x.via)]) got[r] = (got[r] ?? 0) + 1;
+      for (const [provider, n] of Object.entries(step.expect_provider_calls)) {
+        if ((got[provider] ?? 0) !== n)
+          throw new AssertionError(`${where}: ${provider} called ${got[provider] ?? 0} time(s), expected ${n}; all: ${JSON.stringify(got)}`);
+      }
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

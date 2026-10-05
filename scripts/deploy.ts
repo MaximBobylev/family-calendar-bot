@@ -3,7 +3,7 @@
 //
 // 1. Миграции D1 (remote)
 // 2. wrangler deploy → адрес Worker'а
-// 3. Секреты Worker'а (wrangler secret bulk); PUBLIC_BASE_URL и LLM_BASE вычисляются
+// 3. Секреты Worker'а (wrangler secret bulk); PUBLIC_BASE_URL, LLM_BASE и цепочки LLM_CHAIN/STT_CHAIN вычисляются
 // 4. Webhook Telegram на /telegram/webhook с секретом
 
 import { spawnSync } from "node:child_process";
@@ -51,6 +51,41 @@ const url = /https:\/\/[\w.-]+\.workers\.dev/.exec(out)?.[0];
 if (!url) throw new Error("could not find workers.dev URL in wrangler deploy output");
 
 // 3. Секреты
+// Цепочки провайдеров (src/config.ts): основной → запасные; Workers AI — всегда последний запасной.
+const workersAi = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`;
+const llmChain: Record<string, unknown>[] = [];
+const openrouterKey = env.OPENROUTER_API_KEY?.trim();
+if (openrouterKey) {
+  const model = env.OPENROUTER_MODEL?.trim() || "google/gemma-4-26b-a4b-it:free";
+  llmChain.push({
+    name: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: openrouterKey,
+    model,
+    // Gemma 4 с «размышлением» отвечает 5–6 с (docs/research/llm-intents-eval.md)
+    extraBody: { reasoning: { enabled: false } },
+    ...(model.endsWith(":free") ? { inPerM: 0, outPerM: 0 } : {}),
+  });
+}
+llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8" });
+
+const sttChain: Record<string, unknown>[] = [];
+const groqKey = env.GROQ_API_KEY?.trim();
+if (groqKey) {
+  // Groq: whisper-large-v3-turbo ≈ $0.04 за час аудио
+  sttChain.push({
+    name: "groq",
+    kind: "openai",
+    baseUrl: "https://api.groq.com/openai/v1",
+    apiKey: groqKey,
+    model: env.GROQ_STT_MODEL?.trim() || "whisper-large-v3-turbo",
+    perMin: 0.04 / 60,
+  });
+}
+sttChain.push({ name: "workers-ai", kind: "workers-ai", baseUrl: workersAi, apiKey: need("LLM_API_KEY"), model: "@cf/openai/whisper-large-v3-turbo" });
+console.log(`\nLLM: ${llmChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
+console.log(`STT: ${sttChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
+
 const secrets: Record<string, string> = {
   TELEGRAM_BOT_TOKEN: need("TELEGRAM_BOT_TOKEN"),
   TELEGRAM_WEBHOOK_SECRET: need("TELEGRAM_WEBHOOK_SECRET"),
@@ -62,6 +97,8 @@ const secrets: Record<string, string> = {
   LLM_BASE: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
   STT_BASE: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`,
   PUBLIC_BASE_URL: url,
+  LLM_CHAIN: JSON.stringify(llmChain),
+  STT_CHAIN: JSON.stringify(sttChain),
 };
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
   const v = env[name]?.trim();

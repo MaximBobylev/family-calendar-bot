@@ -1,0 +1,77 @@
+# Цепочки провайдеров (ADR-0002): основной → запасной. Прод: OpenRouter → Workers AI для команд,
+# Groq → Workers AI для голоса. Здесь оба — фейки; «отказ» включается шагом provider_outage.
+
+- id: llm-primary-used-when-healthy
+  story: US-11
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+    - expect_provider_calls: { llm: 1, llm-backup: 0 }
+
+- id: llm-falls-back-on-rate-limit
+  story: US-14
+  steps:
+    - *setup
+    # Бесплатный лимит основного провайдера исчерпан (429) — ответ через запасной, пользователь не замечает
+    - provider_outage: { provider: llm, status: 429 }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+    - expect_provider_calls: { llm: 1, llm-backup: 1 }
+
+- id: llm-all-providers-down
+  story: US-14
+  steps:
+    - *setup
+    - provider_outage: { provider: llm, status: 503 }
+    - provider_outage: { provider: llm-backup, status: 429 }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Не могу разобрать команду сейчас"] }
+
+- id: stt-primary-openai-compatible
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Что у меня завтра?</i>"] }
+        - { text_contains: ["Завтра, чт, 8 октября"] }
+    - expect_provider_calls: { stt-openai: 1, stt: 0 }
+
+- id: stt-falls-back-to-workers-ai
+  story: US-10
+  steps:
+    - *setup
+    - provider_outage: { provider: stt-openai, status: 503 }
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Что у меня завтра?</i>"] }
+        - { text_contains: ["Завтра, чт, 8 октября"] }
+    - expect_provider_calls: { stt-openai: 1, stt: 1 }
+
+- id: stt-all-providers-down
+  story: US-10
+  steps:
+    - *setup
+    - provider_outage: { provider: stt-openai, status: 429 }
+    - provider_outage: { provider: stt, status: 429 }
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Не могу распознать голос сейчас"] }

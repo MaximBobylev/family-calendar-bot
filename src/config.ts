@@ -21,8 +21,10 @@ export interface Config {
   allowedTelegramIds: Set<string>;
   testMode: boolean;
   admin: { user: string; password: string };
-  llm: LlmConfig;
-  stt: SttConfig;
+  /** Цепочка LLM: основной → запасные (LLM_CHAIN; без него — один Workers AI из LLM_BASE/LLM_MODEL). */
+  llm: LlmConfig[];
+  /** Цепочка STT: основной → запасные (STT_CHAIN; без него — один Workers AI из STT_BASE/STT_MODEL). */
+  stt: SttConfig[];
   limits: UsageLimits;
   costs: CostEstimates;
 }
@@ -67,10 +69,21 @@ export function loadConfig(env: Env): Config {
     ),
     testMode: env.TEST_MODE === "true",
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
-    llm: { baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL },
+    llm: parseChain<LlmConfig>(env.LLM_CHAIN, "LLM_CHAIN") ?? [{ name: "workers-ai", baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL }],
     // Тот же API-токен Cloudflare, что и для LLM
-    stt: { baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
+    stt: parseChain<SttConfig>(env.STT_CHAIN, "STT_CHAIN") ?? [
+      { name: "workers-ai", kind: "workers-ai", baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
+    ],
     limits: USAGE_LIMITS,
     costs: COST_ESTIMATES,
   };
+}
+
+/** JSON-массив провайдеров из секрета (собирает scripts/deploy.ts). Битый или пустой — ошибка конфигурации, не тихий откат. */
+function parseChain<T extends { baseUrl: string; apiKey: string; model: string }>(json: string | undefined, name: string): T[] | undefined {
+  if (!json?.trim()) return undefined;
+  const chain = JSON.parse(json) as T[];
+  if (!Array.isArray(chain) || chain.length === 0 || chain.some((c) => !c.baseUrl || !c.model))
+    throw new Error(`${name}: expected a non-empty array of {baseUrl, apiKey, model}`);
+  return chain;
 }

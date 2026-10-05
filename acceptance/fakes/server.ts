@@ -5,7 +5,9 @@
 //                                     был code_challenge — нужен верный code_verifier (PKCE S256), иначе invalid_grant
 //   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>")
 //   /llm/v1/chat/completions        — фейк LLM: ответ берётся из фикстур по тексту пользователя
+//   /llm-backup/v1/chat/completions — запасной провайдер LLM: те же фикстуры (цепочка провайдеров)
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
+//   /stt-openai/audio/transcriptions — фейк OpenAI-совместимого STT (Groq), multipart: те же фикстуры
 //   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые)
 //
 // Управление для раннера:
@@ -25,6 +27,9 @@
 //   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой
 //   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
 //   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
+//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai, status}: провайдер отвечает
+//                                     этой ошибкой (0 — снова работает); проверка переключения на запасной
+//   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
 //   POST /__fake/reset              — сброс состояния
 
 import { createHash } from "node:crypto";
@@ -75,6 +80,9 @@ let llmFixtures = new Map<string, LlmFixture>();
 let telegramFiles = new Map<string, string>();
 let sttFixtures = new Map<string, { text?: string; error?: number }>();
 let llmRequests: unknown[] = [];
+let sttRequests: { via: string }[] = [];
+/** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
+let outages = new Map<string, number>();
 let revocations: { token: string; status: number }[] = [];
 let revokeFailStatus = 0;
 
@@ -169,6 +177,8 @@ const server = createServer(async (req, res) => {
       authCodeSeq = 1;
       llmFixtures = new Map();
       llmRequests = [];
+      sttRequests = [];
+      outages = new Map();
       telegramFiles = new Map();
       sttFixtures = new Map();
       nextEventId = 1;
@@ -219,8 +229,37 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    if (url.pathname === "/__fake/outage" && req.method === "POST") {
+      const { provider, status } = (await readJson(req)) as { provider: string; status: number };
+      if (status) outages.set(provider, status);
+      else outages.delete(provider);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/stt/requests") return send(res, 200, sttRequests);
+
+    // --- STT, OpenAI-совместимый (Groq): multipart, аудио — файл в поле file ---
+    if (url.pathname === "/stt-openai/audio/transcriptions" && req.method === "POST") {
+      sttRequests.push({ via: "stt-openai" });
+      const outage = outages.get("stt-openai");
+      if (outage) return send(res, outage, { error: { message: "fake outage" } });
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!/name="model"/.test(raw) || !/filename="voice\.ogg"/.test(raw))
+        return send(res, 400, { error: { message: "fake stt: expected multipart with file and model" } });
+      // Содержимое «аудио» в тестах — короткая строка; ищем фикстуру, чей ключ есть в теле
+      const entry = [...sttFixtures.entries()].find(([content]) => raw.includes(`\r\n\r\n${content}\r\n`));
+      if (!entry) return send(res, 400, { error: { message: "fake stt: no fixture for the uploaded file" } });
+      const fx = entry[1];
+      if (fx.error) return send(res, fx.error, { error: { message: "fake stt error" } });
+      return send(res, 200, { text: fx.text ?? "", language: "russian", duration: 3 });
+    }
+
     // --- Whisper (Workers AI REST) ---
     if (url.pathname.startsWith("/stt/run/") && req.method === "POST") {
+      sttRequests.push({ via: "stt" });
+      const outage = outages.get("stt");
+      if (outage) return send(res, outage, { success: false, errors: [{ message: "fake outage" }] });
       const { audio } = (await readJson(req)) as { audio?: string };
       const content = Buffer.from(audio ?? "", "base64").toString("utf8");
       const fx = sttFixtures.get(content);
@@ -254,9 +293,13 @@ const server = createServer(async (req, res) => {
     }
 
     // --- LLM (OpenAI-совместимый) ---
-    if (url.pathname === "/llm/v1/chat/completions" && req.method === "POST") {
+    const llmPath = /^\/(llm|llm-backup)\/v1\/chat\/completions$/.exec(url.pathname);
+    if (llmPath && req.method === "POST") {
+      const via = llmPath[1]!;
       const body = (await readJson(req)) as { messages?: { role: string; content: string }[] };
-      llmRequests.push(body);
+      llmRequests.push({ ...body, _via: via });
+      const outage = outages.get(via);
+      if (outage) return send(res, outage, { error: { message: "fake outage" } });
       const text = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "";
       const fx = llmFixtures.get(text);
       if (!fx) return send(res, 400, { error: `fake llm: no fixture for «${text}»` });

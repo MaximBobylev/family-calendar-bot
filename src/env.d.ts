@@ -17,6 +17,10 @@ interface Env {
   LLM_BASE: string;
   /** Workers AI REST: https://api.cloudflare.com/client/v4/accounts/<id>/ai (ключ — LLM_API_KEY). */
   STT_BASE: string;
+  /** Необязательно: JSON-цепочка LLM [{name, baseUrl, apiKey, model, extraBody?, inPerM?, outPerM?}] (scripts/deploy.ts). */
+  LLM_CHAIN?: string;
+  /** Необязательно: JSON-цепочка STT [{name, kind, baseUrl, apiKey, model, perMin?}] (scripts/deploy.ts). */
+  STT_CHAIN?: string;
   /** Вход на /admin (HTTP Basic). Пустой пароль — страница недоступна. */
   ADMIN_USER: string;
   ADMIN_PASSWORD: string;

@@ -176,6 +176,38 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
   return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls };
 }
 
+/** Провайдер не ответил: статус/текст ошибки — для журнала. */
+export interface LlmAttemptError {
+  provider: string;
+  error: string;
+}
+
+/**
+ * Цепочка провайдеров (основной → запасные): ошибка (429, 5xx, таймаут, сеть) — пробуем следующий.
+ * Пустой ответ без tools — не ошибка провайдера, дальше не идём.
+ */
+export async function parseIntentChain(
+  chain: LlmConfig[],
+  text: string,
+  context: IntentContext,
+): Promise<{ parsed: ParsedIntent; via: LlmConfig; failed: LlmAttemptError[] }> {
+  const failed: LlmAttemptError[] = [];
+  for (const cfg of chain) {
+    try {
+      return { parsed: await parseIntent(cfg, text, context), via: cfg, failed };
+    } catch (e) {
+      failed.push({ provider: cfg.name ?? cfg.baseUrl, error: String(e instanceof Error ? e.message : e).slice(0, 300) });
+    }
+  }
+  throw new LlmChainError(failed);
+}
+
+export class LlmChainError extends Error {
+  constructor(readonly failed: LlmAttemptError[]) {
+    super(failed.map((f) => `${f.provider}: ${f.error}`).join("; ") || "no LLM providers configured");
+  }
+}
+
 /** Вызовы tools → интент (отдельно — чтобы замеры могли переоценить сохранённые ответы без новых вызовов). */
 export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   // В MVP — одна команда на сообщение (US-12)

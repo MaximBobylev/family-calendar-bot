@@ -5,9 +5,16 @@
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 
 export interface LlmConfig {
+  /** Имя для журнала и /admin: «openrouter», «workers-ai». Нет — адрес. */
+  name?: string;
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Поля запроса провайдера: OpenRouter `reasoning`, Gemma `chat_template_kwargs` и т.п. */
+  extraBody?: Record<string, unknown>;
+  /** Оценка цены, $ за 1M токенов; нет — COST_ESTIMATES (Workers AI). Бесплатные — 0. */
+  inPerM?: number;
+  outPerM?: number;
 }
 
 export interface ToolDefinition {
@@ -50,6 +57,7 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
         tools,
         tool_choice: "required",
         max_tokens: opts.maxTokens ?? 300,
+        ...cfg.extraBody,
         ...opts.extraBody,
       }),
     },

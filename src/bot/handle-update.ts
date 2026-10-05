@@ -19,7 +19,7 @@ import {
 import { recordUsage, usageWindow } from "../db/usage";
 import { checkLimit, HOUR_MS, llmCostMicroUsd, MINUTE_MS, sttCostMicroUsd } from "../limits";
 import { ensureTelegramUser, type User } from "../db/users";
-import { parseIntent, type ParsedIntent } from "../nlu/intents";
+import { LlmChainError, parseIntentChain, type ParsedIntent } from "../nlu/intents";
 import type { TgCallbackQuery, TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
 import {
@@ -42,7 +42,7 @@ import { escapeHtml, telegramName } from "./format";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
 import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, sendReconnect, showSettings } from "./settings";
-import { isEmptySpeech, transcribe, type Transcript } from "../stt/whisper";
+import { isEmptySpeech, transcribeChain, type Transcript } from "../stt/whisper";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
@@ -200,35 +200,44 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   let parsed: ParsedIntent;
   try {
     // Команда — короткая фраза; длинный текст в LLM не шлём (стоимость, prompt injection)
-    parsed = await parseIntent(ctx.config.llm, text.slice(0, 500), { calendars: calendarNames.results.map((r) => r.name) });
-  } catch (e) {
-    console.error("llm failed", e);
+    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars: calendarNames.results.map((r) => r.name) });
+    parsed = res.parsed;
+    const via = res.via;
+    const costs = {
+      ...ctx.config.costs,
+      ...(via.inPerM !== undefined ? { llmInPerM: via.inPerM } : {}),
+      ...(via.outPerM !== undefined ? { llmOutPerM: via.outPerM } : {}),
+    };
     await recordUsage(ctx.db, {
       userId: user.id,
       kind: "llm",
-      provider: ctx.config.llm.baseUrl,
-      model: ctx.config.llm.model,
+      provider: via.name ?? via.baseUrl,
+      model: via.model,
+      tokensIn: parsed.tokensIn,
+      tokensOut: parsed.tokensOut,
+      costMicroUsd: llmCostMicroUsd(costs, parsed.tokensIn, parsed.tokensOut),
       text,
-      result: String(e),
+      // Упавшие до него провайдеры — видно в журнале, что сработал запасной
+      result: res.failed.length ? { ...parsed.intent, fallbackFrom: res.failed } : parsed.intent,
+      outcome: "ok",
+      now: ctx.clock.now(),
+    });
+  } catch (e) {
+    console.error("llm failed", e);
+    const first = ctx.config.llm[0];
+    await recordUsage(ctx.db, {
+      userId: user.id,
+      kind: "llm",
+      provider: e instanceof LlmChainError ? "chain" : (first?.name ?? first?.baseUrl ?? "none"),
+      model: first?.model ?? "none",
+      text,
+      result: e instanceof LlmChainError ? { failed: e.failed } : String(e),
       outcome: "error",
       now: ctx.clock.now(),
     });
     await ctx.telegram.sendMessage(chatId, t("llmUnavailable", user.locale));
     return;
   }
-  await recordUsage(ctx.db, {
-    userId: user.id,
-    kind: "llm",
-    provider: ctx.config.llm.baseUrl,
-    model: ctx.config.llm.model,
-    tokensIn: parsed.tokensIn,
-    tokensOut: parsed.tokensOut,
-    costMicroUsd: llmCostMicroUsd(ctx.config.costs, parsed.tokensIn, parsed.tokensOut),
-    text,
-    result: parsed.intent,
-    outcome: "ok",
-    now: ctx.clock.now(),
-  });
 
   let intent = parsed.intent;
   // Сильные глаголы — это изменение/удаление, даже если LLM решила иначе (замер Qwen3, 2026-10-04)
@@ -337,24 +346,40 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
     await ctx.telegram.sendMessage(chatId, t("voiceDownloadFailed", user.locale));
     return null;
   }
-  const usage = { userId: user.id, kind: "stt" as const, provider: ctx.config.stt.baseUrl, model: ctx.config.stt.model, audioMs: voice.duration * 1000 };
+  const audioMs = voice.duration * 1000;
   let transcript: Transcript;
   try {
-    transcript = await transcribe(ctx.config.stt, audio);
+    const res = await transcribeChain(ctx.config.stt, audio);
+    transcript = res.transcript;
+    const costs = res.via.perMin !== undefined ? { ...ctx.config.costs, sttPerMin: res.via.perMin } : ctx.config.costs;
+    await recordUsage(ctx.db, {
+      userId: user.id,
+      kind: "stt",
+      provider: res.via.name ?? res.via.baseUrl,
+      model: res.via.model,
+      audioMs,
+      costMicroUsd: sttCostMicroUsd(costs, audioMs),
+      text: transcript.text,
+      result: { language: transcript.language, ...(res.failed.length ? { fallbackFrom: res.failed } : {}) },
+      outcome: "ok",
+      now: ctx.clock.now(),
+    });
   } catch (e) {
     console.error("stt failed", e);
-    await recordUsage(ctx.db, { ...usage, result: String(e), outcome: "error", now: ctx.clock.now() });
+    const first = ctx.config.stt[0];
+    await recordUsage(ctx.db, {
+      userId: user.id,
+      kind: "stt",
+      provider: "chain",
+      model: first?.model ?? "none",
+      audioMs,
+      result: String(e),
+      outcome: "error",
+      now: ctx.clock.now(),
+    });
     await ctx.telegram.sendMessage(chatId, t("sttUnavailable", user.locale));
     return null;
   }
-  await recordUsage(ctx.db, {
-    ...usage,
-    costMicroUsd: sttCostMicroUsd(ctx.config.costs, usage.audioMs),
-    text: transcript.text,
-    result: { language: transcript.language },
-    outcome: "ok",
-    now: ctx.clock.now(),
-  });
   if (isEmptySpeech(transcript.text)) {
     await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
     return null;
