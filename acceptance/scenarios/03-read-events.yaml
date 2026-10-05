@@ -38,6 +38,9 @@
               events:
                 - { id: h1, summary: "День народного единства", start: { date: "2026-11-04" }, end: { date: "2026-11-05" } }
       - llm:
+          # Так отвечает живая модель (2026-10-05): период — прилагательным
+          "Выведи сводку на сегодняшний день.": { tool: list_events, args: { range: "сегодняшний день" } }
+          "Что у меня на завтрашний день?": { tool: list_events, args: { range: "на завтрашний день" } }
           "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
           "Покажи неделю": { tool: list_events, args: { range: "неделю" } }
           "Что у меня в субботу?": { tool: list_events, args: { range: "в субботу" } }
@@ -58,6 +61,18 @@
             - "📍 Zoom"
             - "19:00–21:00  Ужин у бабушки · Семья"
           text_not_contains: ["Скучная встреча", "Офис", "Иван"]
+
+- id: read-day-adjectives
+  story: US-20
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Выведи сводку на сегодняшний день." }
+    - expect_telegram:
+        - text_contains: ["Сегодня, ср, 7 октября"]
+          text_not_contains: ["Завтра", "Не понял"]
+    - telegram: { from: 1001, text: "Что у меня на завтрашний день?" }
+    - expect_telegram:
+        - text_contains: ["Завтра, чт, 8 октября", "Планёрка"]
 
 - id: read-week-groups-by-day
   story: US-20

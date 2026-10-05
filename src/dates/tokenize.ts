@@ -27,6 +27,12 @@ export function normalize(text: string): string {
     .trim();
 }
 
+/** Порядок важен: «послезавтрашн» раньше «завтрашн». */
+const DAY_ADJECTIVES: [string, string][] = [
+  ["послезавтрашн", "послезавтра"], ["позавчерашн", "позавчера"], ["сегодняшн", "сегодня"], ["завтрашн", "завтра"], ["вчерашн", "вчера"],
+  ["today's", "today"], ["tomorrow's", "tomorrow"], ["yesterday's", "yesterday"],
+];
+
 /** Слова, начинающиеся на «пол», которые сами по себе что-то значат и не делятся. */
 const POL_WORDS = new Set(["полдень", "полночь", "полчаса", "полтора", "полторы", "половине", "пол"]);
 
@@ -45,6 +51,10 @@ function classify(raw: string): Token[] {
   if ((m = /^(\d{1,2})(am|pm)$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }, { t: "mer", v: m[2] as Meridiem }];
   if ((m = /^(\d{1,2})-?(го|е|ое|ого|st|nd|rd|th)$/.exec(raw))) return [{ t: "dayord", v: +m[1]! }];
   if (/^\d+$/.test(raw)) return [{ t: "num", v: +raw, form: "digit" }];
+
+  // «сегодняшний день», «на завтрашнюю», «послезавтрашние встречи» — прилагательное = само наречие
+  const adj = DAY_ADJECTIVES.find(([prefix]) => raw.startsWith(prefix));
+  if (adj) return [{ t: "word", w: adj[1] }];
 
   const mer = MERIDIEM_WORDS.get(raw);
   if (mer) return [{ t: "mer", v: mer }];

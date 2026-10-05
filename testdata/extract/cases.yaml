@@ -21,6 +21,11 @@ cases:
   - { kind: point, text: "Обед с Машей в обед в пятницу", expect: { point: "в обед в пятницу" } }
   - { kind: point, text: "Созвон с командой", expect: {} }
   - { kind: range, text: "Что у меня завтра?", expect: { range: "завтра" } }
+  - { kind: range, text: "Выведи сводку на сегодняшний день.", expect: { range: "на сегодняшний" } }
+  - { kind: range, text: "Что у меня на завтрашний день?", expect: { range: "на завтрашний" } }
+  - { kind: range, text: "Покажи сегодняшние встречи", expect: { range: "сегодняшние" } }
+  - { kind: range, text: "Что на послезавтрашний день?", expect: { range: "на послезавтрашний" } }
+  - { kind: range, text: "Show today's events", expect: { range: "today's" } }
   - { kind: range, text: "Покажи неделю", expect: { range: "неделю" } }
   - { kind: range, text: "Что в семейном календаре на выходных?", expect: { range: "на выходных" } }
   - { kind: range, text: "Что у меня сегодня вечером?", expect: { range: "сегодня вечером" } }
