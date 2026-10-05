@@ -40,13 +40,11 @@ cases:
 
   - id: colru-008
     text: "через пару дней"
-    status: proposed
     note: "«пара» = 2"
     expect: { date: "2026-10-09" }
 
   - id: colru-009
     text: "через пару часов"
-    status: proposed
     note: "«пара» = 2"
     expect: { datetime: "2026-10-07T12:00" }
 
@@ -88,7 +86,6 @@ cases:
 
   - id: colru-017
     text: "завтра с утра"
-    status: proposed
     note: "«с утра» = утром (06–12)"
     expect: { date: { date: "2026-10-08", part: morning } }
 
@@ -368,7 +365,6 @@ cases:
   - id: colru-078
     text: "на пару часов позже"
     kind: shift
-    status: proposed
     note: "«пара» = 2"
     expect: { shift: "+PT2H" }
 
@@ -400,7 +396,6 @@ cases:
   - id: colru-084
     text: "на пару часов"
     kind: duration
-    status: proposed
     note: "«пара» = 2"
     expect: { duration: "PT2H" }
 
@@ -437,7 +432,7 @@ cases:
     kind: recurrence
     expect: { recurrence: { freq: weekly, by_day: [FR], time: "15:00" } }
 
-  # Должны остаться неразобранными
+  # Должны остаться неразобранными (кроме colru-094 — решено 2026-10-05)
 
   - id: colru-091
     text: "к обеду"
@@ -457,5 +452,9 @@ cases:
 
   - id: colru-094
     text: "в 9-15"
-    note: "9:15 или «с 9 до 15» — не гадаем"
-    expect: { error: unparseable }
+    note: "решение 2026-10-05: варианты — сначала 9:15, затем «с 9 до 15». 9:15 прошло → у времени свои варианты (21:15 / завтра 9:15); начало интервала не проверяется, как у «с 9 до 15»"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T21:15" }
+        - { datetime: "2026-10-08T09:15" }
+        - { interval: { start: "2026-10-07T09:00", end: "2026-10-07T15:00" } }

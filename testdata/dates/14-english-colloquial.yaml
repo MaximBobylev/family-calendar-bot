@@ -79,13 +79,11 @@ cases:
 
   - id: colen-015
     text: "in a couple of days"
-    status: proposed
     note: "couple = 2"
     expect: { date: "2026-10-09" }
 
   - id: colen-016
     text: "in a couple of hours"
-    status: proposed
     note: "couple = 2"
     expect: { datetime: "2026-10-07T12:00" }
 
@@ -245,7 +243,6 @@ cases:
   - id: colen-050
     text: "for a couple of hours"
     kind: duration
-    status: proposed
     note: "couple = 2"
     expect: { duration: "PT2H" }
 

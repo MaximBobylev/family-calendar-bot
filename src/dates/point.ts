@@ -40,7 +40,11 @@ type Period =
   | { k: "week"; which: "this" | "next" }
   | { k: "weekend"; which: "this" | "next" }
   | { k: "month"; which: "this" | "next" | number }
-  | { k: "nextDays"; n: number };
+  | { k: "nextDays"; n: number }
+  /** «в начале месяца», «в конце следующей недели», «в середине ноября» (решение 2026-10-05). */
+  | { k: "segment"; unit: "week" | "month"; seg: Segment; which: "auto" | "this" | "next" | number };
+
+type Segment = "begin" | "middle" | "end";
 
 interface Ast {
   date?: DateAst;
@@ -52,6 +56,12 @@ interface Ast {
   dateRange?: { from: AbsAst; to: AbsAst };
   period?: Period;
   week?: "this" | "next";
+  /** «на неделе»: для чтения — эта неделя, для события — один день в середине оставшихся будних. */
+  vagueWeek?: boolean;
+  /** «к пятнице»: дата без времени → 09:00 того же дня. */
+  byDate?: boolean;
+  /** «в 9-15»: кроме интервала 9–15 — вариант «9:15» (показывается первым). */
+  altTime?: TimeAst;
 }
 
 class Unparseable extends Error {
@@ -201,7 +211,7 @@ export function resolveHour(t: TimeAst): ResolvedHour {
 }
 
 const PART_AS_MERIDIEM: Record<DayPart, Meridiem> = {
-  morning: "am", day: "day", afternoon: "pm", evening: "pm", night: "night",
+  morning: "am", day: "day", afternoon: "pm", late_afternoon: "pm", evening: "pm", night: "night",
 };
 
 // --- Даты ------------------------------------------------------------------
@@ -254,6 +264,31 @@ const NEXT_PREP = new Set(["следующей", "следующем", "буду
 /** Часть суток в именительном/винительном: «на вечер», «завтрашнее утро» — только после дня или «на». */
 const DAY_PART_NOMINATIVE = new Map<string, DayPart>([["утро", "morning"], ["вечер", "evening"], ["ночь", "night"]]);
 const EN_DAY_PARTS = new Set(["morning", "afternoon", "evening"]);
+
+/** «в начале / середине / конце» + месяца / недели / ноября. */
+const SEGMENT_WORDS = new Map<string, Segment>([
+  ["начале", "begin"], ["середине", "middle"], ["конце", "end"],
+  ["beginning", "begin"], ["start", "begin"], ["middle", "middle"], ["end", "end"],
+  ["early", "begin"], ["mid", "middle"], ["late", "end"],
+]);
+const THIS_GEN = new Set(["этого", "этой", "текущего", "текущей", "this"]);
+const NEXT_GEN = new Set(["следующего", "следующей", "будущего", "будущей", "след", "next"]);
+
+/** «в первой / во второй половине дня» → утро / день. */
+function halfOfDay(tokens: Token[], i: number): { part: DayPart; n: number } | null {
+  const tok = tokens[i];
+  const w = word(tok);
+  const ord = tok?.t === "num" && tok.form === "ordNom" ? tok.v : w === "первой" || w === "первая" ? 1 : w === "вторая" ? 2 : undefined;
+  if (ord !== 1 && ord !== 2) return null;
+  if (!/^(половине|половину|половина)$/.test(word(tokens[i + 1]) ?? "")) return null;
+  const day = tokens[i + 2];
+  if (!(day?.t === "mer" && day.v === "day")) return null;
+  return { part: ord === 1 ? "morning" : "day", n: 3 };
+}
+
+/** Целые сутки в длительности: «ближайшие сутки» = 1 день. */
+const wholeDays = (d: { minutes: number; days: number; months: number }) =>
+  d.months ? 0 : d.days ? (d.minutes ? 0 : d.days) : d.minutes % 1440 === 0 ? d.minutes / 1440 : 0;
 
 function readAbs(tokens: Token[], i: number): { abs: AbsAst; n: number } | null {
   const tok = tokens[i];
@@ -337,6 +372,24 @@ function parseAst(tokens: Token[]): Ast {
       continue;
     }
 
+    // «к пятнице», «к 5 ноября» — дата без времени станет 09:00 того дня (решение 2026-10-05).
+    // «к 18», «к обеду», «к концу недели» — сроки (R1): дальше не разберутся
+    if (w === "к") { ast.byDate = true; i++; continue; }
+
+    // Части суток из нескольких слов: «ближе к вечеру», «под вечер» (16–20), «в первой половине дня»
+    if (w === "ближе" && w1 === "к" && word(tokens[i + 2]) === "вечеру") { ast.part = "late_afternoon"; i += 3; continue; }
+    if ((w === "под" && w1 === "вечер") || (w === "late" && w1 === "afternoon")) { ast.part = "late_afternoon"; i += 2; continue; }
+    {
+      const half = halfOfDay(tokens, i);
+      if (half) { ast.part = half.part; i += half.n; continue; }
+    }
+    // «first thing tomorrow», «завтра первым делом» = 09:00
+    if ((tok.t === "num" && tok.form === "ordNom" && tok.v === 1 && w1 === "thing") || (w === "первым" && w1 === "делом")) {
+      setTime({ h: 9, m: 0, mer: "am" });
+      i += 2;
+      continue;
+    }
+
     // «в обед» = 13:00 — только после «в»/«at»: само слово «Обед» обычно название события
     if (ctx && (w === "обед" || w === "lunch" || w === "lunchtime")) { setTime({ h: 13, m: 0 }); i++; continue; }
     // «в час дня», «в час ночи», «в час» — час без числа = 1
@@ -346,8 +399,9 @@ function parseAst(tokens: Token[]): Ast {
       i += 1 + tail.n;
       continue;
     }
-    // «с утра» = утром
+    // «с утра пораньше» = 09:00; «с утра» = утром
     const t1 = tokens[i + 1];
+    if (w === "с" && t1?.t === "mer" && t1.v === "am" && word(tokens[i + 2]) === "пораньше") { setTime({ h: 9, m: 0, mer: "am" }); i += 3; continue; }
     if (w === "с" && t1?.t === "mer" && t1.v === "am") { ast.part = "morning"; i += 2; continue; }
 
     // Явный пояс: «по Москве», «по московскому времени», «мск»
@@ -414,6 +468,30 @@ function parseAst(tokens: Token[]): Ast {
     if (w === "полдень" || w === "noon") { setTime({ h: 12, m: 0, special: "noon" }); i++; continue; }
     if (w === "полночь" || w === "midnight") { setTime({ h: 0, m: 0, special: "midnight" }); i++; continue; }
 
+    // «в 10-12» — с 10 до 12; «в 9-15» — ещё и 9:15 (вариант первым); «в 16-15» — 16:15 (решение 2026-10-05)
+    {
+      const b = tokens[i + 2];
+      if (
+        tok.t === "num" && tok.form === "digit" && w1 === "-" && b?.t === "num" && b.form === "digit" &&
+        tok.v <= 24 && b.v <= 24 && !MONTHS.has(word(tokens[i + 3]) ?? "")
+      ) {
+        const tail = readMeridiemTail(tokens, i + 3);
+        const mer = tail.mer ? { mer: tail.mer } : {};
+        if (b.v <= tok.v && b.v >= 10) setTime(checkTime({ h: tok.v, m: b.v, ...mer }));
+        // «в 9-15 вечера» — часть суток не подходит к концу «15»: только время 21:15
+        else if (tail.mer && b.v > 12) {
+          if (b.v !== 15) throw new Unparseable();
+          setTime({ h: tok.v, m: 15, ...mer });
+        } else {
+          if (ast.interval) throw new Unparseable();
+          ast.interval = { start: { h: tok.v, m: 0 }, end: { h: b.v, m: 0, ...mer } };
+          if (b.v === 15) ast.altTime = { h: tok.v, m: 15, ...mer };
+        }
+        i += 3 + tail.n;
+        continue;
+      }
+    }
+
     const spoken = readSpokenTime(tokens, i);
     if (spoken) {
       const tail = readMeridiemTail(tokens, i + spoken.n);
@@ -453,6 +531,29 @@ function parseAst(tokens: Token[]): Ast {
     if (w === "после" && w1 === "завтра") { setDate({ k: "rel", days: 2 }); i += 2; continue; }
     if (w === "day" && w1 === "after" && word(tokens[i + 2]) === "tomorrow") { setDate({ k: "rel", days: 2 }); i += 3; continue; }
 
+    // «в начале / середине / конце месяца», «в конце следующей недели», «в начале ноября», «early next week»
+    {
+      const seg = w ? SEGMENT_WORDS.get(w) : undefined;
+      if (seg) {
+        let k = i + 1;
+        if (word(tokens[k]) === "of") k++;
+        if (word(tokens[k]) === "the") k++;
+        let which: "auto" | "this" | "next" | number = "auto";
+        if (THIS_GEN.has(word(tokens[k]) ?? "")) { which = "this"; k++; }
+        else if (NEXT_GEN.has(word(tokens[k]) ?? "")) { which = "next"; k++; }
+        const u = word(tokens[k]) ?? "";
+        const month = MONTHS.get(u);
+        let unit: "week" | "month";
+        if (/^(месяца|month)$/.test(u)) unit = "month";
+        else if (/^(недели|week)$/.test(u) && seg !== "middle") unit = "week";
+        else if (month && which === "auto") { unit = "month"; which = month; }
+        else throw new Unparseable();
+        ast.period = { k: "segment", unit, seg, which };
+        i = k + 1;
+        continue;
+      }
+    }
+
     // Неделя / выходные / месяц с модификатором
     const isThis = w !== undefined && THIS_WORDS.has(w);
     const isNext = w !== undefined && NEXT_WORDS.has(w);
@@ -481,7 +582,7 @@ function parseAst(tokens: Token[]): Ast {
     // Части суток
     if (w && DAY_PART_WORDS.has(w)) { ast.part = DAY_PART_WORDS.get(w)!; i++; continue; }
     if (w && DAY_PART_NOMINATIVE.has(w) && (ast.date || prev === "на")) { ast.part = DAY_PART_NOMINATIVE.get(w)!; i++; continue; }
-    if (w === "после" && w1 === "обеда") { ast.part = "afternoon"; i += 2; continue; }
+    if (w === "после" && (w1 === "обеда" || w1 === "полудня")) { ast.part = "afternoon"; i += 2; continue; }
     if (tok.t === "mer" && !ast.time) {
       const part: Partial<Record<Meridiem, DayPart>> = { am: "morning", day: "day", pm: "evening", night: "night" };
       ast.part = part[tok.v]!;
@@ -493,8 +594,8 @@ function parseAst(tokens: Token[]): Ast {
     // «на две недели вперёд», «на неделю вперёд» — N дней, включая сегодня
     {
       const dur = readDuration(tokens, i);
-      if (dur?.d.days && !dur.d.minutes && /^(вперед|ahead)$/.test(word(tokens[i + dur.n]) ?? "")) {
-        ast.period = { k: "nextDays", n: dur.d.days };
+      if (dur && wholeDays(dur.d) && /^(вперед|ahead)$/.test(word(tokens[i + dur.n]) ?? "")) {
+        ast.period = { k: "nextDays", n: wholeDays(dur.d) };
         i += dur.n + 1;
         continue;
       }
@@ -519,6 +620,8 @@ function parseAst(tokens: Token[]): Ast {
     }
     if (w && /^(выходные|выходных|weekend)$/.test(w)) { ast.period = { k: "weekend", which: "this" }; i++; continue; }
     if (w && /^(неделю|неделя|week)$/.test(w)) { ast.week = "this"; i++; continue; }
+    // «созвонимся на неделе» (решение 2026-10-05)
+    if (w === "неделе" && prev === "на") { ast.week = "this"; ast.vagueWeek = true; i++; continue; }
     if (w && MONTHS_PREPOSITIONAL.has(w)) { ast.period = { k: "month", which: MONTHS.get(w)! }; i++; continue; }
     if (w === "до" && w1 === "конца") {
       const what = word(tokens[i + 2]);
@@ -528,7 +631,7 @@ function parseAst(tokens: Token[]): Ast {
     }
     if (w === "ближайшие" || w === "следующие" || w === "next") {
       const dur = readDuration(tokens, i + 1);
-      if (dur?.d.days) { ast.period = { k: "nextDays", n: dur.d.days }; i += 1 + dur.n; continue; }
+      if (dur && wholeDays(dur.d)) { ast.period = { k: "nextDays", n: wholeDays(dur.d) }; i += 1 + dur.n; continue; }
       throw new Unparseable();
     }
 
@@ -540,6 +643,7 @@ function parseAst(tokens: Token[]): Ast {
   if (ast.week && ast.date?.k === "wd") {
     if (ast.week === "next") ast.date.mod = "nextWeek";
     delete ast.week;
+    delete ast.vagueWeek;
   }
   return ast;
 }
@@ -591,11 +695,63 @@ function resolveDays(date: DateAst, now: Moment, time: ResolvedHour | undefined,
   }
 }
 
-function resolvePoint(ast: Ast, now: Moment, tz: string): ParseResult {
+/**
+ * «на неделе» при создании события: середина оставшихся будних дней [завтра … пятница],
+ * из двух средних — более ранний; с пятницы по воскресенье — среда следующей недели.
+ */
+export function midWeekDay(today: Day): Day {
+  const mon = startOfWeek(today);
+  const from = today + 1;
+  const to = mon + 4;
+  if (from > to) return mon + 7 + 2;
+  return from + Math.floor((to - from) / 2);
+}
+
+/** Ночь после названного дня: «завтра ночью» = 00–06 послезавтра; без часа или с часом из «ночью». */
+const nightAfter = (ast: Ast) => ast.part === "night" && !ast.time?.mer && !ast.time?.special;
+
+function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
+  let ast = input;
   if (ast.relMinutes !== undefined) {
-    if (ast.date || ast.time) throw new Unparseable();
-    return dt(addRealMinutes(now, ast.relMinutes, tz));
+    // «через сутки в 10» — целые сутки с названным часом: календарные дни
+    if (!ast.date && ast.time && ast.relMinutes > 0 && ast.relMinutes % 1440 === 0) {
+      const { relMinutes, ...rest } = ast;
+      ast = { ...rest, date: { k: "rel", days: relMinutes / 1440 } };
+    } else {
+      if (ast.date || ast.time) throw new Unparseable();
+      return dt(addRealMinutes(now, ast.relMinutes, tz));
+    }
   }
+
+  // «в 9-15»: сначала 9:15, затем интервал 9–15
+  if (ast.altTime && ast.interval) {
+    const { altTime, interval: _interval, ...rest } = ast;
+    const flat = (r: ParseResult): ParseValue[] => ("error" in r ? [] : "ambiguous" in r ? r.ambiguous : [r]);
+    const tryPoint = (a: Ast): ParseResult => {
+      try {
+        return resolvePoint(a, now, tz);
+      } catch (e) {
+        if (e instanceof Unparseable) return { error: e.reason };
+        throw e;
+      }
+    };
+    const asTime = tryPoint({ ...rest, time: altTime });
+    const asInterval = tryPoint({ ...ast, altTime: undefined });
+    const values = [...flat(asTime), ...flat(asInterval)];
+    if (values.length === 0) return "error" in asTime ? asTime : asInterval;
+    return values.length === 1 ? values[0]! : { ambiguous: values };
+  }
+
+  // Период при создании события — не дата: переспросить. «к следующей неделе» — срок (R1)
+  if (ast.period?.k === "segment") throw new Unparseable();
+  if (ast.byDate && !ast.date && (ast.period || ast.week)) throw new Unparseable();
+
+  if (ast.vagueWeek && !ast.date && !ast.period) {
+    const { week: _week, vagueWeek: _vague, ...rest } = ast;
+    ast = { ...rest, date: { k: "rel", days: midWeekDay(now.day) - now.day } };
+  }
+  // «к пятнице» без времени — утро того дня
+  if (ast.byDate && ast.date && !ast.time && !ast.part && !ast.interval) ast = { ...ast, time: { h: 9, m: 0, mer: "am" } };
 
   if (ast.dateRange) {
     const from = resolveAbsDate(ast.dateRange.from, now.day);
@@ -625,13 +781,16 @@ function resolvePoint(ast: Ast, now: Moment, tz: string): ParseResult {
   if (ast.period || ast.week) return resolveRange(ast, now);
 
   const time = effectiveTime(ast);
-  const rh = time ? resolveHour(time) : undefined;
+  let rh = time ? resolveHour(time) : undefined;
   const minutes = time?.m ?? 0;
+  const night = nightAfter(ast);
+  // «завтра ночью в 2» — час после полуночи относится к следующему дню
+  if (rh && night && ast.date && rh.hour < 12 && rh.dayOffset === 0) rh = { ...rh, dayOffset: 1 };
 
   // Только время, без дня
   if (!ast.date) {
     if (!rh) {
-      if (ast.part) return dateValue(now.day, ast.part);
+      if (ast.part) return dateValue(now.day + (night ? 1 : 0), ast.part);
       throw new Unparseable();
     }
     const cand = at(now.day + rh.dayOffset, rh.hour * 60 + minutes);
@@ -646,7 +805,7 @@ function resolvePoint(ast: Ast, now: Moment, tz: string): ParseResult {
 
   const days = resolveDays(ast.date, now, rh, minutes);
   const values = days.map((day): ParseValue | ParseError => {
-    if (!rh) return day < now.day ? "in_past" : dateValue(day, ast.part);
+    if (!rh) return day < now.day ? "in_past" : dateValue(day + (night ? 1 : 0), ast.part);
     const cand = at(day + rh.dayOffset, rh.hour * 60 + minutes);
     if (compare(cand, now) > 0) return dt(cand);
     // День — сегодня, утреннее время прошло → вечер того же дня
@@ -691,15 +850,52 @@ function resolveRange(ast: Ast, now: Moment): ParseResult {
     return monthRange(p.which > t.month ? t.year : t.year + 1, p.which);
   }
   if (p?.k === "nextDays") return rangeOfDays(today, today + p.n - 1);
+  if (p?.k === "segment") return resolveSegment(p, today);
 
   // День (+ часть суток)
   const days = ast.date ? resolveDays(ast.date, { day: today, minutes: -1 }, undefined, 0) : [today];
   const toValue = (day: Day): ParseValue => {
     if (!ast.part) return rangeOfDays(day, day);
     const [s, e] = DAY_PART_BOUNDS[ast.part];
-    return { range: { from: formatMoment(at(day, s)), to: formatMoment(at(day, e)) } };
+    const d = day + (nightAfter(ast) ? 1 : 0);
+    return { range: { from: formatMoment(at(d, s)), to: formatMoment(at(d, e)) } };
   };
   return days.length === 1 ? toValue(days[0]!) : { ambiguous: days.map(toValue) };
+}
+
+/** Начало / середина / конец: месяц — 1–10 / 11–20 / 21–конец, неделя — пн–ср / чт–вс. */
+function segmentDays(unit: "week" | "month", seg: Segment, first: Day): [Day, Day] {
+  if (unit === "week") return seg === "begin" ? [first, first + 2] : [first + 3, first + 6];
+  const { year, month } = parts(first);
+  const [a, b] = seg === "begin" ? [1, 10] : seg === "middle" ? [11, 20] : [21, daysInMonth(year, month)];
+  return [makeDay(year, month, a), makeDay(year, month, b)];
+}
+
+/**
+ * Текущий месяц/неделя — с сегодня до конца части; часть уже прошла — та же часть следующего
+ * («этого/этой» — in_past). «следующего» — следующий целиком; названный месяц — как «в ноябре».
+ */
+function resolveSegment(p: Extract<Period, { k: "segment" }>, today: Day): ParseValue {
+  const t = parts(today);
+  const current = (first: Day): ParseValue | null => {
+    const [s, e] = segmentDays(p.unit, p.seg, first);
+    return e < today ? null : rangeOfDays(Math.max(s, today), e);
+  };
+  const whole = (first: Day): ParseValue => rangeOfDays(...segmentDays(p.unit, p.seg, first));
+  const thisFirst = p.unit === "week" ? startOfWeek(today) : makeDay(t.year, t.month, 1);
+  const nextFirst = p.unit === "week" ? thisFirst + 7 : addMonths(thisFirst, 1);
+  switch (p.which) {
+    case "next": return whole(nextFirst);
+    case "auto": return current(thisFirst) ?? whole(nextFirst);
+    case "this": {
+      const v = current(thisFirst);
+      if (!v) throw new Unparseable("in_past");
+      return v;
+    }
+    default:
+      if (p.which === t.month) return current(thisFirst) ?? whole(makeDay(t.year + 1, p.which, 1));
+      return whole(makeDay(p.which > t.month ? t.year : t.year + 1, p.which, 1));
+  }
 }
 
 // --- Вход ------------------------------------------------------------------

@@ -49,3 +49,12 @@ cases:
   - { kind: range, text: "Покажи субботние встречи", expect: { range: "субботние" } }
   - { kind: range, text: "What do I have for the rest of the week?", expect: { range: "for the rest of the week" } }
   - { kind: range, text: "Что запланировано до конца месяца?", expect: { range: "до конца месяца" } }
+  # Решения 2026-10-05 (docs/open-questions.md)
+  - { kind: point, text: "Созвонимся с Олегом на неделе", expect: { point: "на неделе" } }
+  - { kind: point, text: "Подготовить отчёт к пятнице", expect: { point: "к пятнице" } }
+  - { kind: point, text: "Позвонить маме завтра ближе к вечеру", expect: { point: "завтра ближе к вечеру" } }
+  - { kind: point, text: "Стоматолог завтра в 9-15", expect: { point: "завтра в 9-15" } }
+  - { kind: point, text: "Проверить почту через сутки", expect: { point: "через сутки" } }
+  - { kind: point, text: "Call Anna first thing tomorrow", expect: { point: "first thing tomorrow" } }
+  - { kind: range, text: "Что у меня в конце месяца?", expect: { range: "в конце месяца" } }
+  - { kind: range, text: "Что у меня завтра во второй половине дня?", expect: { range: "завтра во второй половине дня" } }

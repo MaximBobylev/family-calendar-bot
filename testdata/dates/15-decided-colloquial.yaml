@@ -1,0 +1,502 @@
+# Разговорные формы, решённые автором 2026-10-05 (docs/open-questions.md, «Решено 2026-10-05»).
+# Номер решения — в id (d03-… = решение 3). «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+
+  # 2. «с утра» = утром (06–12)
+
+  - id: d02-001
+    text: "с утра"
+    expect: { date: { date: "2026-10-07", part: morning } }
+
+  - id: d02-002
+    text: "завтра с утра"
+    kind: range
+    expect: { range: { from: "2026-10-08T06:00", to: "2026-10-08T12:00" } }
+
+  - id: d02-003
+    text: "в пятницу с утра"
+    expect: { date: { date: "2026-10-09", part: morning } }
+
+  # 3. «ближе к вечеру», «под вечер» — часть суток 16:00–20:00; при создании бот спрашивает час
+
+  - id: d03-001
+    text: "ближе к вечеру"
+    expect: { date: { date: "2026-10-07", part: late_afternoon } }
+
+  - id: d03-002
+    text: "завтра ближе к вечеру"
+    expect: { date: { date: "2026-10-08", part: late_afternoon } }
+
+  - id: d03-003
+    text: "под вечер"
+    expect: { date: { date: "2026-10-07", part: late_afternoon } }
+
+  - id: d03-004
+    text: "в пятницу под вечер"
+    expect: { date: { date: "2026-10-09", part: late_afternoon } }
+
+  - id: d03-005
+    text: "завтра ближе к вечеру"
+    kind: range
+    expect: { range: { from: "2026-10-08T16:00", to: "2026-10-08T20:00" } }
+
+  - id: d03-006
+    text: "под вечер"
+    kind: range
+    expect: { range: { from: "2026-10-07T16:00", to: "2026-10-07T20:00" } }
+
+  - id: d03-007
+    text: "ближе к вечеру в 5"
+    note: "часть суток уточняет час, как «вечером в 5»"
+    expect: { datetime: "2026-10-07T17:00" }
+
+  - id: d03-008
+    text: "tomorrow late afternoon"
+    expect: { date: { date: "2026-10-08", part: late_afternoon } }
+
+  - id: d03-009
+    text: "к вечеру"
+    note: "«к …» без даты — срок, как «к обеду» (решение 9): не разбирается"
+    expect: { error: unparseable }
+
+  # 4. «первая / вторая половина дня» = 06–12 / 12–18 (= утром / днём)
+
+  - id: d04-001
+    text: "в первой половине дня"
+    expect: { date: { date: "2026-10-07", part: morning } }
+
+  - id: d04-002
+    text: "завтра во второй половине дня"
+    expect: { date: { date: "2026-10-08", part: day } }
+
+  - id: d04-003
+    text: "в первую половину дня в пятницу"
+    expect: { date: { date: "2026-10-09", part: morning } }
+
+  - id: d04-004
+    text: "завтра в первой половине дня"
+    kind: range
+    expect: { range: { from: "2026-10-08T06:00", to: "2026-10-08T12:00" } }
+
+  - id: d04-005
+    text: "во второй половине дня"
+    kind: range
+    expect: { range: { from: "2026-10-07T12:00", to: "2026-10-07T18:00" } }
+
+  # 5. «после полудня» = «после обеда» (13–18)
+
+  - id: d05-001
+    text: "после полудня"
+    expect: { date: { date: "2026-10-07", part: afternoon } }
+
+  - id: d05-002
+    text: "завтра после полудня"
+    expect: { date: { date: "2026-10-08", part: afternoon } }
+
+  - id: d05-003
+    text: "завтра после полудня"
+    kind: range
+    expect: { range: { from: "2026-10-08T13:00", to: "2026-10-08T18:00" } }
+
+  - id: d05-004
+    text: "после полудня в 3"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  # 6. Начало / середина / конец месяца (1–10 / 11–20 / 21–конец) и недели (пн–ср / чт–вс)
+  # Для чтения — период; при создании события (kind=point) — переспросить: unparseable
+
+  - id: d06-001
+    text: "в начале месяца"
+    kind: range
+    note: "текущий месяц, начало ещё не прошло → с сегодня до 10-го"
+    expect: { range: { from: "2026-10-07", to: "2026-10-10" } }
+
+  - id: d06-002
+    text: "в середине месяца"
+    kind: range
+    expect: { range: { from: "2026-10-11", to: "2026-10-20" } }
+
+  - id: d06-003
+    text: "в конце месяца"
+    kind: range
+    expect: { range: { from: "2026-10-21", to: "2026-10-31" } }
+
+  - id: d06-004
+    text: "в начале месяца"
+    kind: range
+    now: "2026-10-25T10:00"
+    note: "начало текущего месяца прошло → начало следующего"
+    expect: { range: { from: "2026-11-01", to: "2026-11-10" } }
+
+  - id: d06-005
+    text: "в начале этого месяца"
+    kind: range
+    now: "2026-10-25T10:00"
+    note: "«этого» — только текущий месяц; прошедший период не читаем"
+    expect: { error: in_past }
+
+  - id: d06-006
+    text: "в начале следующего месяца"
+    kind: range
+    expect: { range: { from: "2026-11-01", to: "2026-11-10" } }
+
+  - id: d06-007
+    text: "в конце ноября"
+    kind: range
+    expect: { range: { from: "2026-11-21", to: "2026-11-30" } }
+
+  - id: d06-008
+    text: "в середине декабря"
+    kind: range
+    expect: { range: { from: "2026-12-11", to: "2026-12-20" } }
+
+  - id: d06-009
+    text: "в конце февраля"
+    kind: range
+    expect: { range: { from: "2027-02-21", to: "2027-02-28" } }
+
+  - id: d06-010
+    text: "в конце октября"
+    kind: range
+    note: "текущий месяц"
+    expect: { range: { from: "2026-10-21", to: "2026-10-31" } }
+
+  - id: d06-011
+    text: "в начале недели"
+    kind: range
+    note: "сегодня среда — последний день начала недели"
+    expect: { range: { from: "2026-10-07", to: "2026-10-07" } }
+
+  - id: d06-012
+    text: "в конце недели"
+    kind: range
+    expect: { range: { from: "2026-10-08", to: "2026-10-11" } }
+
+  - id: d06-013
+    text: "в начале следующей недели"
+    kind: range
+    expect: { range: { from: "2026-10-12", to: "2026-10-14" } }
+
+  - id: d06-014
+    text: "в конце следующей недели"
+    kind: range
+    expect: { range: { from: "2026-10-15", to: "2026-10-18" } }
+
+  - id: d06-015
+    text: "в начале недели"
+    kind: range
+    now: "2026-10-09T10:00"
+    note: "пятница: начало этой недели прошло → начало следующей"
+    expect: { range: { from: "2026-10-12", to: "2026-10-14" } }
+
+  - id: d06-016
+    text: "в середине недели"
+    kind: range
+    note: "не решено — переспросить"
+    expect: { error: unparseable }
+
+  - id: d06-017
+    text: "в начале месяца"
+    note: "создание события: 10 дней — не дата; бот переспрашивает"
+    expect: { error: unparseable }
+
+  - id: d06-018
+    text: "в конце недели"
+    note: "создание события: переспросить"
+    expect: { error: unparseable }
+
+  - id: d06-019
+    text: "early next week"
+    kind: range
+    expect: { range: { from: "2026-10-12", to: "2026-10-14" } }
+
+  - id: d06-020
+    text: "end of the month"
+    kind: range
+    expect: { range: { from: "2026-10-21", to: "2026-10-31" } }
+
+  - id: d06-021
+    text: "at the beginning of next month"
+    kind: range
+    expect: { range: { from: "2026-11-01", to: "2026-11-10" } }
+
+  - id: d06-022
+    text: "late this week"
+    kind: range
+    expect: { range: { from: "2026-10-08", to: "2026-10-11" } }
+
+  - id: d06-023
+    text: "in the middle of the month"
+    kind: range
+    expect: { range: { from: "2026-10-11", to: "2026-10-20" } }
+
+  # 7. «на неделе»: чтение — до конца этой недели; создание — середина оставшихся будних дней
+
+  - id: d07-001
+    text: "на неделе"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: d07-002
+    text: "на неделе"
+    note: "среда: остаток чт–пт → четверг (из двух — более ранний)"
+    expect: { date: "2026-10-08" }
+
+  - id: d07-003
+    text: "на неделе"
+    now: "2026-10-05T10:00"
+    note: "понедельник: вт–пт → среда"
+    expect: { date: "2026-10-07" }
+
+  - id: d07-004
+    text: "на неделе"
+    now: "2026-10-06T10:00"
+    note: "вторник: ср–пт → четверг"
+    expect: { date: "2026-10-08" }
+
+  - id: d07-005
+    text: "на неделе"
+    now: "2026-10-08T10:00"
+    note: "четверг: остаётся только пятница"
+    expect: { date: "2026-10-09" }
+
+  - id: d07-006
+    text: "на неделе"
+    now: "2026-10-09T10:00"
+    note: "пятница: будних дней не осталось → среда следующей недели"
+    expect: { date: "2026-10-14" }
+
+  - id: d07-007
+    text: "на неделе"
+    now: "2026-10-11T10:00"
+    note: "воскресенье → среда следующей недели"
+    expect: { date: "2026-10-14" }
+
+  - id: d07-008
+    text: "на неделе в 15"
+    expect: { datetime: "2026-10-08T15:00" }
+
+  - id: d07-009
+    text: "на неделе вечером"
+    expect: { date: { date: "2026-10-08", part: evening } }
+
+  - id: d07-010
+    text: "на неделе"
+    kind: range
+    now: "2026-10-11T10:00"
+    expect: { range: { from: "2026-10-11", to: "2026-10-11" } }
+
+  # 8. «first thing tomorrow» = завтра 09:00
+
+  - id: d08-001
+    text: "first thing tomorrow"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: d08-002
+    text: "tomorrow first thing"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: d08-003
+    text: "first thing on Monday"
+    expect: { datetime: "2026-10-12T09:00" }
+
+  - id: d08-004
+    text: "first thing in the morning"
+    note: "09:00 сегодня прошло → завтра"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: d08-005
+    text: "завтра первым делом"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: d08-006
+    text: "завтра с утра пораньше"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: d08-007
+    text: "первым делом"
+    now: "2026-10-07T08:00"
+    expect: { datetime: "2026-10-07T09:00" }
+
+  # 9. Сроки — не разбираются (R1, отдельный вид значения)
+
+  - id: d09-001
+    text: "EOD"
+    expect: { error: unparseable }
+
+  - id: d09-002
+    text: "end of day"
+    expect: { error: unparseable }
+
+  - id: d09-003
+    text: "by end of day"
+    expect: { error: unparseable }
+
+  - id: d09-004
+    text: "by Friday"
+    expect: { error: unparseable }
+
+  - id: d09-005
+    text: "by the end of the week"
+    kind: range
+    expect: { error: unparseable }
+
+  - id: d09-006
+    text: "к концу дня"
+    expect: { error: unparseable }
+
+  # 10. «<день> ночью» — ночь ПОСЛЕ названного дня (00–06 следующей даты); «tomorrow night» = вечер
+
+  - id: d10-001
+    text: "завтра ночью"
+    note: "ночь с четверга на пятницу"
+    expect: { date: { date: "2026-10-09", part: night } }
+
+  - id: d10-002
+    text: "завтра ночью"
+    kind: range
+    expect: { range: { from: "2026-10-09T00:00", to: "2026-10-09T06:00" } }
+
+  - id: d10-003
+    text: "сегодня ночью"
+    expect: { date: { date: "2026-10-08", part: night } }
+
+  - id: d10-004
+    text: "ночью"
+    note: "день не назван = сегодня → ночь после сегодняшнего дня"
+    expect: { date: { date: "2026-10-08", part: night } }
+
+  - id: d10-005
+    text: "в пятницу ночью"
+    kind: range
+    expect: { range: { from: "2026-10-10T00:00", to: "2026-10-10T06:00" } }
+
+  - id: d10-006
+    text: "завтра ночью в 2"
+    note: "час из ночной части суток — тоже после названного дня"
+    expect: { datetime: "2026-10-09T02:00" }
+
+  - id: d10-007
+    text: "завтрашняя ночь"
+    kind: range
+    expect: { range: { from: "2026-10-09T00:00", to: "2026-10-09T06:00" } }
+
+  - id: d10-008
+    text: "tomorrow night"
+    note: "английское night — поздний вечер, как tonight"
+    expect: { date: { date: "2026-10-08", part: evening } }
+
+  - id: d10-009
+    text: "tomorrow night"
+    kind: range
+    expect: { range: { from: "2026-10-08T18:00", to: "2026-10-09T00:00" } }
+
+  - id: d10-010
+    text: "friday night"
+    expect: { date: { date: "2026-10-09", part: evening } }
+
+  - id: d10-011
+    text: "tomorrow night at 9"
+    expect: { datetime: "2026-10-08T21:00" }
+
+  # 11. «через сутки» = через 24 часа (момент)
+
+  - id: d11-001
+    text: "через сутки"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: d11-002
+    text: "через двое суток"
+    expect: { datetime: "2026-10-09T10:00" }
+
+  - id: d11-003
+    text: "через 3 суток"
+    expect: { datetime: "2026-10-10T10:00" }
+
+  - id: d11-004
+    text: "через сутки"
+    now: "2026-10-24T12:00"
+    tz: Europe/Berlin
+    note: "как «через 24 часа» (tz-005): через переход на зимнее время — 11:00 по местному"
+    expect: { datetime: "2026-10-25T11:00" }
+
+  - id: d11-007
+    text: "через сутки в 10"
+    note: "с названным часом целые сутки — календарные дни, как «через день в 10»"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: d11-005
+    text: "на сутки позже"
+    kind: shift
+    expect: { shift: "+PT24H" }
+
+  - id: d11-006
+    text: "на сутки"
+    kind: duration
+    expect: { duration: "PT24H" }
+
+  # 12. «в 9-15» — варианты: 9:15 / с 9 до 15; «10-12» — интервал; «15-30» — время
+
+  - id: d12-001
+    text: "завтра в 9-15"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-08T09:15" }
+        - { interval: { start: "2026-10-08T09:00", end: "2026-10-08T15:00" } }
+
+  - id: d12-002
+    text: "в 11-15"
+    now: "2026-10-07T08:00"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T11:15" }
+        - { interval: { start: "2026-10-07T11:00", end: "2026-10-07T15:00" } }
+
+  - id: d12-004
+    text: "в 10-12"
+    expect: { interval: { start: "2026-10-07T10:00", end: "2026-10-07T12:00" } }
+
+  - id: d12-005
+    text: "завтра 14-16"
+    expect: { interval: { start: "2026-10-08T14:00", end: "2026-10-08T16:00" } }
+
+  - id: d12-007
+    text: "в 9-15 вечера"
+    note: "«вечера» не подходит к концу интервала 15 → только время"
+    expect: { datetime: "2026-10-07T21:15" }
+
+  - id: d12-006
+    text: "в 16-15"
+    note: "конец раньше начала → это время 16:15"
+    expect: { datetime: "2026-10-07T16:15" }
+
+  # 13. «к + дата» — сама дата, утро (09:00); «к 18», «до пятницы» — сроки, не разбираются
+
+  - id: d13-001
+    text: "к пятнице"
+    expect: { datetime: "2026-10-09T09:00" }
+
+  - id: d13-002
+    text: "к 5 ноября"
+    expect: { datetime: "2026-11-05T09:00" }
+
+  - id: d13-003
+    text: "к пятнице в 15"
+    note: "время названо — оно и используется"
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: d13-004
+    text: "к среде"
+    note: "среда — сегодня, 09:00 уже прошло → следующая среда"
+    expect: { datetime: "2026-10-14T09:00" }
+
+  - id: d13-005
+    text: "к пятнице"
+    kind: range
+    note: "для чтения — сам день"
+    expect: { range: { from: "2026-10-09", to: "2026-10-09" } }

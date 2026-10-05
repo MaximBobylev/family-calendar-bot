@@ -8,7 +8,8 @@ export type LocalDate = string;
 
 export type ValueKind = "point" | "range" | "shift" | "duration" | "recurrence";
 
-export type DayPart = "morning" | "day" | "afternoon" | "evening" | "night";
+/** late_afternoon — «ближе к вечеру», «под вечер» (16–20). */
+export type DayPart = "morning" | "day" | "afternoon" | "late_afternoon" | "evening" | "night";
 
 export type Weekday = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 

@@ -19,6 +19,7 @@ function fromUnit(unit: Unit, amount: number): Duration | null {
   switch (unit) {
     case "minute": return { ...ZERO, minutes: amount };
     case "hour": return { ...ZERO, minutes: amount * 60 };
+    case "day24": return { ...ZERO, minutes: amount * 24 * 60 };
     case "day": return Number.isInteger(amount) ? { ...ZERO, days: amount } : null;
     case "week": return Number.isInteger(amount) ? { ...ZERO, days: amount * 7 } : null;
     case "fortnight": return Number.isInteger(amount) ? { ...ZERO, days: amount * 14 } : null;

@@ -73,6 +73,8 @@ addNumbers("card", {
   пятьдесят: 50,
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
   fifteen: 15, twenty: 20, thirty: 30,
+  // собирательные — «через двое суток»
+  двое: 2, трое: 3, четверо: 4,
 });
 addNumbers("gen", {
   двух: 2, трех: 3, четырех: 4, пяти: 5, шести: 6, семи: 7, восьми: 8, девяти: 9, десяти: 10, одиннадцати: 11,
@@ -110,7 +112,8 @@ export const DAY_PART_WORDS = new Map<string, DayPart>([
   ["утречком", "morning"], ["поутру", "morning"],
   ["днем", "day"],
   ["вечером", "evening"], ["вечерком", "evening"], ["evening", "evening"], ["tonight", "evening"],
-  ["ночью", "night"], ["night", "night"],
+  // «завтра ночью» — ночь ПОСЛЕ названного дня (point.ts); английское night — поздний вечер, как tonight
+  ["ночью", "night"], ["night", "evening"],
   ["afternoon", "afternoon"],
 ]);
 
@@ -119,16 +122,19 @@ export const DAY_PART_BOUNDS: Record<DayPart, [number, number]> = {
   morning: [6 * 60, 12 * 60],
   day: [12 * 60, 18 * 60],
   afternoon: [13 * 60, 18 * 60],
+  late_afternoon: [16 * 60, 20 * 60],
   evening: [18 * 60, 24 * 60],
   night: [0, 6 * 60],
 };
 
-export type Unit = "minute" | "hour" | "day" | "week" | "fortnight" | "month" | "year";
+/** day24 — «сутки»: 24 реальных часа, а не календарный день. */
+export type Unit = "minute" | "hour" | "day24" | "day" | "week" | "fortnight" | "month" | "year";
 export const UNITS = index<Unit>(
   {
     minute: ["минута", "минуты", "минут", "минуту", "мин", "минутку", "минутки", "минуток", "minute", "minutes", "min", "mins"],
     hour: ["час", "часа", "часов", "ч", "часик", "часика", "часиков", "часок", "hour", "hours", "h", "hr", "hrs"],
-    day: ["день", "дня", "дней", "сутки", "суток", "денек", "денька", "деньков", "day", "days"],
+    day24: ["сутки", "суток"],
+    day: ["день", "дня", "дней", "денек", "денька", "деньков", "day", "days"],
     week: ["неделя", "неделю", "недели", "недель", "недельку", "недельки", "неделек", "week", "weeks"],
     fortnight: ["fortnight", "fortnights"],
     month: ["месяц", "месяца", "месяцев", "month", "months"],
