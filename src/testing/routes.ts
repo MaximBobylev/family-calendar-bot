@@ -11,11 +11,31 @@ import { pendingUpdateIds } from "../inbox";
 import { processInboxUpdate } from "../process";
 import { ensureDigests } from "../jobs/digest";
 import { cleanup, runQueuedJob, tick } from "../scheduler";
+import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "../db/ops-state";
 
 const TABLES = [
-  "test_state", "feature_usage", "usage_events", "entitlements", "scheduled_jobs", "inbox", "pending_actions",
-  "dialog_state", "conversations", "assignments", "event_meta", "dependents", "household_members", "households",
-  "oauth_states", "calendar_aliases", "calendars", "provider_accounts", "channel_identities", "users",
+  "admin_audit",
+  "ops_state",
+  "test_state",
+  "feature_usage",
+  "usage_events",
+  "entitlements",
+  "scheduled_jobs",
+  "inbox",
+  "pending_actions",
+  "dialog_state",
+  "conversations",
+  "assignments",
+  "event_meta",
+  "dependents",
+  "household_members",
+  "households",
+  "oauth_states",
+  "calendar_aliases",
+  "calendars",
+  "provider_accounts",
+  "channel_identities",
+  "users",
 ];
 
 export async function handleTestRoute(ctx: AppContext, request: Request, path: string): Promise<Response> {
@@ -30,6 +50,7 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
       return Response.json({ ok: true, now: new Date(ms).toISOString() });
     }
     case "/__test/tick":
+      await setOpsState(ctx.db, OPS_LAST_TICK, "", ctx.clock.now());
       return Response.json({
         ok: true,
         jobs: await tick(ctx.db, ctx.clock.now(), async (jobs) => {
@@ -39,6 +60,7 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
     case "/__test/hourly":
       await cleanup(ctx.db, ctx.clock.now());
       await ensureDigests(ctx.db, ctx.clock.now());
+      await setOpsState(ctx.db, OPS_LAST_HOURLY, "", ctx.clock.now());
       return Response.json({ ok: true });
     case "/__test/cleanup":
       await cleanup(ctx.db, ctx.clock.now());

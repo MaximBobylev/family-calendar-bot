@@ -46,7 +46,13 @@ type Step =
   | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
   /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
   | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
-  | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string; basic_auth?: string } }
+  /**
+   * HTTP-запрос к SUT. В path, значениях form и text_(not_)contains подставляются {{имя}} из capture предыдущих шагов;
+   * capture: { имя: регэксп с одной группой } — запомнить кусок ответа (например, id из ссылки).
+   */
+  | { http_get: HttpCheck }
+  /** POST формы (application/x-www-form-urlencoded) — действия на страницах (админка). */
+  | { http_post: HttpCheck & { form?: Record<string, string> } }
   | { llm: Record<string, unknown> }
   /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
   | { press: string | { button: string; from?: number; again?: boolean } }
@@ -117,6 +123,16 @@ interface TelegramExpectation {
   text_contains?: string[];
   text_not_contains?: string[];
   buttons?: string[];
+}
+
+interface HttpCheck {
+  path: string;
+  expect_status?: number;
+  text_contains?: string[];
+  text_not_contains?: string[];
+  location?: string;
+  basic_auth?: string;
+  capture?: Record<string, string>;
 }
 
 interface Scenario {
@@ -248,7 +264,7 @@ async function openConnectLink(jar: CookieJar, startUrl: string, opts: { without
 // --- Выполнение --------------------------------------------------------------
 
 /** Служебные вызовы Telegram — не сообщения пользователю; в expect_telegram не учитываются. */
-const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction"]);
+const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction", "getWebhookInfo"]);
 
 class AssertionError extends Error {}
 
@@ -265,6 +281,14 @@ async function runScenario(s: Scenario): Promise<void> {
   const browsers = new Map<string, CookieJar>();
   const browser = (name = "default") => browsers.get(name) ?? browsers.set(name, new CookieJar()).get(name)!;
   const heldCallbacks = new Map<string, string>();
+  // Значения, запомненные capture в http_get/http_post, — подставляются как {{имя}}
+  const vars = new Map<string, string>();
+  const fill = (s: string) =>
+    s.replace(/\{\{(\w+)\}\}/g, (_, name: string) => {
+      const v = vars.get(name);
+      if (v === undefined) throw new AssertionError(`no captured value {{${name}}}`);
+      return v;
+    });
   const checkPage = (where: string, what: string, body: string, parts: string[] = []) => {
     for (const part of parts) if (!body.includes(part)) throw new AssertionError(`${where}: ${what} does not contain «${part}»:\n${body}`);
   };
@@ -404,13 +428,29 @@ async function runScenario(s: Scenario): Promise<void> {
         replyTo = q.messageId;
       }
       await sendUpdate({ from: v.from, voice: { file_id: fileId, duration: v.duration ?? 3 }, ...(replyTo ? { reply_to: replyTo } : {}) }, where);
-    } else if ("http_get" in step) {
-      const h = step.http_get;
-      const res = await fetch(`${SUT}${h.path}`, { redirect: "manual", headers: h.basic_auth ? { authorization: `Basic ${btoa(h.basic_auth)}` } : {} });
-      if (res.status !== (h.expect_status ?? 200)) throw new AssertionError(`${where}: GET ${h.path} → ${res.status}`);
-      if (h.location && !res.headers.get("location")?.endsWith(h.location)) throw new AssertionError(`${where}: location ${res.headers.get("location")}`);
+    } else if ("http_get" in step || "http_post" in step) {
+      const isPost = "http_post" in step;
+      const h: HttpCheck & { form?: Record<string, string> } = isPost ? step.http_post : step.http_get;
+      const path = fill(h.path);
+      const headers: Record<string, string> = h.basic_auth ? { authorization: `Basic ${btoa(h.basic_auth)}` } : {};
+      const init: RequestInit = { redirect: "manual", headers };
+      if (isPost) {
+        init.method = "POST";
+        headers["content-type"] = "application/x-www-form-urlencoded";
+        init.body = new URLSearchParams(Object.entries(h.form ?? {}).map(([k, v]) => [k, fill(v)])).toString();
+      }
+      const what = `${isPost ? "POST" : "GET"} ${path}`;
+      const res = await fetch(`${SUT}${path}`, init);
       const body = await res.text();
-      for (const part of h.text_contains ?? []) if (!body.includes(part)) throw new AssertionError(`${where}: GET ${h.path} does not contain «${part}»`);
+      if (res.status !== (h.expect_status ?? 200)) throw new AssertionError(`${where}: ${what} → ${res.status}`);
+      if (h.location && !res.headers.get("location")?.endsWith(h.location)) throw new AssertionError(`${where}: location ${res.headers.get("location")}`);
+      for (const part of (h.text_contains ?? []).map(fill)) if (!body.includes(part)) throw new AssertionError(`${where}: ${what} does not contain «${part}»`);
+      for (const part of (h.text_not_contains ?? []).map(fill)) if (body.includes(part)) throw new AssertionError(`${where}: ${what} contains «${part}»`);
+      for (const [name, re] of Object.entries(h.capture ?? {})) {
+        const m = new RegExp(re).exec(body);
+        if (!m?.[1]) throw new AssertionError(`${where}: ${what}: capture ${name} /${re}/ not found`);
+        vars.set(name, m[1]);
+      }
     } else if ("google_touch" in step) {
       await post(`${FAKES}/__fake/google/touch`, step.google_touch);
     } else if ("expect_google_patches" in step) {

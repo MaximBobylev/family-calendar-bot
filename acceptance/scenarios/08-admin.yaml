@@ -1,12 +1,18 @@
-# Страница статистики для владельца: HTTP Basic, только чтение.
+# Админка (docs/admin-console.md, первая итерация): HTTP Basic; здоровье; журнал замаскирован по умолчанию,
+# «Показать» — только с причиной и с записью в аудит; «В тест» — заготовки YAML для testdata.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК.
 
 - id: admin-requires-auth
   story: US-13
   steps:
     - http_get: { path: "/admin", expect_status: 401 }
     - http_get: { path: "/admin", expect_status: 401, basic_auth: "admin:wrong" }
+    - http_get: { path: "/admin/journal", expect_status: 401 }
+    - http_get: { path: "/admin/usage", expect_status: 401, basic_auth: "admin:wrong" }
+    - http_get: { path: "/admin/audit", expect_status: 401 }
+    - http_post: { path: "/admin/journal/x/reveal", form: { reason: "Отладка NLU" }, expect_status: 401 }
 
-- id: admin-shows-stats-and-journal
+- id: admin-health-panel
   story: US-13
   steps:
     - clock: "2026-10-07T07:00:00Z"
@@ -14,9 +20,111 @@
         from: 1001
         email: ivan@gmail.com
         calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
-    - llm: { "Что у меня <завтра>?": { tool: list_events, args: { range: "завтра" } } }
-    - telegram: { from: 1001, text: "Что у меня <завтра>?" }
+    - tick: true
     - http_get:
         path: "/admin"
         basic_auth: "admin:test-admin-password"
-        text_contains: ["статистика", "Пользователи", "list_events", "Что у меня &lt;завтра&gt;?", "fake-model"]
+        text_contains:
+          - "Здоровье"
+          - "Webhook Telegram"
+          - "http://dev:8787/telegram/webhook"
+          - "pending_update_count"
+          - "Inbox апдейтов"
+          - "Задачи планировщика"
+          - "digest"
+          - "Дайджесты"
+          - "Cron"
+          - "Последний прогон"
+          - "Пользователи"
+        text_not_contains: ["≠ ожидаемого", "Не удалось получить состояние"]
+
+- id: admin-journal-masked-reveal-audit
+  story: US-13
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - llm:
+        "Созвон с Петей завтра в 15:30 на полчаса": { tool: create_event, args: { start: "завтра в 15:30", title: "Созвон с Петей", duration: "на полчаса" } }
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    # Журнал: интент и даты открыты, остальное — маска; ни имени, ни названия
+    - http_get:
+        path: "/admin/journal"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["Журнал распознанного", "create_event", "▒▒▒▒▒▒ ▒ ▒▒▒▒▒ завтра в 15:30 на полчаса"]
+        text_not_contains: ["Петей", "Созвон"]
+        capture: { row: 'href="/admin/journal/([0-9a-f-]{36})"', user: 'journal\?u=(u-[0-9a-f]{6})' }
+    - http_get:
+        path: "/admin/journal?u={{user}}"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["create_event"]
+    - http_get:
+        path: "/admin/journal?u=u-000000"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["записей нет"]
+    # Запись: маска, replay дат сейчас и заготовки «В тест» (now и tz пользователя на момент фразы)
+    - http_get:
+        path: "/admin/journal/{{row}}"
+        basic_auth: "admin:test-admin-password"
+        text_not_contains: ["Петей", "Созвон"]
+        text_contains:
+          - "Показать полный текст"
+          - 'text: "завтра в 15:30"'
+          - "kind: point"
+          - 'now: "2026-10-07T10:00"'
+          - "tz: Europe/Moscow"
+          - 'expect: { datetime: "2026-10-08T15:30" }'
+          - "kind: duration"
+          - 'expect: { duration: "PT30M" }'
+          - '- { kind: point, text: "▒▒▒▒▒▒ ▒ ▒▒▒▒▒ завтра в 15:30 на полчаса", expect: { point: "завтра в 15:30", duration: "на полчаса" } }'
+    # Без причины — не показывается и в аудит не пишется
+    - http_post:
+        path: "/admin/journal/{{row}}/reveal"
+        basic_auth: "admin:test-admin-password"
+        form: { reason: "" }
+        expect_status: 400
+        text_contains: ["Укажите причину"]
+        text_not_contains: ["Петей"]
+    - http_post:
+        path: "/admin/journal/{{row}}/reveal"
+        basic_auth: "admin:test-admin-password"
+        form: { reason: "Другое" }
+        expect_status: 400
+        text_not_contains: ["Петей"]
+    - http_get:
+        path: "/admin/audit"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["записей нет"]
+        text_not_contains: ["view_reveal"]
+    # С причиной — текст показан, в аудите запись: кто, что, причина
+    - http_post:
+        path: "/admin/journal/{{row}}/reveal"
+        basic_auth: "admin:test-admin-password"
+        form: { reason: "Отладка NLU", note: "проверка сценария" }
+        text_contains:
+          - "Созвон с Петей завтра в 15:30 на полчаса"
+          - "запись аудита #"
+          - "ТЕКСТ НЕ АНОНИМИЗИРОВАН"
+          - '- { kind: point, text: "Созвон с Петей завтра в 15:30 на полчаса", expect: { point: "завтра в 15:30", duration: "на полчаса" } }'
+    - http_get:
+        path: "/admin/audit"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["view_reveal", "Отладка NLU: проверка сценария", "{{user}}", "usage_event_id"]
+        text_not_contains: ["Петей"]
+    # Показ не «залипает»: следующий просмотр снова замаскирован
+    - http_get:
+        path: "/admin/journal/{{row}}"
+        basic_auth: "admin:test-admin-password"
+        text_not_contains: ["Петей"]
+    # Здоровье и расход — без текстов пользователей
+    - http_get:
+        path: "/admin"
+        basic_auth: "admin:test-admin-password"
+        text_not_contains: ["Петей", "Созвон"]
+    - http_get:
+        path: "/admin/usage"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["Расход AI", "{{user}}", "fake-model", "create_event", "/ 60", "/ 300"]
+        text_not_contains: ["Петей", "Созвон"]

@@ -11,7 +11,8 @@ import { cleanup, runQueuedJob, tick, type JobMessage } from "./scheduler";
 import { ensureDigests } from "./jobs/digest";
 import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
-import { adminPage, checkAdminAuth } from "./admin";
+import { handleAdmin } from "./admin";
+import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "./db/ops-state";
 import { timingSafeEqual } from "./crypto";
 import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
@@ -69,12 +70,7 @@ export default {
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request, exec);
     if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
-    if (url.pathname === "/admin" && request.method === "GET") {
-      if (!checkAdminAuth(request, ctx.config.admin.user, ctx.config.admin.password)) {
-        return new Response("Unauthorized", { status: 401, headers: { "www-authenticate": 'Basic realm="admin", charset="UTF-8"' } });
-      }
-      return adminPage(ctx);
-    }
+    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return handleAdmin(ctx, request, url);
     // Fail-closed: тестовые маршруты никогда не работают на публичном https-адресе
     if (ctx.config.testMode && !ctx.config.publicBaseUrl.startsWith("https://") && url.pathname.startsWith("/__test/")) {
       return handleTestRoute(ctx, request, url.pathname);
@@ -105,6 +101,8 @@ export default {
 
   async scheduled(_controller, env): Promise<void> {
     const ctx = await context(env);
+    // Heartbeat cron для панели «здоровье» (docs/admin-console.md)
+    await setOpsState(ctx.db, OPS_LAST_TICK, "", ctx.clock.now());
     await tick(ctx.db, ctx.clock.now(), async (jobs, delays) => {
       await env.INBOX.sendBatch(jobs.map((j, i) => ({ body: { jobId: j.id } satisfies JobMessage, delaySeconds: delays[i]! })));
     });
@@ -112,6 +110,7 @@ export default {
     if (new Date(ctx.clock.now()).getUTCMinutes() === 7) {
       await cleanup(ctx.db, ctx.clock.now());
       await ensureDigests(ctx.db, ctx.clock.now());
+      await setOpsState(ctx.db, OPS_LAST_HOURLY, "", ctx.clock.now());
     }
   },
 } satisfies ExportedHandler<Env, InboxMessage | JobMessage>;
