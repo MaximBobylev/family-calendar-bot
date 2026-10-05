@@ -5,10 +5,7 @@ import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
 
 /** Минимальные scopes (ADR-0001 п.4). */
-export const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-];
+export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"];
 
 export function redirectUri(config: Config): string {
   return `${config.publicBaseUrl}/oauth/google/callback`;
@@ -41,18 +38,22 @@ export interface TokenResponse {
 
 /** client_secret остаётся (web-клиент Google — конфиденциальный); code_verifier — вдобавок к нему (PKCE). */
 export async function exchangeCode(config: Config, code: string, codeVerifier: string): Promise<TokenResponse> {
-  const res = await fetchWithTimeout(`${config.googleOAuthBase}/token`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      code_verifier: codeVerifier,
-      client_id: config.googleClientId,
-      client_secret: config.googleClientSecret,
-      redirect_uri: redirectUri(config),
-      grant_type: "authorization_code",
-    }),
-  }, TIMEOUTS.google);
+  const res = await fetchWithTimeout(
+    `${config.googleOAuthBase}/token`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        code_verifier: codeVerifier,
+        client_id: config.googleClientId,
+        client_secret: config.googleClientSecret,
+        redirect_uri: redirectUri(config),
+        grant_type: "authorization_code",
+      }),
+    },
+    TIMEOUTS.google,
+  );
   if (!res.ok) throw new Error(`google token exchange failed: ${res.status} ${await res.text()}`);
   return (await res.json()) as TokenResponse;
 }
@@ -62,11 +63,15 @@ export async function exchangeCode(config: Config, code: string, codeVerifier: s
  * 400 invalid_token — токен уже недействителен (отозван в Google): для пользователя это тоже успех.
  */
 export async function revokeToken(config: Config, token: string): Promise<void> {
-  const res = await fetchWithTimeout(`${config.googleOAuthBase}/revoke`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ token }),
-  }, TIMEOUTS.google);
+  const res = await fetchWithTimeout(
+    `${config.googleOAuthBase}/revoke`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token }),
+    },
+    TIMEOUTS.google,
+  );
   if (res.ok) return;
   const body = await res.text();
   if (res.status === 400 && body.includes("invalid_token")) return;

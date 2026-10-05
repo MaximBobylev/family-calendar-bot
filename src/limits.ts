@@ -26,7 +26,8 @@ export interface UsageWindow {
   dayOldest: number | null;
 }
 
-export const HOUR_MS = 60 * 60 * 1000;
+export const MINUTE_MS = 60 * 1000;
+export const HOUR_MS = 60 * MINUTE_MS;
 export const DAY_MS = 24 * HOUR_MS;
 
 export type LimitVerdict = { ok: true } | { ok: false; window: "hour" | "day"; limit: number; retryInMs: number };
@@ -52,5 +53,5 @@ export function llmCostMicroUsd(c: CostEstimates, tokensIn: number, tokensOut: n
 
 /** Оценка стоимости распознавания, микродоллары. */
 export function sttCostMicroUsd(c: CostEstimates, audioMs: number): number {
-  return Math.round((audioMs / 60_000) * c.sttPerMin * 1e6);
+  return Math.round((audioMs / MINUTE_MS) * c.sttPerMin * 1e6);
 }

@@ -13,7 +13,10 @@ export class GoogleAuthError extends Error {
 
 /** Ошибка Calendar API с HTTP-статусом: 404/410 — удалено, 403 — нет прав или лимит, 412 — событие изменили (etag). */
 export class GoogleApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
     super(message);
   }
 }

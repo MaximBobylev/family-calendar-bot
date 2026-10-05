@@ -7,7 +7,7 @@ import {
 } from "./calendar";
 import { readDuration } from "./duration";
 import {
-  DAY_PART_BOUNDS, DAY_PART_WORDS, FILLERS, MERIDIEM_WORDS, MONTHS, MONTHS_PREPOSITIONAL, TIMEZONE_WORDS, UNITS,
+  DAY_PART_BOUNDS, DAY_PART_WORDS, FILLERS, MONTHS, MONTHS_PREPOSITIONAL, TIMEZONE_WORDS, UNITS,
   WEEKDAY_INDEX, WEEKDAYS, type Meridiem,
 } from "./lexicon";
 import type { Token } from "./tokenize";
@@ -293,11 +293,11 @@ function parseAst(tokens: Token[]): Ast {
   let pendingMod: WeekdayMod = "none";
 
   const setDate = (d: DateAst) => {
-    if (!ast.date) return void (ast.date = d);
+    if (!ast.date) ast.date = d;
     // «в среду 14-го» — день недели вместе с числом
-    if (ast.date.k === "wd" && d.k === "abs") return void (ast.date = { k: "abs", abs: d.abs, wd: ast.date.wd });
-    if (ast.date.k === "abs" && d.k === "wd") return void (ast.date = { ...ast.date, wd: d.wd });
-    throw new Unparseable();
+    else if (ast.date.k === "wd" && d.k === "abs") ast.date = { k: "abs", abs: d.abs, wd: ast.date.wd };
+    else if (ast.date.k === "abs" && d.k === "wd") ast.date = { ...ast.date, wd: d.wd };
+    else throw new Unparseable();
   };
   const setTime = (t: TimeAst) => {
     if (ast.time) throw new Unparseable();

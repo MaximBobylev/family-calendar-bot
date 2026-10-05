@@ -1,0 +1,64 @@
+{
+  // Форматтер и линтер — Biome (docs/code-style.md)
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "src/**/*.ts",
+      "scripts/**/*.ts",
+      "test/**/*.ts",
+      "acceptance/**/*.ts",
+      "!worker-configuration.d.ts",
+      // TODO: отформатировать после того, как лягут параллельные работы (NLU-эксперименты и админка):
+      // файлы ниже сейчас правятся в других ветках работы, формат — отдельным коммитом потом
+      "!src/nlu",
+      "!scripts/eval-intents.ts",
+      "!scripts/nlu-variants.ts",
+      "!src/admin.ts",
+      "!src/admin",
+      "!src/db/ops-state.ts",
+      "!src/index.ts",
+      "!src/pages.ts",
+      "!acceptance/runner.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    // Длинные строки здесь привычны; 160 — компромисс, чтобы формат не переписал полкода
+    "lineWidth": 160
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    }
+  },
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "off" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        // При noUncheckedIndexedAccess «!» после проверки длины/регулярки — норма; уйдёт с union-типами (tech-debt, «Низкий»)
+        "noNonNullAssertion": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      // Грамматика дат и словари свёрстаны таблицами (одна строка — одно правило/группа слов):
+      // форматтер раскладывает их по слову на строку и делает только хуже. Линтер для них включён.
+      "includes": ["src/dates/lexicon.ts", "src/dates/point.ts", "src/dates/recurrence.ts", "src/dates/tokenize.ts", "src/dates/duration.ts"],
+      "formatter": { "enabled": false }
+    },
+    {
+      // Лестница `if ((m = re.exec(raw)))` — намеренная идиома разбора токена
+      "includes": ["src/dates/tokenize.ts"],
+      "linter": { "rules": { "suspicious": { "noAssignInExpressions": "off" } } }
+    }
+  ]
+}

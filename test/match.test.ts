@@ -28,7 +28,15 @@ describe("findCalendarByName", () => {
     { title: "Работа", aliases: [] },
   ];
   it.each([
-    ["Иван", "Иван"], ["family budget", "Family Budget"], ["семейный", "Family Budget"], ["в семейном календаре", "Family Budget"],
-    ["семейном", "Family Budget"], ["общий календарь", "Family Budget"], ["в рабочий", "Работа"], ["работе", "Работа"], ["личного", "Иван"], ["отпуск", undefined],
+    ["Иван", "Иван"],
+    ["family budget", "Family Budget"],
+    ["семейный", "Family Budget"],
+    ["в семейном календаре", "Family Budget"],
+    ["семейном", "Family Budget"],
+    ["общий календарь", "Family Budget"],
+    ["в рабочий", "Работа"],
+    ["работе", "Работа"],
+    ["личного", "Иван"],
+    ["отпуск", undefined],
   ])("%s → %s", (name, title) => expect(findCalendarByName(cals, name)?.title).toBe(title));
 });

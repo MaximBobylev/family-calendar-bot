@@ -12,11 +12,15 @@ export const parseDateFragment: DateParser = ({ text, kind, now, tz }) => {
   if (tokens.length === 0) return { error: "empty" };
   const nowMoment = parseLocal(now);
   switch (kind) {
-    case "shift": return parseShift(tokens);
-    case "duration": return parseDuration(tokens);
-    case "recurrence": return parseRecurrence(tokens, nowMoment.day);
+    case "shift":
+      return parseShift(tokens);
+    case "duration":
+      return parseDuration(tokens);
+    case "recurrence":
+      return parseRecurrence(tokens, nowMoment.day);
     case "point":
-    case "range": return parsePointOrRange(tokens, kind, nowMoment, tz);
+    case "range":
+      return parsePointOrRange(tokens, kind, nowMoment, tz);
   }
 };
 

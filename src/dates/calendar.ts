@@ -4,6 +4,9 @@
 import type { LocalDate, LocalDateTime } from "./types";
 
 const DAY_MS = 86_400_000;
+const DAY_MIN = 24 * 60;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
 const pad = (n: number) => String(n).padStart(2, "0");
 
 /** Дата как число дней от 1970-01-01. */
@@ -60,8 +63,8 @@ export function formatMoment(m: Moment): LocalDateTime {
 }
 
 export function normalize(m: Moment): Moment {
-  const extraDays = Math.floor(m.minutes / 1440);
-  return { day: m.day + extraDays, minutes: m.minutes - extraDays * 1440 };
+  const extraDays = Math.floor(m.minutes / DAY_MIN);
+  return { day: m.day + extraDays, minutes: m.minutes - extraDays * DAY_MIN };
 }
 
 export function compare(a: Moment, b: Moment): number {
@@ -99,13 +102,17 @@ function formatter(tz: string): Intl.DateTimeFormat {
 
 /** Локальное время в поясе `tz` для момента UTC. */
 export function utcToLocal(utcMs: number, tz: string): Moment {
-  const p = Object.fromEntries(formatter(tz).formatToParts(new Date(utcMs)).map((x) => [x.type, x.value]));
+  const p = Object.fromEntries(
+    formatter(tz)
+      .formatToParts(new Date(utcMs))
+      .map((x) => [x.type, x.value]),
+  );
   return { day: makeDay(+p.year!, +p.month!, +p.day!), minutes: +p.hour! * 60 + +p.minute! };
 }
 
 function wallMs(m: Moment): number {
   const n = normalize(m);
-  return n.day * DAY_MS + n.minutes * 60_000;
+  return n.day * DAY_MS + n.minutes * MINUTE_MS;
 }
 
 /**
@@ -121,7 +128,7 @@ export function localToUtc(m: Moment, tz: string): number {
     guess = wall - offset;
   }
   // Если раньше на час то же локальное время — берём раннее вхождение.
-  const earlier = guess - 3_600_000;
+  const earlier = guess - HOUR_MS;
   return wallMs(utcToLocal(earlier, tz)) === wall ? earlier : guess;
 }
 
@@ -131,7 +138,7 @@ export function convertZone(m: Moment, fromTz: string, toTz: string): Moment {
 
 /** Прибавить реальные минуты с учётом переходов времени в поясе `tz`. */
 export function addRealMinutes(m: Moment, minutes: number, tz: string): Moment {
-  return utcToLocal(localToUtc(m, tz) + minutes * 60_000, tz);
+  return utcToLocal(localToUtc(m, tz) + minutes * MINUTE_MS, tz);
 }
 
 /** Момент + минуты (локальное время, без учёта переходов — для этого addRealMinutes). */
@@ -141,5 +148,5 @@ export function addMinutes(m: Moment, minutes: number): Moment {
 
 /** Разница a − b в минутах. */
 export function minutesBetween(a: Moment, b: Moment): number {
-  return (a.day - b.day) * 1440 + (a.minutes - b.minutes);
+  return (a.day - b.day) * DAY_MIN + (a.minutes - b.minutes);
 }

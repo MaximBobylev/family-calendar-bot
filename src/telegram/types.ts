@@ -46,6 +46,4 @@ export interface InlineKeyboardButton {
   url?: string;
 }
 
-export type ReplyMarkup =
-  | { inline_keyboard: InlineKeyboardButton[][] }
-  | { force_reply: true; input_field_placeholder?: string };
+export type ReplyMarkup = { inline_keyboard: InlineKeyboardButton[][] } | { force_reply: true; input_field_placeholder?: string };

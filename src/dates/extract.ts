@@ -74,8 +74,21 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
 
 /** Слова, по которым событие без времени считается событием на весь день (US-31). */
 const ALL_DAY_PATTERNS = [
-  /день рождени/i, /(?<!\p{L})др(?!\p{L})/iu, /годовщин/i, /юбиле/i, /отпуск/i, /праздник/i, /командировк/i, /выходн(ой|ые)/i, /весь день/i,
-  /birthday/i, /anniversary/i, /vacation/i, /holiday/i, /all day/i, /day off/i,
+  /день рождени/i,
+  /(?<!\p{L})др(?!\p{L})/iu,
+  /годовщин/i,
+  /юбиле/i,
+  /отпуск/i,
+  /праздник/i,
+  /командировк/i,
+  /выходн(ой|ые)/i,
+  /весь день/i,
+  /birthday/i,
+  /anniversary/i,
+  /vacation/i,
+  /holiday/i,
+  /all day/i,
+  /day off/i,
 ];
 
 export function looksAllDay(text: string): boolean {
@@ -89,7 +102,11 @@ export function cleanTitle(title: string | undefined, dateFragments: string[]): 
   if (!title) return undefined;
   let t = title;
   for (const f of dateFragments) t = t.replace(new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), " ");
-  t = t.replace(/\s+/g, " ").trim().replace(/^[,.\-—]+|[,.\-—]+$/g, "").trim();
+  t = t
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[,.\-—]+|[,.\-—]+$/g, "")
+    .trim();
   if (!t || GENERIC_TITLES.has(t.toLowerCase())) return undefined;
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
@@ -176,7 +193,8 @@ export interface RecurrenceSpan {
  * «по понедельникам» — серией.
  */
 /** Слово, без которого правила нет: «по 20 ноября» в «с 10 по 20 ноября» — не «каждый год 20 ноября». */
-const RECURRENCE_MARKER = /^(кажд|ежедневн|еженедельн|ежемесячн|ежегодн|будн|выходным|every|each|daily|weekly|monthly|yearly|annually|weekdays|weekends|месяца$|month$|раз$)/i;
+const RECURRENCE_MARKER =
+  /^(кажд|ежедневн|еженедельн|ежемесячн|ежегодн|будн|выходным|every|each|daily|weekly|monthly|yearly|annually|weekdays|weekends|месяца$|month$|раз$)/i;
 const isRecurrenceMarker = (w: string) => RECURRENCE_MARKER.test(w) || WEEKDAYS_PLURAL_DATIVE.has(w.toLowerCase());
 
 export function extractRecurrenceSpan(text: string, now: string, tz: string): RecurrenceSpan | undefined {

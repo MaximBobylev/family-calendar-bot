@@ -17,7 +17,9 @@ export async function createOAuthState(db: D1Database, state: string, userId: st
 export async function peekOAuthState(db: D1Database, state: string, now: number): Promise<{ userId: string; tgName: string | null; locale: string } | null> {
   const row = await db
     .prepare(
-      `SELECT s.user_id, s.tg_name, u.locale FROM oauth_states s JOIN users u ON u.id = s.user_id
+      `SELECT s.user_id, s.tg_name, u.locale
+       FROM oauth_states s
+       JOIN users u ON u.id = s.user_id
        WHERE s.state = ? AND s.used_at IS NULL AND s.expires_at > ?`,
     )
     .bind(state, now)
@@ -31,12 +33,7 @@ export async function peekOAuthState(db: D1Database, state: string, now: number)
  * другой браузер) перезаписывает: callback пройдёт только в браузере, нажавшем «Продолжить» последним.
  * false — ссылка не действует (использована, истекла, неизвестна).
  */
-export async function bindOAuthState(
-  db: D1Database,
-  state: string,
-  now: number,
-  bind: { codeVerifierEnc: string; browserBinding: string },
-): Promise<boolean> {
+export async function bindOAuthState(db: D1Database, state: string, now: number, bind: { codeVerifierEnc: string; browserBinding: string }): Promise<boolean> {
   const res = await db
     .prepare("UPDATE oauth_states SET code_verifier_enc = ?, browser_binding = ? WHERE state = ? AND used_at IS NULL AND expires_at > ?")
     .bind(bind.codeVerifierEnc, bind.browserBinding, state, now)
@@ -52,13 +49,18 @@ export type ConsumeStateResult =
 export async function consumeOAuthState(db: D1Database, state: string, now: number): Promise<ConsumeStateResult> {
   const row = await db
     .prepare(
-      `UPDATE oauth_states SET used_at = ? WHERE state = ? AND used_at IS NULL AND expires_at > ?
+      `UPDATE oauth_states
+       SET used_at = ?
+       WHERE state = ? AND used_at IS NULL AND expires_at > ?
        RETURNING user_id, tg_name, code_verifier_enc, browser_binding`,
     )
     .bind(now, state, now)
     .first<{ user_id: string; tg_name: string | null; code_verifier_enc: string | null; browser_binding: string | null }>();
   if (row) return { ok: true, userId: row.user_id, tgName: row.tg_name, codeVerifierEnc: row.code_verifier_enc, browserBinding: row.browser_binding };
-  const existing = await db.prepare("SELECT used_at, expires_at FROM oauth_states WHERE state = ?").bind(state).first<{ used_at: number | null; expires_at: number }>();
+  const existing = await db
+    .prepare("SELECT used_at, expires_at FROM oauth_states WHERE state = ?")
+    .bind(state)
+    .first<{ used_at: number | null; expires_at: number }>();
   if (!existing) return { ok: false, reason: "unknown" };
   return { ok: false, reason: existing.used_at ? "used" : "expired" };
 }
@@ -110,7 +112,10 @@ export async function saveGoogleAccount(
       .prepare("SELECT provider_calendar_id FROM calendars WHERE account_id = ? AND is_default = 1")
       .bind(accountId)
       .first<{ provider_calendar_id: string }>();
-    const defaultId = pickDefaultCalendar(prevDefault?.provider_calendar_id, args.calendars.map((c) => ({ id: c.id, writable: writable(c), ...(c.primary ? { primary: true } : {}) })));
+    const defaultId = pickDefaultCalendar(
+      prevDefault?.provider_calendar_id,
+      args.calendars.map((c) => ({ id: c.id, writable: writable(c), ...(c.primary ? { primary: true } : {}) })),
+    );
     await db.batch([
       db
         .prepare("UPDATE provider_accounts SET credentials_enc = ?, granted_scopes = ?, email_hash = ? WHERE id = ?")
@@ -122,7 +127,8 @@ export async function saveGoogleAccount(
       ...args.calendars.map((c) =>
         db
           .prepare(
-            `INSERT INTO calendars (id, account_id, provider_calendar_id, title, time_zone, writable, is_default) VALUES (?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO calendars (id, account_id, provider_calendar_id, title, time_zone, writable, is_default)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (account_id, provider_calendar_id) DO UPDATE SET
                title = excluded.title, time_zone = excluded.time_zone, writable = excluded.writable, is_default = excluded.is_default`,
           )
@@ -158,7 +164,11 @@ export async function saveGoogleAccount(
   ]);
 
   return {
-    accountId, email: args.email, timeZone, writableCalendars, relinked: false,
+    accountId,
+    email: args.email,
+    timeZone,
+    writableCalendars,
+    relinked: false,
     ...(existing ? { replaced: { credentialsEnc: existing.credentials_enc, emailHash: existing.email_hash } } : {}),
   };
 }

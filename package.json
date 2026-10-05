@@ -7,10 +7,15 @@
     "deploy": "tsx scripts/deploy.ts",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts && tsc --noEmit -p test && tsc --noEmit -p acceptance",
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "format:check": "biome format",
+    "check": "npm run -s typecheck && biome ci",
     "test": "vitest run",
     "corpus:dates": "tsx scripts/date-corpus.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@types/node": "^26.6.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

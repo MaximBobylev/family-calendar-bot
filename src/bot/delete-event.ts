@@ -59,9 +59,15 @@ export async function proposeDelete(
 
   const decline = !e.organizerIsSelf;
   const payload: DeleteCardPayload = {
-    chatId, tz: user.home_tz, ref: e.ref, title: e.title, when: whenOf(e, today, locale),
-    notify: !decline && e.hasOtherAttendees, decline,
-    ...(e.seriesId ? { seriesId: e.seriesId } : {}), ...(e.etag ? { etag: e.etag } : {}),
+    chatId,
+    tz: user.home_tz,
+    ref: e.ref,
+    title: e.title,
+    when: whenOf(e, today, locale),
+    notify: !decline && e.hasOtherAttendees,
+    decline,
+    ...(e.seriesId ? { seriesId: e.seriesId } : {}),
+    ...(e.etag ? { etag: e.etag } : {}),
   };
   const id = await createPendingAction(ctx.db, { conversationId, userId: user.id, kind: DELETE_CARD, payload, now: ctx.clock.now() });
 
@@ -74,7 +80,13 @@ export async function proposeDelete(
   if (decline) {
     buttons = [[{ text: t("declineButton", locale), callback_data: callbackData(id, "decline") }, cancel]];
   } else if (e.recurring && req.scope === undefined) {
-    buttons = [[{ text: t("onlyThis", locale), callback_data: callbackData(id, "this") }, { text: t("wholeSeries", locale), callback_data: callbackData(id, "all") }], [cancel]];
+    buttons = [
+      [
+        { text: t("onlyThis", locale), callback_data: callbackData(id, "this") },
+        { text: t("wholeSeries", locale), callback_data: callbackData(id, "all") },
+      ],
+      [cancel],
+    ];
   } else {
     buttons = [[{ text: t("deleteButton", locale), callback_data: callbackData(id, req.scope === "all" && e.seriesId ? "all" : "this") }, cancel]];
   }
@@ -83,10 +95,17 @@ export async function proposeDelete(
 }
 
 /** Подтверждение удаления / отклонения. Карточка уже «забрана» атомарно. */
-export async function confirmDelete(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<DeleteCardPayload>, choice: string): Promise<void> {
+export async function confirmDelete(
+  ctx: AppContext,
+  provider: CalendarProvider,
+  user: User,
+  action: PendingAction<DeleteCardPayload>,
+  choice: string,
+): Promise<void> {
   const p = action.payload;
   const locale = user.locale;
-  const edit = (text: string) => (action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve());
+  const edit = (text: string) =>
+    action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve();
   const details = `<b>${escapeHtml(p.title)}</b>\n🕒 ${p.when}`;
 
   if (choice === "x") {

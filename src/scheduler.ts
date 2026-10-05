@@ -22,6 +22,8 @@ export interface JobMessage {
 
 const MAX_ATTEMPTS = 5;
 const STALE_MS = 10 * 60 * 1000;
+/** Первая пауза перед повтором упавшей задачи; дальше удваивается. */
+const RETRY_BASE_MS = 60 * 1000;
 /** Разброс отправки по секундам — лимит Telegram ~30 сообщений/с. */
 const JOBS_PER_SECOND = 20;
 
@@ -33,7 +35,8 @@ const HANDLERS: Record<string, JobHandler> = {
 export async function claimDueJobs(db: D1Database, now: number, limit = 500): Promise<DueJob[]> {
   const { results } = await db
     .prepare(
-      `UPDATE scheduled_jobs SET status = 'queued', queued_at = ?1
+      `UPDATE scheduled_jobs
+       SET status = 'queued', queued_at = ?1
        WHERE id IN (SELECT id FROM scheduled_jobs WHERE status = 'pending' AND fire_at <= ?1 ORDER BY fire_at LIMIT ?2)
        RETURNING id, kind, user_id, payload_json, fire_at, attempts`,
     )
@@ -54,7 +57,10 @@ export async function tick(db: D1Database, now: number, enqueue: (jobs: DueJob[]
   const jobs = await claimDueJobs(db, now);
   if (jobs.length === 0) return 0;
   try {
-    await enqueue(jobs, jobs.map((_, i) => Math.floor(i / JOBS_PER_SECOND)));
+    await enqueue(
+      jobs,
+      jobs.map((_, i) => Math.floor(i / JOBS_PER_SECOND)),
+    );
   } catch (e) {
     console.error("enqueue jobs failed", e);
     await db.batch(jobs.map((j) => db.prepare("UPDATE scheduled_jobs SET status = 'pending' WHERE id = ? AND status = 'queued'").bind(j.id)));
@@ -67,7 +73,8 @@ export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void
   const now = ctx.clock.now();
   const job = await ctx.db
     .prepare(
-      `UPDATE scheduled_jobs SET status = 'running', attempts = attempts + 1, queued_at = ?
+      `UPDATE scheduled_jobs
+       SET status = 'running', attempts = attempts + 1, queued_at = ?
        WHERE id = ? AND status = 'queued'
        RETURNING id, kind, user_id, payload_json, fire_at, attempts`,
     )
@@ -86,7 +93,7 @@ export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'failed', last_error = ? WHERE id = ?").bind(error, job.id).run();
     } else {
       // 1, 2, 4, 8 минут
-      const retryAt = ctx.clock.now() + 60_000 * 2 ** (job.attempts - 1);
+      const retryAt = ctx.clock.now() + RETRY_BASE_MS * 2 ** (job.attempts - 1);
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'pending', fire_at = ?, last_error = ? WHERE id = ?").bind(retryAt, error, job.id).run();
     }
   }
@@ -103,7 +110,9 @@ export async function cleanup(db: D1Database, now: number): Promise<void> {
   await db.batch([
     db.prepare("DELETE FROM inbox WHERE status = 'done' AND received_at < ?").bind(now - 7 * DAY_MS),
     db.prepare("DELETE FROM inbox WHERE received_at < ?").bind(now - 30 * DAY_MS),
-    db.prepare("UPDATE usage_events SET text = NULL, result_json = NULL WHERE created_at < ? AND (text IS NOT NULL OR result_json IS NOT NULL)").bind(now - 90 * DAY_MS),
+    db
+      .prepare("UPDATE usage_events SET text = NULL, result_json = NULL WHERE created_at < ? AND (text IS NOT NULL OR result_json IS NOT NULL)")
+      .bind(now - 90 * DAY_MS),
     db.prepare("DELETE FROM pending_actions WHERE expires_at < ?").bind(now - DAY_MS),
     db.prepare("DELETE FROM oauth_states WHERE expires_at < ?").bind(now - DAY_MS),
     db.prepare("DELETE FROM dialog_state WHERE updated_at < ?").bind(now - 30 * DAY_MS),

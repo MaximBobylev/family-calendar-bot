@@ -4,7 +4,10 @@ import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { ReplyMarkup } from "./types";
 
 export class TelegramError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
     super(message);
   }
 }
@@ -26,11 +29,15 @@ export class TelegramApi {
   ) {}
 
   private async call<T>(method: string, body: Record<string, unknown>, attempt = 0): Promise<T> {
-    const res = await fetchWithTimeout(`${this.base}/bot${this.token}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }, TIMEOUTS.telegram);
+    const res = await fetchWithTimeout(
+      `${this.base}/bot${this.token}/${method}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      TIMEOUTS.telegram,
+    );
     // Тело может быть не JSON (502 от прокси) — не падаем на разборе
     const json = (await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }))) as {
       ok: boolean;
@@ -59,13 +66,16 @@ export class TelegramApi {
 
   /** Правка карточки — best-effort: «message is not modified» / «not found» — штатные ситуации. */
   editMessageText(chatId: number | string, messageId: number | string, text: string, replyMarkup?: ReplyMarkup, opts: { html?: boolean } = {}) {
-    return bestEffort(this.call<unknown>("editMessageText", {
-      chat_id: chatId,
-      message_id: Number(messageId),
-      text,
-      reply_markup: replyMarkup ?? { inline_keyboard: [] },
-      ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
-    }), "editMessageText");
+    return bestEffort(
+      this.call<unknown>("editMessageText", {
+        chat_id: chatId,
+        message_id: Number(messageId),
+        text,
+        reply_markup: replyMarkup ?? { inline_keyboard: [] },
+        ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
+      }),
+      "editMessageText",
+    );
   }
 
   /** Скачать файл (голосовое) по file_id: getFile → /file/bot<token>/<path>. */

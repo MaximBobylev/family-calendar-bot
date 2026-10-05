@@ -14,7 +14,8 @@ export interface User {
 export async function findUserByTelegramId(db: D1Database, telegramId: number): Promise<User | null> {
   const row = await db
     .prepare(
-      `SELECT u.id, u.locale, u.home_tz, u.settings_json FROM users u
+      `SELECT u.id, u.locale, u.home_tz, u.settings_json
+       FROM users u
        JOIN channel_identities ci ON ci.user_id = u.id
        WHERE ci.channel = 'telegram' AND ci.external_id = ?`,
     )
@@ -24,17 +25,15 @@ export async function findUserByTelegramId(db: D1Database, telegramId: number): 
 }
 
 export async function findUserById(db: D1Database, id: string): Promise<User | null> {
-  const row = await db.prepare("SELECT id, locale, home_tz, settings_json FROM users WHERE id = ?").bind(id)
+  const row = await db
+    .prepare("SELECT id, locale, home_tz, settings_json FROM users WHERE id = ?")
+    .bind(id)
     .first<{ id: string; locale: string; home_tz: string; settings_json: string }>();
   return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
 }
 
 /** Находит или создаёт пользователя для Telegram-аккаунта. Новому пользователю выдаётся entitlement `comp`. */
-export async function ensureTelegramUser(
-  db: D1Database,
-  telegramId: number,
-  now: number,
-): Promise<{ user: User; created: boolean }> {
+export async function ensureTelegramUser(db: D1Database, telegramId: number, now: number): Promise<{ user: User; created: boolean }> {
   const existing = await findUserByTelegramId(db, telegramId);
   if (existing) return { user: existing, created: false };
 
@@ -43,13 +42,9 @@ export async function ensureTelegramUser(
   const userLocale = "ru";
   await db.batch([
     db.prepare("INSERT INTO users (id, created_at, locale) VALUES (?, ?, ?)").bind(id, now, userLocale),
-    db
-      .prepare("INSERT INTO channel_identities (channel, external_id, user_id, created_at) VALUES ('telegram', ?, ?, ?)")
-      .bind(String(telegramId), id, now),
+    db.prepare("INSERT INTO channel_identities (channel, external_id, user_id, created_at) VALUES ('telegram', ?, ?, ?)").bind(String(telegramId), id, now),
     // Пока доступ только по allowlist — все зарегистрированные получают comp (ADR-0004)
-    db
-      .prepare("INSERT INTO entitlements (id, user_id, plan, source, starts_at) VALUES (?, ?, 'comp', 'comp', ?)")
-      .bind(crypto.randomUUID(), id, now),
+    db.prepare("INSERT INTO entitlements (id, user_id, plan, source, starts_at) VALUES (?, ?, 'comp', 'comp', ?)").bind(crypto.randomUUID(), id, now),
   ]);
   return { user: { id, locale: userLocale, home_tz: "UTC", settings: {} }, created: true };
 }
@@ -62,11 +57,14 @@ export async function ensureTelegramUser(
 export async function deleteUserData(db: D1Database, userId: string, telegramId: number): Promise<void> {
   const accounts = "SELECT id FROM provider_accounts WHERE user_id = ?1";
   await db.batch([
-    db.prepare(
-      `DELETE FROM inbox WHERE json_extract(payload_json, '$.message.from.id') = ?1
-         OR json_extract(payload_json, '$.callback_query.from.id') = ?1
-         OR json_extract(payload_json, '$.edited_message.from.id') = ?1`,
-    ).bind(telegramId),
+    db
+      .prepare(
+        `DELETE FROM inbox
+         WHERE json_extract(payload_json, '$.message.from.id') = ?1
+            OR json_extract(payload_json, '$.callback_query.from.id') = ?1
+            OR json_extract(payload_json, '$.edited_message.from.id') = ?1`,
+      )
+      .bind(telegramId),
     db.prepare("DELETE FROM pending_actions WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM dialog_state WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM conversations WHERE channel = 'telegram' AND chat_id = ?1 AND kind = 'private'").bind(String(telegramId)),

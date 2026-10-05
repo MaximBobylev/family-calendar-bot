@@ -9,9 +9,7 @@ import { parseTimeZone, TZ_PRESETS } from "../dates/timezone";
 import { parseHhmm } from "../dates/daily";
 import { mergeDialogState } from "../db/conversations";
 import { rescheduleDigest } from "../jobs/digest";
-import {
-  addAliases, clearAliases, DEFAULT_DIGEST_TIME, DEFAULT_DURATION_MIN, setDefaultCalendar, setHomeTz, setLocale, updateSettings,
-} from "../db/settings";
+import { addAliases, clearAliases, DEFAULT_DIGEST_TIME, DEFAULT_DURATION_MIN, setDefaultCalendar, setHomeTz, setLocale, updateSettings } from "../db/settings";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -20,13 +18,21 @@ import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
 
 const AWAIT_TTL_MS = 15 * 60 * 1000;
+const DAY_MIN = 24 * 60;
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 const DIGEST_TIMES = ["06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00"];
 
 /** Пресеты напоминаний: ключ кнопки → минуты (null — как в Google). */
 const REMINDER_PRESETS: Record<string, number[] | null> = {
-  g: null, n: [], m10: [10], m15: [15], m30: [30], h1: [60], h1d1: [60, 1440], d1: [1440],
+  g: null,
+  n: [],
+  m10: [10],
+  m15: [15],
+  m30: [30],
+  h1: [60],
+  h1d1: [60, 1440],
+  d1: [1440],
 };
 /** Для «весь день» минуты считаются до полуночи дня события: 900 = накануне в 9:00. */
 const ALL_DAY_PRESETS: Record<string, number[]> = { n: [], e18: [360], e9: [900], e9d2: [900, 2340] };
@@ -41,13 +47,13 @@ function durationLabel(min: number, locale: string): string {
 }
 
 function beforeLabel(min: number, locale: string): string {
-  if (min % 1440 === 0) return t("reminderBefore", locale, { value: locale === "en" ? `${min / 1440} d` : `${min / 1440} дн.` });
+  if (min % DAY_MIN === 0) return t("reminderBefore", locale, { value: locale === "en" ? `${min / DAY_MIN} d` : `${min / DAY_MIN} дн.` });
   return t("reminderBefore", locale, { value: durationLabel(min, locale) });
 }
 
 function allDayLabel(min: number, locale: string): string {
-  const days = Math.ceil(min / 1440);
-  const time = hhmm(days * 1440 - min).replace(/^0/, "");
+  const days = Math.ceil(min / DAY_MIN);
+  const time = hhmm(days * DAY_MIN - min).replace(/^0/, "");
   return days === 1 ? t("reminderDayBefore", locale, { time }) : t("reminderDaysBefore", locale, { days: String(days), time });
 }
 
@@ -79,14 +85,16 @@ function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[]): Scr
   const s = user.settings;
   const def = calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable);
   const text = [
-    t("settingsTitle", l), "",
+    t("settingsTitle", l),
+    "",
     t("settingsCalendar", l, { value: escapeHtml(def?.title ?? t("settingsNone", l)) }),
     t("settingsTz", l, { value: user.home_tz, time: nowIn(ctx, user.home_tz) }),
     t("settingsDuration", l, { value: durationLabel(s.durationMin ?? DEFAULT_DURATION_MIN, l) }),
     t("settingsReminders", l, { value: remindersLabel(s.reminders, l) }),
     t("settingsAllDayReminders", l, { value: allDayRemindersLabel(s.allDayReminders, l) }),
     s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
-    t("settingsLanguage", l), "",
+    t("settingsLanguage", l),
+    "",
     `<i>${t("settingsHint", l)}</i>`,
     `<i>${t("settingsDisconnectHint", l)}</i>`,
   ].join("\n");
@@ -143,29 +151,25 @@ const same = (a: number[] | null | undefined, b: number[] | null | undefined) =>
 
 function remindersScreen(user: User): Screen {
   const l = user.locale;
-  const items = Object.entries(REMINDER_PRESETS).map(([k, v]) =>
-    btn(mark(same(v, user.settings.reminders), remindersLabel(v ?? undefined, l)), `remset:${k}`));
+  const items = Object.entries(REMINDER_PRESETS).map(([k, v]) => btn(mark(same(v, user.settings.reminders), remindersLabel(v ?? undefined, l)), `remset:${k}`));
   return { text: t("settingsChooseReminders", l), buttons: [...rows(items, 2), back(l)] };
 }
 
 function allDayScreen(user: User): Screen {
   const l = user.locale;
   const items = Object.entries(ALL_DAY_PRESETS).map(([k, v]) =>
-    btn(mark(same(v, user.settings.allDayReminders ?? []), allDayRemindersLabel(v, l)), `radset:${k}`));
+    btn(mark(same(v, user.settings.allDayReminders ?? []), allDayRemindersLabel(v, l)), `radset:${k}`),
+  );
   return { text: t("settingsChooseAllDay", l), buttons: [...rows(items, 1), back(l)] };
 }
 
 function digestScreen(user: User): Screen {
   const l = user.locale;
-  const cur = user.settings.digestOff ? undefined : user.settings.digestTime ?? DEFAULT_DIGEST_TIME;
+  const cur = user.settings.digestOff ? undefined : (user.settings.digestTime ?? DEFAULT_DIGEST_TIME);
   const items = DIGEST_TIMES.map((tm) => btn(mark(tm === cur, tm), `digset:${tm.replace(":", "")}`));
   return {
     text: t("settingsChooseDigest", l, { tz: user.home_tz }),
-    buttons: [
-      ...rows(items, 3),
-      [btn(t("settingsOtherTime", l), "digother"), ...(cur ? [btn(t("settingsDigestDisable", l), "digoff")] : [])],
-      back(l),
-    ],
+    buttons: [...rows(items, 3), [btn(t("settingsOtherTime", l), "digother"), ...(cur ? [btn(t("settingsDigestDisable", l), "digoff")] : [])], back(l)],
   };
 }
 
@@ -173,7 +177,12 @@ async function setDigest(ctx: AppContext, user: User, time: string | null): Prom
   await updateSettings(ctx.db, user.id, time ? { digestOff: undefined, digestTime: time === DEFAULT_DIGEST_TIME ? undefined : time } : { digestOff: true });
   await rescheduleDigest(ctx.db, user.id, ctx.clock.now());
   const { digestOff: _o, digestTime: _t, ...rest } = user.settings;
-  return { ...user, settings: time ? { ...rest, digestTime: time } : { ...rest, digestOff: true, ...(user.settings.digestTime ? { digestTime: user.settings.digestTime } : {}) } };
+  return {
+    ...user,
+    settings: time
+      ? { ...rest, digestTime: time }
+      : { ...rest, digestOff: true, ...(user.settings.digestTime ? { digestTime: user.settings.digestTime } : {}) },
+  };
 }
 
 // --- Сценарий ------------------------------------------------------------------
@@ -207,12 +216,17 @@ export async function handleSettingsCallback(
   let screen: Screen | null = null;
 
   switch (cb.section) {
-    case "menu": break;
+    case "menu":
+      break;
     case "conn":
       await sendReconnect(ctx, user, chatId);
       return undefined;
-    case "cals": screen = calendarsScreen(u, calendars); break;
-    case "cal": if (cal) screen = calendarScreen(u, cal); break;
+    case "cals":
+      screen = calendarsScreen(u, calendars);
+      break;
+    case "cal":
+      if (cal) screen = calendarScreen(u, cal);
+      break;
     case "cdef":
       if (cal && (await setDefaultCalendar(ctx.db, user.id, cal.id))) {
         saved = true;
@@ -229,12 +243,20 @@ export async function handleSettingsCallback(
       break;
     case "calias":
       if (cal) {
-        await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { kind: "settings_alias", calendarId: cal.id, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } }, ctx.clock.now());
+        await mergeDialogState(
+          ctx.db,
+          conversationId,
+          user.id,
+          { awaiting: { kind: "settings_alias", calendarId: cal.id, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } },
+          ctx.clock.now(),
+        );
         await ctx.telegram.sendMessage(chatId, t("settingsAskAlias", l, { name: cal.title }));
         return undefined;
       }
       break;
-    case "tz": screen = tzScreen(u); break;
+    case "tz":
+      screen = tzScreen(u);
+      break;
     case "tzset": {
       const p = TZ_PRESETS[Number(cb.value)];
       if (p) {
@@ -246,10 +268,18 @@ export async function handleSettingsCallback(
       break;
     }
     case "tzother":
-      await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { kind: "settings_tz", expiresAt: ctx.clock.now() + AWAIT_TTL_MS } }, ctx.clock.now());
+      await mergeDialogState(
+        ctx.db,
+        conversationId,
+        user.id,
+        { awaiting: { kind: "settings_tz", expiresAt: ctx.clock.now() + AWAIT_TTL_MS } },
+        ctx.clock.now(),
+      );
       await ctx.telegram.sendMessage(chatId, t("settingsAskTz", l));
       return undefined;
-    case "dur": screen = durationScreen(u); break;
+    case "dur":
+      screen = durationScreen(u);
+      break;
     case "durset": {
       const m = Number(cb.value);
       if (DURATIONS.includes(m)) {
@@ -259,7 +289,9 @@ export async function handleSettingsCallback(
       }
       break;
     }
-    case "rem": screen = remindersScreen(u); break;
+    case "rem":
+      screen = remindersScreen(u);
+      break;
     case "remset":
       if (cb.value && cb.value in REMINDER_PRESETS) {
         const v = REMINDER_PRESETS[cb.value]!;
@@ -269,7 +301,9 @@ export async function handleSettingsCallback(
         saved = true;
       }
       break;
-    case "rad": screen = allDayScreen(u); break;
+    case "rad":
+      screen = allDayScreen(u);
+      break;
     case "radset":
       if (cb.value && cb.value in ALL_DAY_PRESETS) {
         const v = ALL_DAY_PRESETS[cb.value]!;
@@ -278,7 +312,9 @@ export async function handleSettingsCallback(
         saved = true;
       }
       break;
-    case "dig": screen = digestScreen(u); break;
+    case "dig":
+      screen = digestScreen(u);
+      break;
     case "digset": {
       const time = cb.value && /^\d{4}$/.test(cb.value) ? `${cb.value.slice(0, 2)}:${cb.value.slice(2)}` : undefined;
       if (time && DIGEST_TIMES.includes(time)) {
@@ -292,7 +328,13 @@ export async function handleSettingsCallback(
       saved = true;
       break;
     case "digother":
-      await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { kind: "settings_digest_time", expiresAt: ctx.clock.now() + AWAIT_TTL_MS } }, ctx.clock.now());
+      await mergeDialogState(
+        ctx.db,
+        conversationId,
+        user.id,
+        { awaiting: { kind: "settings_digest_time", expiresAt: ctx.clock.now() + AWAIT_TTL_MS } },
+        ctx.clock.now(),
+      );
       await ctx.telegram.sendMessage(chatId, t("settingsAskDigestTime", l));
       return undefined;
     case "lang":
@@ -357,7 +399,10 @@ export async function handleSettingsInput(
 
 /** Ссылка «Подключить» для уже подключённого: переподключение того же аккаунта сохраняет настройки (tech-debt #19). */
 export async function sendReconnect(ctx: AppContext, user: User, chatId: number): Promise<void> {
-  const row = await ctx.db.prepare("SELECT email FROM provider_accounts WHERE user_id = ? AND provider = 'google'").bind(user.id).first<{ email: string | null }>();
+  const row = await ctx.db
+    .prepare("SELECT email FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
+    .bind(user.id)
+    .first<{ email: string | null }>();
   const text = row ? t("reconnectPrompt", user.locale, { email: row.email ?? "Google" }) : t("connectPrompt", user.locale);
   await ctx.telegram.sendMessage(chatId, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
 }

@@ -30,7 +30,8 @@ export type ClaimOutcome = { status: "claimed"; update: TgUpdate } | { status: "
 export async function claimUpdate(db: D1Database, updateId: number, now: number): Promise<ClaimOutcome> {
   const row = await db
     .prepare(
-      `UPDATE inbox SET status = 'processing', attempts = attempts + 1, processed_at = ?
+      `UPDATE inbox
+       SET status = 'processing', attempts = attempts + 1, processed_at = ?
        WHERE update_id = ? AND (status IN ('pending', 'failed') OR (status = 'processing' AND processed_at < ?))
        RETURNING payload_json`,
     )
@@ -55,8 +56,6 @@ export async function completeUpdate(db: D1Database, updateId: number, now: numb
 }
 
 export async function pendingUpdateIds(db: D1Database): Promise<number[]> {
-  const { results } = await db
-    .prepare("SELECT update_id FROM inbox WHERE status = 'pending' ORDER BY update_id")
-    .all<{ update_id: number }>();
+  const { results } = await db.prepare("SELECT update_id FROM inbox WHERE status = 'pending' ORDER BY update_id").all<{ update_id: number }>();
   return results.map((r) => r.update_id);
 }

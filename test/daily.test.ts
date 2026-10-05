@@ -19,6 +19,13 @@ describe("nextDailyAt", () => {
 });
 
 describe("parseHhmm", () => {
-  it.each([["8", 480], ["08:00", 480], ["7.45", 465], ["23:59", 1439], ["24:00", undefined], ["7:60", undefined], ["утром", undefined]])(
-    "%s → %s", (s, m) => expect(parseHhmm(s)).toBe(m));
+  it.each([
+    ["8", 480],
+    ["08:00", 480],
+    ["7.45", 465],
+    ["23:59", 1439],
+    ["24:00", undefined],
+    ["7:60", undefined],
+    ["утром", undefined],
+  ])("%s → %s", (s, m) => expect(parseHhmm(s)).toBe(m));
 });

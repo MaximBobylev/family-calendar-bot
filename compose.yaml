@@ -1,6 +1,7 @@
 # Всё окружение — в контейнере, на хосте нужен только Docker.
 #   docker compose run --rm test          — тесты (vitest)
 #   docker compose run --rm test npm run typecheck
+#   docker compose run --rm test npm run check    — typecheck + линтер и формат (Biome, docs/code-style.md)
 #   docker compose up dev                 — wrangler dev на http://localhost:8787 (+ фейки)
 #   docker compose run --rm acceptance    — приёмочные сценарии (поднимет dev и fakes)
 #   docker compose run --rm deploy        — деплой (секреты из .env)

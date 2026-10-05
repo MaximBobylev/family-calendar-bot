@@ -34,4 +34,3 @@ export function parseTimeZone(input: string): string | undefined {
     return undefined;
   }
 }
-

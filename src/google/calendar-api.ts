@@ -92,11 +92,15 @@ async function writeEvent(
   body: GoogleEventInput,
   etag?: string,
 ): Promise<GoogleEvent & { htmlLink?: string }> {
-  const res = await fetchWithTimeout(url, {
-    method,
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...(etag ? { "if-match": etag } : {}) },
-    body: JSON.stringify(body),
-  }, TIMEOUTS.google);
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method,
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...(etag ? { "if-match": etag } : {}) },
+      body: JSON.stringify(body),
+    },
+    TIMEOUTS.google,
+  );
   if (!res.ok) throw new GoogleApiError(`events.${method === "POST" ? "insert" : "patch"} failed: ${res.status} ${await res.text()}`, res.status);
   return (await res.json()) as GoogleEvent & { htmlLink?: string };
 }
@@ -146,10 +150,14 @@ export async function deleteEvent(
 ): Promise<"deleted" | "gone"> {
   const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
   if (opts.sendUpdates) url.searchParams.set("sendUpdates", opts.sendUpdates);
-  const res = await fetchWithTimeout(url, {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${accessToken}`, ...(opts.etag ? { "if-match": opts.etag } : {}) },
-  }, TIMEOUTS.google);
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}`, ...(opts.etag ? { "if-match": opts.etag } : {}) },
+    },
+    TIMEOUTS.google,
+  );
   if (res.status === 404 || res.status === 410) return "gone";
   if (!res.ok) throw new GoogleApiError(`events.delete failed: ${res.status} ${await res.text()}`, res.status);
   return "deleted";

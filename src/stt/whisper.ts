@@ -22,11 +22,15 @@ export async function transcribe(cfg: SttConfig, audio: ArrayBuffer): Promise<Tr
   const bytes = new Uint8Array(audio);
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  const res = await fetchWithTimeout(`${cfg.baseUrl}/run/${cfg.model}`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${cfg.apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ audio: btoa(binary), vad_filter: true }),
-  }, TIMEOUTS.stt);
+  const res = await fetchWithTimeout(
+    `${cfg.baseUrl}/run/${cfg.model}`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ audio: btoa(binary), vad_filter: true }),
+    },
+    TIMEOUTS.stt,
+  );
   if (!res.ok) throw new Error(`stt ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { result?: { text?: string; transcription_info?: { language?: string; duration?: number } } };
   const info = json.result?.transcription_info;

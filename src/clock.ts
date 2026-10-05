@@ -21,7 +21,11 @@ export async function resolveClock(db: D1Database, testMode: boolean): Promise<C
 
 export async function setTestClock(db: D1Database, ms: number): Promise<void> {
   await db
-    .prepare("INSERT INTO test_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+    .prepare(
+      `INSERT INTO test_state (key, value)
+       VALUES (?, ?)
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    )
     .bind(CLOCK_KEY, String(ms))
     .run();
 }

@@ -13,7 +13,10 @@ export { escapeHtml };
 export function dayTitle(day: Day, today: Day, locale: string): string {
   const { year, month, date } = parts(day);
   const label = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", {
-    weekday: "short", day: "numeric", month: "long", timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
   }).format(new Date(Date.UTC(year, month - 1, date)));
   if (day === today) return `${t("today", locale)}, ${label}`;
   if (day === today + 1) return `${t("tomorrow", locale)}, ${label}`;
@@ -72,10 +75,12 @@ export function formatEvents(
     return [`${period}\n${t("noEvents", locale)}`];
   }
 
-  const blocks = [...byDay.keys()].sort((a, b) => a - b).map((day) => {
-    const list = orderForDisplay(byDay.get(day)!, fromDay);
-    return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale))].join("\n");
-  });
+  const blocks = [...byDay.keys()]
+    .sort((a, b) => a - b)
+    .map((day) => {
+      const list = orderForDisplay(byDay.get(day)!, fromDay);
+      return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale))].join("\n");
+    });
 
   // Разбиение по лимиту Telegram; дни не режем
   const messages: string[] = [];
@@ -90,4 +95,3 @@ export function formatEvents(
   if (current) messages.push(current);
   return messages;
 }
-

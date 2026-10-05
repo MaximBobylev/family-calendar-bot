@@ -21,19 +21,31 @@ export const isDisconnectCommand = (text: string | undefined) => /^\/(disconnect
 export async function proposeDisconnect(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   const id = await createPendingAction(ctx.db, {
-    conversationId, userId: user.id, kind: DISCONNECT_CARD, payload: { chatId } satisfies DisconnectPayload, now: ctx.clock.now(),
+    conversationId,
+    userId: user.id,
+    kind: DISCONNECT_CARD,
+    payload: { chatId } satisfies DisconnectPayload,
+    now: ctx.clock.now(),
   });
   const sent = await ctx.telegram.sendMessage(chatId, t("disconnectConfirm", user.locale), {
-    inline_keyboard: [[
-      { text: t("disconnectButton", user.locale), callback_data: callbackData(id, "ok") },
-      { text: t("cancelButton", user.locale), callback_data: callbackData(id, "x") },
-    ]],
+    inline_keyboard: [
+      [
+        { text: t("disconnectButton", user.locale), callback_data: callbackData(id, "ok") },
+        { text: t("cancelButton", user.locale), callback_data: callbackData(id, "x") },
+      ],
+    ],
   });
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
 /** Нажатие на карточке. Карточка уже «забрана» атомарно. */
-export async function confirmDisconnect(ctx: AppContext, user: User, telegramId: number, action: PendingAction<DisconnectPayload>, choice: string): Promise<void> {
+export async function confirmDisconnect(
+  ctx: AppContext,
+  user: User,
+  telegramId: number,
+  action: PendingAction<DisconnectPayload>,
+  choice: string,
+): Promise<void> {
   const { chatId } = action.payload;
   const reply = (key: MessageKey) =>
     action.messageId ? ctx.telegram.editMessageText(chatId, action.messageId, t(key, user.locale)) : ctx.telegram.sendMessage(chatId, t(key, user.locale));

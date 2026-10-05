@@ -132,12 +132,18 @@ const messages = {
   createSeriesConfirm: { ru: "Создать повторяющееся событие?", en: "Create this recurring event?" },
   seriesNext: { ru: "Ближайшие: {list}", en: "Next: {list}" },
   seriesMonthly: { ru: "Каждый месяц {day}-го", en: "Every month on day {day}" },
-  seriesShortMonthsQuestion: { ru: "Не во всех месяцах есть {day}-е число. Как быть в такие месяцы?", en: "Not every month has day {day}. What about those months?" },
+  seriesShortMonthsQuestion: {
+    ru: "Не во всех месяцах есть {day}-е число. Как быть в такие месяцы?",
+    en: "Not every month has day {day}. What about those months?",
+  },
   seriesSkipOption: { ru: "пропускать", en: "skip" },
   seriesLastDayOption: { ru: "в последний день месяца", en: "on the last day" },
   seriesSkipButton: { ru: "Пропускать", en: "Skip them" },
   seriesLastDayButton: { ru: "В последний день", en: "Last day of month" },
-  seriesNoDates: { ru: "По этому правилу не выходит ни одной даты. Проверьте, до какого числа повторять.", en: "This rule gives no dates. Check the end date." },
+  seriesNoDates: {
+    ru: "По этому правилу не выходит ни одной даты. Проверьте, до какого числа повторять.",
+    en: "This rule gives no dates. Check the end date.",
+  },
   createChoose: { ru: "Когда именно?", en: "When exactly?" },
   createButton: { ru: "Создать", en: "Create" },
   cancelButton: { ru: "Отмена", en: "Cancel" },
@@ -178,8 +184,14 @@ const messages = {
     ru: "Вы не организатор встречи «<b>{title}</b>» — перенести или переименовать её может только организатор.",
     en: "You're not the organizer of “<b>{title}</b>” — only the organizer can move or rename it.",
   },
-  modify_nothingToChange: { ru: "Что изменить? Например: «на час позже», «на пятницу», «переименуй в …».", en: "What should I change? For example: “one hour later”, “to Friday”." },
-  modify_notUnderstood: { ru: "Не понял, на когда перенести. Например: «на пятницу», «на 11», «на час позже».", en: "I didn't get the new time. For example: “to Friday”, “to 11”, “one hour later”." },
+  modify_nothingToChange: {
+    ru: "Что изменить? Например: «на час позже», «на пятницу», «переименуй в …».",
+    en: "What should I change? For example: “one hour later”, “to Friday”.",
+  },
+  modify_notUnderstood: {
+    ru: "Не понял, на когда перенести. Например: «на пятницу», «на 11», «на час позже».",
+    en: "I didn't get the new time. For example: “to Friday”, “to 11”, “one hour later”.",
+  },
   modify_inPast: { ru: "Это время уже прошло — выберите другое.", en: "That time has already passed — please pick another." },
   modify_allDayTime: { ru: "Встречу на весь день пока можно только переименовать.", en: "All-day events can only be renamed for now." },
   seriesMoveUnsupported: {
@@ -247,7 +259,10 @@ const messages = {
   settingsOtherTime: { ru: "Другое время…", en: "Other time…" },
   settingsAskDigestTime: { ru: "Во сколько присылать сводку? Например: 7:45", en: "What time should I send it? E.g. 7:45" },
   settingsDigestSet: { ru: "Утренняя сводка — каждый день в {time}.", en: "Morning summary — every day at {time}." },
-  settingsTimeUnknown: { ru: "Не понял время «{value}». Напишите, например, 7:45 — или выберите в /settings.", en: "I didn't get the time “{value}”. Type e.g. 7:45, or pick one in /settings." },
+  settingsTimeUnknown: {
+    ru: "Не понял время «{value}». Напишите, например, 7:45 — или выберите в /settings.",
+    en: "I didn't get the time “{value}”. Type e.g. 7:45, or pick one in /settings.",
+  },
   // --- /settings (US-04, US-06, US-07, US-42) ---
   settingsTitle: { ru: "⚙️ <b>Настройки</b>", en: "⚙️ <b>Settings</b>" },
   settingsCalendar: { ru: "🗓 Календарь по умолчанию: {value}", en: "🗓 Default calendar: {value}" },

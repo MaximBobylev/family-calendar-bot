@@ -29,7 +29,11 @@ describe("cleanTitle", () => {
 });
 
 describe("looksAllDay", () => {
-  it.each([["Завтра день рождения мамы", true], ["Отпуск с 10 по 20 ноября", true], ["Созвон завтра", false]] as const)("%s", (t, v) => {
+  it.each([
+    ["Завтра день рождения мамы", true],
+    ["Отпуск с 10 по 20 ноября", true],
+    ["Созвон завтра", false],
+  ] as const)("%s", (t, v) => {
     expect(looksAllDay(t)).toBe(v);
   });
 });
@@ -47,7 +51,10 @@ describe("extractModifySpans", () => {
 });
 
 describe("extractRecurrenceSpan", () => {
-  interface RDoc { defaults: { now: string; tz: string }; cases: { text: string; span: string | null; rest?: string }[] }
+  interface RDoc {
+    defaults: { now: string; tz: string };
+    cases: { text: string; span: string | null; rest?: string }[];
+  }
   const rdoc = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "extract", "recurrence.yaml"), "utf8")) as RDoc;
   it.each(rdoc.cases.map((c) => [c.text, c] as const))("%s", (_t, c) => {
     const got = extractRecurrenceSpan(c.text, rdoc.defaults.now, rdoc.defaults.tz);

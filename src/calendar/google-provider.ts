@@ -7,8 +7,16 @@ import { refreshAccessToken } from "../google/auth";
 import { deleteEvent, getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
 import { toCalendarError } from "./google-errors";
 import {
-  AuthRevoked, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type CreatedEvent, type EventList, type EventPatch,
-  type EventRef, type NewEvent,
+  AuthRevoked,
+  EventGone,
+  type CalendarEvent,
+  type CalendarInfo,
+  type CalendarProvider,
+  type CreatedEvent,
+  type EventList,
+  type EventPatch,
+  type EventRef,
+  type NewEvent,
 } from "./model";
 
 /** Типы событий, которые не показываем (US-20). */
@@ -71,7 +79,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
       .prepare(
         `SELECT c.id, c.account_id, c.provider_calendar_id, c.title, c.writable, c.is_default,
                 (SELECT json_group_array(alias) FROM calendar_aliases al WHERE al.calendar_id = c.id AND al.user_id = a.user_id) AS aliases
-         FROM calendars c JOIN provider_accounts a ON a.id = c.account_id
+         FROM calendars c
+         JOIN provider_accounts a ON a.id = c.account_id
          WHERE a.user_id = ? AND a.provider = 'google'
          ORDER BY c.is_default DESC, c.title`,
       )
@@ -110,10 +119,9 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const calendars = await this.calendars();
     const settled = await Promise.allSettled(
       calendars.map(async (cal) => {
-        const raw = await google(() => listEvents(
-          this.config.googleApiBase, token, cal.providerCalendarId,
-          new Date(fromUtcMs).toISOString(), new Date(toUtcMs).toISOString(), tz,
-        ));
+        const raw = await google(() =>
+          listEvents(this.config.googleApiBase, token, cal.providerCalendarId, new Date(fromUtcMs).toISOString(), new Date(toUtcMs).toISOString(), tz),
+        );
         return raw.map((e) => toDomainEvent(e, cal, tz)).filter((e): e is CalendarEvent => e !== null);
       }),
     );
@@ -147,14 +155,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
       ? { start: { date: formatDate(e.startDay) }, end: { date: formatDate(e.endDay + 1) } } // end.date — исключающая
       : { start: { dateTime: `${formatMoment(e.start!)}:00`, timeZone: e.tz }, end: { dateTime: `${formatMoment(e.end!)}:00`, timeZone: e.tz } };
     const token = await this.token();
-    const created = await google(() => insertEvent(this.config.googleApiBase, token, cal.providerCalendarId, {
-      ...(id ? { id } : {}),
-      summary: e.title,
-      ...(e.location ? { location: e.location } : {}),
-      ...(e.recurrence ? { recurrence: e.recurrence } : {}),
-      ...(e.reminders ? { reminders: { useDefault: false, overrides: e.reminders.map((minutes) => ({ method: "popup" as const, minutes })) } } : {}),
-      ...time,
-    }));
+    const created = await google(() =>
+      insertEvent(this.config.googleApiBase, token, cal.providerCalendarId, {
+        ...(id ? { id } : {}),
+        summary: e.title,
+        ...(e.location ? { location: e.location } : {}),
+        ...(e.recurrence ? { recurrence: e.recurrence } : {}),
+        ...(e.reminders ? { reminders: { useDefault: false, overrides: e.reminders.map((minutes) => ({ method: "popup" as const, minutes })) } } : {}),
+        ...time,
+      }),
+    );
     return {
       ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id },
       ...(created.htmlLink ? { link: created.htmlLink } : {}),
@@ -173,26 +183,33 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const cal = await this.calendar(ref.calendarId);
     const time = (m: Moment) => ({ dateTime: `${formatMoment(m)}:00`, timeZone: patch.tz });
     const token = await this.token();
-    const updated = await google(() => patchEvent(
-      this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId,
-      {
-        ...(patch.title !== undefined ? { summary: patch.title } : {}),
-        ...(patch.location !== undefined ? { location: patch.location } : {}),
-        ...(patch.start ? { start: time(patch.start) } : {}),
-        ...(patch.end ? { end: time(patch.end) } : {}),
-      },
-      { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
-    ));
+    const updated = await google(() =>
+      patchEvent(
+        this.config.googleApiBase,
+        token,
+        cal.providerCalendarId,
+        ref.providerEventId,
+        {
+          ...(patch.title !== undefined ? { summary: patch.title } : {}),
+          ...(patch.location !== undefined ? { location: patch.location } : {}),
+          ...(patch.start ? { start: time(patch.start) } : {}),
+          ...(patch.end ? { end: time(patch.end) } : {}),
+        },
+        { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
+      ),
+    );
     return updated.etag ? { etag: updated.etag } : {};
   }
 
   async deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone"> {
     const cal = await this.calendar(ref.calendarId);
     const token = await this.token();
-    return google(() => deleteEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, {
-      sendUpdates: opts.notify ? "all" : "none",
-      ...(opts.etag ? { etag: opts.etag } : {}),
-    }));
+    return google(() =>
+      deleteEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, {
+        sendUpdates: opts.notify ? "all" : "none",
+        ...(opts.etag ? { etag: opts.etag } : {}),
+      }),
+    );
   }
 
   async declineEvent(ref: EventRef, tz: string): Promise<void> {

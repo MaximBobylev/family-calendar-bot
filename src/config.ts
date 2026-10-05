@@ -60,7 +60,10 @@ export function loadConfig(env: Env): Config {
     googleClientSecret: env.GOOGLE_CLIENT_SECRET,
     tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,
     allowedTelegramIds: new Set(
-      (env.ALLOWED_TELEGRAM_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      (env.ALLOWED_TELEGRAM_IDS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     ),
     testMode: env.TEST_MODE === "true",
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },

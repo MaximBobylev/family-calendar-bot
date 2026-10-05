@@ -8,9 +8,7 @@ import { addMinutes, formatMoment, minutesBetween, parseLocal, utcToLocal, type 
 import { durationToMinutes } from "../dates/duration";
 import { fragmentParts } from "../dates/point";
 import { tokenize } from "../dates/tokenize";
-import {
-  attachMessage, createPendingAction, mergeDialogState, type PendingAction,
-} from "../db/conversations";
+import { attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -122,7 +120,15 @@ export async function startModify(ctx: AppContext, provider: CalendarProvider, a
   if (e) await proposeChange(ctx, provider, a.user, a.chatId, a.conversationId, e, a.request);
 }
 
-export async function proposeChange(ctx: AppContext, provider: CalendarProvider, user: User, chatId: number, conversationId: string, e: CalendarEvent, req: ModifyRequest): Promise<void> {
+export async function proposeChange(
+  ctx: AppContext,
+  provider: CalendarProvider,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  e: CalendarEvent,
+  req: ModifyRequest,
+): Promise<void> {
   const locale = user.locale;
   const tz = user.home_tz;
   const calendars: CalendarInfo[] = await provider.calendars();
@@ -148,9 +154,18 @@ export async function proposeChange(ctx: AppContext, provider: CalendarProvider,
   const askScope = e.recurring && req.scope === undefined && res.options.length === 1;
   const sameDay = res.options.every((o) => !o.start || o.start.day === e.start?.day);
   const payload: ModifyCardPayload = {
-    chatId, tz, ref: e.ref, title: e.title, ...(e.location ? { oldLocation: e.location } : {}), oldStart: e.start ?? { day: e.startDay, minutes: 0 }, oldEnd: e.end ?? { day: e.endDay, minutes: 0 },
-    notify: e.hasOtherAttendees, options: res.options, askScope: askScope && sameDay,
-    ...(e.seriesId ? { seriesId: e.seriesId } : {}), ...(e.etag ? { etag: e.etag } : {}),
+    chatId,
+    tz,
+    ref: e.ref,
+    title: e.title,
+    ...(e.location ? { oldLocation: e.location } : {}),
+    oldStart: e.start ?? { day: e.startDay, minutes: 0 },
+    oldEnd: e.end ?? { day: e.endDay, minutes: 0 },
+    notify: e.hasOtherAttendees,
+    options: res.options,
+    askScope: askScope && sameDay,
+    ...(e.seriesId ? { seriesId: e.seriesId } : {}),
+    ...(e.etag ? { etag: e.etag } : {}),
   };
   // «Все» — только изменения в пределах дня; перенос серии на другой день — R2
   if (req.scope === "all" && !sameDay) {
@@ -162,7 +177,10 @@ export async function proposeChange(ctx: AppContext, provider: CalendarProvider,
   const o = res.options[0]!;
   const lines = [`${t(o.start ? "modifyMoveConfirm" : "modifyConfirm", locale)}`, "", `<b>${escapeHtml(e.title)}</b>`];
   if (res.options.length === 1 && o.start) {
-    lines.push(`${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, today, locale)}`, `${t("now", locale)}: ${spanLabel(o.start, o.end!, today, locale)}`);
+    lines.push(
+      `${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, today, locale)}`,
+      `${t("now", locale)}: ${spanLabel(o.start, o.end!, today, locale)}`,
+    );
   }
   if (o.title) lines.push(`${t("newTitle", locale)}: <b>${escapeHtml(o.title)}</b>`);
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
@@ -177,25 +195,37 @@ export async function proposeChange(ctx: AppContext, provider: CalendarProvider,
     ];
   } else if (payload.askScope) {
     buttons = [
-      [{ text: t("onlyThis", locale), callback_data: callbackData(id, "c0") }, { text: t("wholeSeries", locale), callback_data: callbackData(id, "all") }],
+      [
+        { text: t("onlyThis", locale), callback_data: callbackData(id, "c0") },
+        { text: t("wholeSeries", locale), callback_data: callbackData(id, "all") },
+      ],
       [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
     ];
   } else {
-    buttons = [[
-      { text: t("confirmButton", locale), callback_data: callbackData(id, req.scope === "all" ? "all" : "c0") },
-      { text: t("cancelButton", locale), callback_data: callbackData(id, "x") },
-    ]];
+    buttons = [
+      [
+        { text: t("confirmButton", locale), callback_data: callbackData(id, req.scope === "all" ? "all" : "c0") },
+        { text: t("cancelButton", locale), callback_data: callbackData(id, "x") },
+      ],
+    ];
   }
   const sent = await ctx.telegram.sendMessage(chatId, lines.join("\n"), { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
 /** Подтверждение изменения. Карточка уже «забрана» атомарно. */
-export async function confirmModify(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<ModifyCardPayload>, choice: string): Promise<void> {
+export async function confirmModify(
+  ctx: AppContext,
+  provider: CalendarProvider,
+  user: User,
+  action: PendingAction<ModifyCardPayload>,
+  choice: string,
+): Promise<void> {
   const p = action.payload;
   const locale = user.locale;
   const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
-  const edit = (text: string) => (action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve());
+  const edit = (text: string) =>
+    action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve();
 
   if (choice === "x") {
     await edit(t("cancelled", locale));
@@ -222,11 +252,21 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
       const length = o.start ? diff(o.end!, o.start) : diff(master.end!, master.start!);
       const ms = plus(master.start!, delta);
       const res = await provider.updateEvent(masterRef, { tz: p.tz, ...o, start: ms, end: plus(ms, length) }, { notify: p.notify });
-      undoRecord = { kind: "update", ref: masterRef, tz: p.tz, notify: p.notify, before: { start: master.start!, end: master.end!, ...beforeOf(master) }, ...(res.etag ? { etag: res.etag } : {}) };
+      undoRecord = {
+        kind: "update",
+        ref: masterRef,
+        tz: p.tz,
+        notify: p.notify,
+        before: { start: master.start!, end: master.end!, ...beforeOf(master) },
+        ...(res.etag ? { etag: res.etag } : {}),
+      };
     } else {
       const res = await provider.updateEvent(p.ref, { tz: p.tz, ...o }, { notify: p.notify, ...(p.etag ? { etag: p.etag } : {}) });
       undoRecord = {
-        kind: "update", ref: p.ref, tz: p.tz, notify: p.notify,
+        kind: "update",
+        ref: p.ref,
+        tz: p.tz,
+        notify: p.notify,
         before: beforeOf({ start: p.oldStart, end: p.oldEnd, title: p.title, ...(p.oldLocation ? { location: p.oldLocation } : {}) }),
         ...(res.etag ? { etag: res.etag } : {}),
       };
@@ -248,7 +288,13 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
   if (wholeSeries) details.push(t("wholeSeriesChanged", locale));
   const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
   if (action.messageId) {
-    await ctx.telegram.editMessageText(p.chatId, action.messageId, `${t("modified", locale)}\n\n${details.join("\n")}`, { inline_keyboard: [[undo.button]] }, { html: true });
+    await ctx.telegram.editMessageText(
+      p.chatId,
+      action.messageId,
+      `${t("modified", locale)}\n\n${details.join("\n")}`,
+      { inline_keyboard: [[undo.button]] },
+      { html: true },
+    );
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());

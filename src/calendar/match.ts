@@ -2,10 +2,48 @@
 // Без морфологического словаря: совпадение по общему префиксу, достаточному для русских окончаний.
 
 const STOP_WORDS = new Set([
-  "встреча", "встречу", "встречи", "встрече", "событие", "события", "мероприятие", "запись",
-  "с", "со", "по", "в", "во", "на", "у", "к", "и", "или", "о", "об", "про", "для",
-  "мою", "мой", "моё", "мое", "мои", "эту", "этот", "это", "эта", "ту", "тот", "то",
-  "the", "a", "an", "my", "with", "meeting", "event", "my",
+  "встреча",
+  "встречу",
+  "встречи",
+  "встрече",
+  "событие",
+  "события",
+  "мероприятие",
+  "запись",
+  "с",
+  "со",
+  "по",
+  "в",
+  "во",
+  "на",
+  "у",
+  "к",
+  "и",
+  "или",
+  "о",
+  "об",
+  "про",
+  "для",
+  "мою",
+  "мой",
+  "моё",
+  "мое",
+  "мои",
+  "эту",
+  "этот",
+  "это",
+  "эта",
+  "ту",
+  "тот",
+  "то",
+  "the",
+  "a",
+  "an",
+  "my",
+  "with",
+  "meeting",
+  "event",
+  "my",
 ]);
 
 export function normalizeWords(text: string): string[] {
@@ -52,7 +90,6 @@ export function findCalendarByName<C extends { title: string; aliases: string[] 
   const exact = calendars.filter((c) => names(c).some((n) => n.join(" ") === wanted.join(" ")));
   if (exact.length === 1) return exact[0];
   if (exact.length > 1) return undefined;
-  const fuzzy = calendars.filter((c) =>
-    names(c).some((n) => n.length === wanted.length && n.every((w, i) => sameWord(w, wanted[i]!))));
+  const fuzzy = calendars.filter((c) => names(c).some((n) => n.length === wanted.length && n.every((w, i) => sameWord(w, wanted[i]!))));
   return fuzzy.length === 1 ? fuzzy[0] : undefined;
 }

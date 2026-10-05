@@ -60,9 +60,7 @@ interface GoogleCalendar {
 
 type LlmFixture =
   /** raw_arguments — строка аргументов как есть (для имитации битого JSON). */
-  | { tool: string; args?: Record<string, unknown>; raw_arguments?: string }
-  | { tools: { tool: string; args?: Record<string, unknown> }[] }
-  | { error: number };
+  { tool: string; args?: Record<string, unknown>; raw_arguments?: string } | { tools: { tool: string; args?: Record<string, unknown> }[] } | { error: number };
 
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "test-client-secret";
 
@@ -102,9 +100,7 @@ function zonedToUtc(local: string, tz: string): number {
 /** Приводит время события к виду, который вернул бы Google: dateTime со смещением (здесь — в UTC). */
 function normalizeTimes(e: GoogleEvent, tz: string): GoogleEvent {
   const fix = (t: { dateTime?: string; date?: string; timeZone?: string } | undefined) =>
-    t?.dateTime && !/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime)
-      ? { ...t, dateTime: new Date(zonedToUtc(t.dateTime, t.timeZone ?? tz)).toISOString() }
-      : t;
+    t?.dateTime && !/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime) ? { ...t, dateTime: new Date(zonedToUtc(t.dateTime, t.timeZone ?? tz)).toISOString() } : t;
   return { ...e, start: fix(e.start)!, end: fix(e.end)! };
 }
 
@@ -153,6 +149,9 @@ function telegramResult(method: string, body: Record<string, unknown>): unknown 
       return { message_id: nextMessageId++, date: 0, chat: { id: body.chat_id, type: "private" }, text: body.text };
     case "editMessageText":
       return true;
+    // Админка: панель «здоровье» (webhook установлен на SUT, очередь пуста)
+    case "getWebhookInfo":
+      return { url: "http://dev:8787/telegram/webhook", has_custom_certificate: false, pending_update_count: 0 };
     default:
       return true;
   }
@@ -242,7 +241,10 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/__fake/google/deletes") return send(res, 200, deletes);
     if (url.pathname === "/__fake/google/touch" && req.method === "POST") {
       const { email, calendar, id } = (await readJson(req)) as { email: string; calendar: string; id: string };
-      const ev = googleAccounts.get(email)?.calendars.find((c) => c.id === calendar)?.events?.find((e) => e.id === id);
+      const ev = googleAccounts
+        .get(email)
+        ?.calendars.find((c) => c.id === calendar)
+        ?.events?.find((e) => e.id === id);
       if (ev) ev.etag = newEtag();
       return send(res, 200, { ok: !!ev });
     }
@@ -261,7 +263,19 @@ const server = createServer(async (req, res) => {
       if ("error" in fx) return send(res, fx.error, { error: "fake llm error" });
       const calls = "tools" in fx ? fx.tools : [fx];
       return send(res, 200, {
-        choices: [{ message: { role: "assistant", content: null, tool_calls: calls.map((c, i) => ({ id: `call_${i}`, type: "function", function: { name: c.tool, arguments: "raw_arguments" in c && c.raw_arguments !== undefined ? c.raw_arguments : JSON.stringify(c.args ?? {}) } })) } }],
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: calls.map((c, i) => ({
+                id: `call_${i}`,
+                type: "function",
+                function: { name: c.tool, arguments: "raw_arguments" in c && c.raw_arguments !== undefined ? c.raw_arguments : JSON.stringify(c.args ?? {}) },
+              })),
+            },
+          },
+        ],
         usage: { prompt_tokens: 1000, completion_tokens: 20 },
       });
     }
@@ -365,10 +379,15 @@ const server = createServer(async (req, res) => {
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
       const input = (await readJson(req)) as unknown as GoogleEvent;
       // Свой id клиента (идемпотентность): повтор → 409, как у Google
-      if (input.id && cal.events?.some((e) => e.id === input.id)) return send(res, 409, { error: { code: 409, message: "The requested identifier already exists." } });
+      if (input.id && cal.events?.some((e) => e.id === input.id))
+        return send(res, 409, { error: { code: 409, message: "The requested identifier already exists." } });
       const id = input.id ?? `new${nextEventId++}`;
-      const ev = normalizeTimes({ ...input, id, status: "confirmed", etag: newEtag(), htmlLink: `https://calendar.google.com/event?eid=${id}` }, cal.timeZone ?? "UTC");
-      (cal.events ??= []).push(ev);
+      const ev = normalizeTimes(
+        { ...input, id, status: "confirmed", etag: newEtag(), htmlLink: `https://calendar.google.com/event?eid=${id}` },
+        cal.timeZone ?? "UTC",
+      );
+      cal.events ??= [];
+      cal.events.push(ev);
       return send(res, 200, ev);
     }
     if (evList && req.method === "GET") {

@@ -74,7 +74,9 @@ export async function readEvents(
     const options = parsed.ambiguous
       .map(periodOf)
       .filter((p): p is Period => p !== null)
-      .map((p) => (p.fromDay === p.toDay ? dayTitle(p.fromDay, now.day, locale) : `${dayTitle(p.fromDay, now.day, locale)} — ${dayTitle(p.toDay, now.day, locale)}`));
+      .map((p) =>
+        p.fromDay === p.toDay ? dayTitle(p.fromDay, now.day, locale) : `${dayTitle(p.fromDay, now.day, locale)} — ${dayTitle(p.toDay, now.day, locale)}`,
+      );
     await ctx.telegram.sendMessage(chatId, t("rangeAmbiguous", locale, { options: options.join(` ${t("or", locale)} `) }));
     return;
   }
@@ -97,12 +99,18 @@ export async function readEvents(
   const list = await provider.listEvents(localToUtc(period.from, tz), localToUtc(period.to, tz), tz);
   const events = list.events.filter((e) => !only || e.ref.calendarId === only.id);
   // Порядок как в выводе — для «перенеси вторую» (US-60)
-  const ordered = orderForDisplay(events.filter((e) => e.endDay >= period.fromDay && Math.max(e.startDay, period.fromDay) <= period.toDay), period.fromDay);
+  const ordered = orderForDisplay(
+    events.filter((e) => e.endDay >= period.fromDay && Math.max(e.startDay, period.fromDay) <= period.toDay),
+    period.fromDay,
+  );
   await mergeDialogState(ctx.db, args.conversationId, args.userId, { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() } }, ctx.clock.now());
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId);
   // Календарь не загрузился (удалён, нет доступа) — показываем остальное и честно говорим, чего нет (tech-debt #12)
-  appendFailedNote(messages, list.failed.filter((f) => !only || f.id === only.id), locale);
+  appendFailedNote(
+    messages,
+    list.failed.filter((f) => !only || f.id === only.id),
+    locale,
+  );
   for (const text of messages) await ctx.telegram.sendMessage(chatId, text, undefined, { html: true });
 }
-

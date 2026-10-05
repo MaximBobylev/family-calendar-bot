@@ -10,6 +10,8 @@ import { attachMessage, CONTEXT_TTL_MS, createPendingAction, getDialogState, typ
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
+
+const DAY_MS = 86_400_000;
 import { eventLabel } from "./format";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
@@ -46,7 +48,13 @@ interface PickCardPayload {
  * Кандидаты. fuzzy=true — по названию ничего не совпало, но день указан: предлагаем все события дня
  * («Не нашёл „созвон“ — может, одна из этих?»), это закрывает и синонимы («созвон» ↔ «звонок»).
  */
-async function findCandidates(ctx: AppContext, provider: CalendarProvider, user: User, conversationId: string, req: EventRequest): Promise<{ events: CalendarEvent[]; fuzzy: boolean }> {
+async function findCandidates(
+  ctx: AppContext,
+  provider: CalendarProvider,
+  user: User,
+  conversationId: string,
+  req: EventRequest,
+): Promise<{ events: CalendarEvent[]; fuzzy: boolean }> {
   const tz = user.home_tz;
   const nowUtc = ctx.clock.now();
   const now = utcToLocal(nowUtc, tz);
@@ -96,13 +104,14 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
   }
   if (req.reference === "next" || (!req.spans.reference && !exact)) {
     // Без указания дня — ближайшие ещё не начавшиеся (US-21)
-    events = events.filter((e) => e.allDay ? e.startDay >= now.day : diff(e.start!, now) > 0);
+    events = events.filter((e) => (e.allDay ? e.startDay >= now.day : diff(e.start!, now) > 0));
   }
-  events.sort((a, b) => (a.start ? localToUtc(a.start, tz) : a.startDay * 86_400_000) - (b.start ? localToUtc(b.start, tz) : b.startDay * 86_400_000));
+  // Событие на весь день — по полуночи UTC своего дня
+  const sortKey = (e: CalendarEvent) => (e.start ? localToUtc(e.start, tz) : e.startDay * DAY_MS);
+  events.sort((a, b) => sortKey(a) - sortKey(b));
   if (req.reference === "next") events = events.slice(0, 1);
   return { events, fuzzy };
 }
-
 
 export interface LocateArgs {
   user: User;
@@ -129,8 +138,11 @@ export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a
     return null;
   }
   const id = await createPendingAction(ctx.db, {
-    conversationId: a.conversationId, userId: user.id, kind: PICK_CARD,
-    payload: { chatId, refs: candidates.map((c) => c.ref), request: a.request, purpose: a.purpose } satisfies PickCardPayload, now: ctx.clock.now(),
+    conversationId: a.conversationId,
+    userId: user.id,
+    kind: PICK_CARD,
+    payload: { chatId, refs: candidates.map((c) => c.ref), request: a.request, purpose: a.purpose } satisfies PickCardPayload,
+    now: ctx.clock.now(),
   });
   const buttons: InlineKeyboardButton[][] = [
     ...candidates.map((c, i) => [{ text: eventLabel(c, today, locale).slice(0, 60), callback_data: callbackData(id, `e${i}`) }]),

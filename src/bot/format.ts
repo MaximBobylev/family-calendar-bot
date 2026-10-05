@@ -22,7 +22,11 @@ export function dateLabel(day: Day, today: Day, locale: string): string {
   const { year, month, date } = parts(day);
   const withYear = year !== parts(today).year;
   return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", {
-    weekday: "short", day: "numeric", month: "long", ...(withYear ? { year: "numeric" } : {}), timeZone: "UTC",
+    weekday: "short",
+    day: "numeric",
+    month: "long",
+    ...(withYear ? { year: "numeric" } : {}),
+    timeZone: "UTC",
   }).format(new Date(Date.UTC(year, month - 1, date)));
 }
 
@@ -35,7 +39,8 @@ export function spanLabel(start: Moment, end: Moment, today: Day, locale: string
 /** Время события для карточек и кнопок: интервал или «…, весь день». */
 export function whenOf(e: { allDay: boolean; startDay: Day; endDay: Day; start?: Moment; end?: Moment }, today: Day, locale: string): string {
   if (e.allDay) {
-    const range = e.startDay === e.endDay ? dateLabel(e.startDay, today, locale) : `${dateLabel(e.startDay, today, locale)} — ${dateLabel(e.endDay, today, locale)}`;
+    const range =
+      e.startDay === e.endDay ? dateLabel(e.startDay, today, locale) : `${dateLabel(e.startDay, today, locale)} — ${dateLabel(e.endDay, today, locale)}`;
     return `${range}, ${t("allDayLower", locale)}`;
   }
   return spanLabel(e.start!, e.end!, today, locale);
@@ -48,9 +53,11 @@ export function eventLabel(e: CalendarEvent, today: Day, locale: string): string
 
 /** Порядок вывода списка — он же порядок для «перенеси вторую» (US-60): по дню, весь день сверху, по времени. */
 export function orderForDisplay(events: CalendarEvent[], fromDay: Day): CalendarEvent[] {
-  return [...events].sort((a, b) =>
-    Math.max(a.startDay, fromDay) - Math.max(b.startDay, fromDay) ||
-    (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) ||
-    (a.start?.minutes ?? 0) - (b.start?.minutes ?? 0) ||
-    a.title.localeCompare(b.title));
+  return [...events].sort(
+    (a, b) =>
+      Math.max(a.startDay, fromDay) - Math.max(b.startDay, fromDay) ||
+      (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) ||
+      (a.start?.minutes ?? 0) - (b.start?.minutes ?? 0) ||
+      a.title.localeCompare(b.title),
+  );
 }

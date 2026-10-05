@@ -8,17 +8,29 @@ import { cleanTitle, extractDateSpans, extractRecurrenceSpan, extractModifySpans
 import { BARE_CANCEL, DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
 import { hasGoogleAccount } from "../db/accounts";
 import {
-  cancelOpenCards, claimPendingAction, ensureConversation, findOpenByMessage, getDialogState, mergeDialogState, type PendingAction,
+  cancelOpenCards,
+  claimPendingAction,
+  ensureConversation,
+  findOpenByMessage,
+  getDialogState,
+  mergeDialogState,
+  type PendingAction,
 } from "../db/conversations";
 import { recordUsage, usageWindow } from "../db/usage";
-import { checkLimit, llmCostMicroUsd, sttCostMicroUsd } from "../limits";
+import { checkLimit, HOUR_MS, llmCostMicroUsd, MINUTE_MS, sttCostMicroUsd } from "../limits";
 import { ensureTelegramUser, type User } from "../db/users";
 import { parseIntent, type ParsedIntent } from "../nlu/intents";
 import type { TgCallbackQuery, TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
 import {
-  CREATE_CARD, TITLE_QUESTION, confirmCreate, draftFromIntent, startCreate,
-  type CreateCardPayload, type CreateDraft, type TitleQuestionPayload,
+  CREATE_CARD,
+  TITLE_QUESTION,
+  confirmCreate,
+  draftFromIntent,
+  startCreate,
+  type CreateCardPayload,
+  type CreateDraft,
+  type TitleQuestionPayload,
 } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete, startDelete } from "./delete-event";
 import { DISCONNECT_CARD, confirmDisconnect, isDisconnectCommand, proposeDisconnect } from "./disconnect";
@@ -107,13 +119,29 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
 
   // Ответ (reply) на вопрос о названии — переименовать созданное событие (US-30)
   if (message.reply_to_message) {
-    const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, message.reply_to_message.message_id, ctx.clock.now());
+    const q = await findOpenByMessage<TitleQuestionPayload>(
+      ctx.db,
+      conversationId,
+      user.id,
+      TITLE_QUESTION,
+      message.reply_to_message.message_id,
+      ctx.clock.now(),
+    );
     if (q && (await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) {
       await withCalendar(ctx, user, chatId, async (provider) => {
         const res = await provider.updateEvent(q.payload.ref, { tz: user.home_tz, title: text }, { notify: false });
         const undo = await recordUndo(ctx, {
-          conversationId, user, chatId,
-          record: { kind: "update", ref: q.payload.ref, tz: user.home_tz, notify: false, before: { title: q.payload.title ?? t("defaultTitle", user.locale) }, ...(res.etag ? { etag: res.etag } : {}) },
+          conversationId,
+          user,
+          chatId,
+          record: {
+            kind: "update",
+            ref: q.payload.ref,
+            tz: user.home_tz,
+            notify: false,
+            before: { title: q.payload.title ?? t("defaultTitle", user.locale) },
+            ...(res.etag ? { etag: res.etag } : {}),
+          },
           summary: `<b>${escapeHtml(text)}</b> → <b>${escapeHtml(q.payload.title ?? t("defaultTitle", user.locale))}</b>`,
         });
         const sent = await ctx.telegram.sendMessage(chatId, t("renamed", user.locale, { title: text }), { inline_keyboard: [[undo.button]] });
@@ -158,8 +186,12 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
 
   const calendarNames = await ctx.db
     .prepare(
-      `SELECT c.title AS name FROM calendars c JOIN provider_accounts a ON a.id = c.account_id WHERE a.user_id = ?1
-       UNION SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
+      `SELECT c.title AS name
+       FROM calendars c
+       JOIN provider_accounts a ON a.id = c.account_id
+       WHERE a.user_id = ?1
+       UNION
+       SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
     )
     .bind(user.id)
     .all<{ name: string }>();
@@ -171,14 +203,31 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     parsed = await parseIntent(ctx.config.llm, text.slice(0, 500), { calendars: calendarNames.results.map((r) => r.name) });
   } catch (e) {
     console.error("llm failed", e);
-    await recordUsage(ctx.db, { userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model, text, result: String(e), outcome: "error", now: ctx.clock.now() });
+    await recordUsage(ctx.db, {
+      userId: user.id,
+      kind: "llm",
+      provider: ctx.config.llm.baseUrl,
+      model: ctx.config.llm.model,
+      text,
+      result: String(e),
+      outcome: "error",
+      now: ctx.clock.now(),
+    });
     await ctx.telegram.sendMessage(chatId, t("llmUnavailable", user.locale));
     return;
   }
   await recordUsage(ctx.db, {
-    userId: user.id, kind: "llm", provider: ctx.config.llm.baseUrl, model: ctx.config.llm.model,
-    tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, costMicroUsd: llmCostMicroUsd(ctx.config.costs, parsed.tokensIn, parsed.tokensOut),
-    text, result: parsed.intent, outcome: "ok", now: ctx.clock.now(),
+    userId: user.id,
+    kind: "llm",
+    provider: ctx.config.llm.baseUrl,
+    model: ctx.config.llm.model,
+    tokensIn: parsed.tokensIn,
+    tokensOut: parsed.tokensOut,
+    costMicroUsd: llmCostMicroUsd(ctx.config.costs, parsed.tokensIn, parsed.tokensOut),
+    text,
+    result: parsed.intent,
+    outcome: "ok",
+    now: ctx.clock.now(),
   });
 
   let intent = parsed.intent;
@@ -201,9 +250,12 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
       const rec = extractRecurrenceSpan(text, localNow, user.home_tz);
       const spans = extractDateSpans(rec ? rec.rest : text, localNow, user.home_tz, "point");
-      const startText = rec ? undefined : spans.point ?? (intent.start || undefined);
+      const startText = rec ? undefined : (spans.point ?? (intent.start || undefined));
       const durationText = spans.duration ?? intent.duration;
-      const title = cleanTitle(intent.title, [rec?.span, rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x));
+      const title = cleanTitle(
+        intent.title,
+        [rec?.span, rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x),
+      );
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
         startText,
@@ -250,7 +302,10 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     case "list_events":
       await withCalendar(ctx, user, chatId, (provider) =>
         readEvents(ctx, provider, {
-          userId: user.id, chatId, locale: user.locale, tz: user.home_tz,
+          userId: user.id,
+          chatId,
+          locale: user.locale,
+          tz: user.home_tz,
           range: extractDateSpans(text, localNow, user.home_tz, "range").range ?? intent.range,
           conversationId,
           ...(intent.calendar ? { calendar: intent.calendar } : {}),
@@ -293,7 +348,12 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
     return null;
   }
   await recordUsage(ctx.db, {
-    ...usage, costMicroUsd: sttCostMicroUsd(ctx.config.costs, usage.audioMs), text: transcript.text, result: { language: transcript.language }, outcome: "ok", now: ctx.clock.now(),
+    ...usage,
+    costMicroUsd: sttCostMicroUsd(ctx.config.costs, usage.audioMs),
+    text: transcript.text,
+    result: { language: transcript.language },
+    outcome: "ok",
+    now: ctx.clock.now(),
   });
   if (isEmptySpeech(transcript.text)) {
     await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
@@ -304,16 +364,22 @@ async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): 
   return transcript.text;
 }
 
+const LIMIT_MESSAGES = {
+  llm: { hour: "llmLimitHour", day: "llmLimitDay" },
+  stt: { hour: "sttLimitHour", day: "sttLimitDay" },
+} as const;
+
 /** Лимит вызовов LLM/STT на пользователя (tech-debt #4): исчерпан — вежливый ответ и никакого внешнего вызова. */
 async function withinLimit(ctx: AppContext, user: User, kind: "llm" | "stt", chatId: number): Promise<boolean> {
   const now = ctx.clock.now();
   const verdict = checkLimit(ctx.config.limits[kind], await usageWindow(ctx.db, user.id, kind, now), now);
   if (verdict.ok) return true;
   console.warn("usage limit reached", user.id, kind, verdict.window);
-  const params: Record<string, string> = verdict.window === "hour"
-    ? { minutes: String(Math.max(1, Math.ceil(verdict.retryInMs / 60_000))) }
-    : { hours: String(Math.max(1, Math.ceil(verdict.retryInMs / 3_600_000))) };
-  const key = kind === "llm" ? (verdict.window === "hour" ? "llmLimitHour" : "llmLimitDay") : verdict.window === "hour" ? "sttLimitHour" : "sttLimitDay";
+  const params: Record<string, string> =
+    verdict.window === "hour"
+      ? { minutes: String(Math.max(1, Math.ceil(verdict.retryInMs / MINUTE_MS))) }
+      : { hours: String(Math.max(1, Math.ceil(verdict.retryInMs / HOUR_MS))) };
+  const key = LIMIT_MESSAGES[kind][verdict.window];
   await ctx.telegram.sendMessage(chatId, t(key, user.locale, { limit: String(verdict.limit), ...params }));
   return false;
 }
@@ -373,12 +439,7 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
  * Прочие ошибки (Telegram, D1, баги) не выдаём за «Google не отвечает» (ревью 2026-10-05).
  * Возвращает false, если действие не удалось.
  */
-async function withCalendar(
-  ctx: AppContext,
-  user: User,
-  chatId: number,
-  action: (provider: GoogleCalendarProvider) => Promise<void>,
-): Promise<boolean> {
+async function withCalendar(ctx: AppContext, user: User, chatId: number, action: (provider: GoogleCalendarProvider) => Promise<void>): Promise<boolean> {
   try {
     await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id));
     return true;

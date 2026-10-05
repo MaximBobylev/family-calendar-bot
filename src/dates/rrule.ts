@@ -54,14 +54,17 @@ function intervalOk(r: Recurrence, day: Day, anchor: Day): boolean {
   const n = r.interval ?? 1;
   if (n === 1) return true;
   switch (r.freq) {
-    case "daily": return (day - anchor) % n === 0;
-    case "weekly": return ((startOfWeek(day) - startOfWeek(anchor)) / 7) % n === 0;
+    case "daily":
+      return (day - anchor) % n === 0;
+    case "weekly":
+      return ((startOfWeek(day) - startOfWeek(anchor)) / 7) % n === 0;
     case "monthly": {
       const a = parts(anchor);
       const b = parts(day);
       return ((b.year - a.year) * 12 + (b.month - a.month)) % n === 0;
     }
-    case "yearly": return (parts(day).year - parts(anchor).year) % n === 0;
+    case "yearly":
+      return (parts(day).year - parts(anchor).year) % n === 0;
   }
 }
 
@@ -123,9 +126,23 @@ export function toRRule(r: Recurrence, start: Moment, tz: string, allDay: boolea
 // --- Описание словами --------------------------------------------------------
 
 const RU_DAY_ACC: Record<Weekday, string> = { MO: "понедельник", TU: "вторник", WE: "среду", TH: "четверг", FR: "пятницу", SA: "субботу", SU: "воскресенье" };
-const RU_DAY_DAT_PL: Record<Weekday, string> = { MO: "понедельникам", TU: "вторникам", WE: "средам", TH: "четвергам", FR: "пятницам", SA: "субботам", SU: "воскресеньям" };
+const RU_DAY_DAT_PL: Record<Weekday, string> = {
+  MO: "понедельникам",
+  TU: "вторникам",
+  WE: "средам",
+  TH: "четвергам",
+  FR: "пятницам",
+  SA: "субботам",
+  SU: "воскресеньям",
+};
 const RU_EVERY: Record<Weekday, string> = { MO: "Каждый", TU: "Каждый", WE: "Каждую", TH: "Каждый", FR: "Каждую", SA: "Каждую", SU: "Каждое" };
-const RU_POS: Record<string, [string, string]> = { "1": ["первый", "первую"], "2": ["второй", "вторую"], "3": ["третий", "третью"], "4": ["четвёртый", "четвёртую"], "-1": ["последний", "последнюю"] };
+const RU_POS: Record<string, [string, string]> = {
+  "1": ["первый", "первую"],
+  "2": ["второй", "вторую"],
+  "3": ["третий", "третью"],
+  "4": ["четвёртый", "четвёртую"],
+  "-1": ["последний", "последнюю"],
+};
 const RU_MONTH_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 const FEMININE = new Set<Weekday>(["WE", "FR", "SA"]);
 const EN_DAY: Record<Weekday, string> = { MO: "Monday", TU: "Tuesday", WE: "Wednesday", TH: "Thursday", FR: "Friday", SA: "Saturday", SU: "Sunday" };
@@ -154,7 +171,9 @@ export function describeRecurrence(r: Recurrence, start: Day, locale: string): s
       if (r.by_set_pos !== undefined && r.by_day?.length) {
         const wd = r.by_day[0]!;
         const pos = RU_POS[String(r.by_set_pos)] ?? [`${r.by_set_pos}-й`, `${r.by_set_pos}-ю`];
-        text = en ? `Every ${r.by_set_pos === -1 ? "last" : `#${r.by_set_pos}`} ${EN_DAY[wd]} of the month` : `В ${FEMININE.has(wd) ? pos[1] : pos[0]} ${RU_DAY_ACC[wd]} месяца`;
+        text = en
+          ? `Every ${r.by_set_pos === -1 ? "last" : `#${r.by_set_pos}`} ${EN_DAY[wd]} of the month`
+          : `В ${FEMININE.has(wd) ? pos[1] : pos[0]} ${RU_DAY_ACC[wd]} месяца`;
       } else if (r.by_month_day === -1) text = en ? "On the last day of every month" : "В последний день месяца";
       else text = en ? `Every month on day ${r.by_month_day ?? parts(start).date}` : `Каждый месяц ${r.by_month_day ?? parts(start).date}-го`;
       if (r.short_months === "last_day") text += en ? " (or the last day of the month)" : " (или в последний день месяца)";
@@ -163,14 +182,18 @@ export function describeRecurrence(r: Recurrence, start: Day, locale: string): s
       break;
     case "yearly": {
       const p = parts(start);
-      text = en ? `Every year on ${r.by_month_day ?? p.date}/${r.by_month ?? p.month}` : `Каждый год ${r.by_month_day ?? p.date} ${RU_MONTH_GEN[(r.by_month ?? p.month) - 1]}`;
+      text = en
+        ? `Every year on ${r.by_month_day ?? p.date}/${r.by_month ?? p.month}`
+        : `Каждый год ${r.by_month_day ?? p.date} ${RU_MONTH_GEN[(r.by_month ?? p.month) - 1]}`;
       break;
     }
   }
   if (r.until) {
     const u = untilDay(r)!;
     const up = parts(u);
-    text += en ? ` until ${up.date}/${up.month}/${up.year}` : ` до ${up.date} ${RU_MONTH_GEN[up.month - 1]}${up.year !== parts(start).year ? ` ${up.year}` : ""}`;
+    text += en
+      ? ` until ${up.date}/${up.month}/${up.year}`
+      : ` до ${up.date} ${RU_MONTH_GEN[up.month - 1]}${up.year !== parts(start).year ? ` ${up.year}` : ""}`;
   } else if (r.count) text += en ? `, ${r.count} times` : `, ${r.count} раз`;
   return text;
 }

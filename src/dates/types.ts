@@ -49,9 +49,6 @@ export type ParseValue =
   | { duration: string }
   | { recurrence: Recurrence };
 
-export type ParseResult =
-  | ParseValue
-  | { ambiguous: ParseValue[] }
-  | { error: ParseError };
+export type ParseResult = ParseValue | { ambiguous: ParseValue[] } | { error: ParseError };
 
 export type DateParser = (input: ParseInput) => ParseResult;

@@ -50,7 +50,9 @@ export async function setHomeTz(db: D1Database, userId: string, tz: string): Pro
 export async function setDefaultCalendar(db: D1Database, userId: string, calendarId: string): Promise<boolean> {
   const own = await db
     .prepare(
-      `SELECT c.account_id FROM calendars c JOIN provider_accounts a ON a.id = c.account_id
+      `SELECT c.account_id
+       FROM calendars c
+       JOIN provider_accounts a ON a.id = c.account_id
        WHERE c.id = ? AND a.user_id = ? AND c.writable = 1`,
     )
     .bind(calendarId, userId)
@@ -63,7 +65,13 @@ export async function setDefaultCalendar(db: D1Database, userId: string, calenda
 const MAX_ALIAS_LEN = 40;
 const MAX_ALIASES = 20;
 
-export const normalizeAlias = (s: string) => s.trim().toLowerCase().replaceAll("ё", "е").replace(/^[«"']+|[»"']+$/g, "").replace(/\s+/g, " ");
+export const normalizeAlias = (s: string) =>
+  s
+    .trim()
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replace(/^[«"']+|[»"']+$/g, "")
+    .replace(/\s+/g, " ");
 
 /** Добавить алиасы календарю. Алиас уникален у пользователя — у другого календаря он снимается. */
 export async function addAliases(db: D1Database, userId: string, calendarId: string, aliases: string[]): Promise<string[]> {
@@ -71,8 +79,14 @@ export async function addAliases(db: D1Database, userId: string, calendarId: str
   if (clean.length === 0) return [];
   await db.batch(
     clean.map((a) =>
-      db.prepare("INSERT INTO calendar_aliases (user_id, alias, calendar_id) VALUES (?, ?, ?) ON CONFLICT (user_id, alias) DO UPDATE SET calendar_id = excluded.calendar_id")
-        .bind(userId, a, calendarId)),
+      db
+        .prepare(
+          `INSERT INTO calendar_aliases (user_id, alias, calendar_id)
+           VALUES (?, ?, ?)
+           ON CONFLICT (user_id, alias) DO UPDATE SET calendar_id = excluded.calendar_id`,
+        )
+        .bind(userId, a, calendarId),
+    ),
   );
   return clean;
 }

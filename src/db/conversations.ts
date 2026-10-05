@@ -4,10 +4,7 @@ export const CARD_TTL_MS = 15 * 60 * 1000;
 
 export async function ensureConversation(db: D1Database, chatId: number | string, kind: "private" | "group"): Promise<string> {
   const id = `telegram:${chatId}`;
-  await db
-    .prepare("INSERT OR IGNORE INTO conversations (id, channel, chat_id, kind) VALUES (?, 'telegram', ?, ?)")
-    .bind(id, String(chatId), kind)
-    .run();
+  await db.prepare("INSERT OR IGNORE INTO conversations (id, channel, chat_id, kind) VALUES (?, 'telegram', ?, ?)").bind(id, String(chatId), kind).run();
   return id;
 }
 
@@ -49,7 +46,8 @@ export async function getDialogState(db: D1Database, conversationId: string, use
 export async function setDialogState(db: D1Database, conversationId: string, userId: string, state: DialogState, now: number): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO dialog_state (conversation_id, user_id, state_json, updated_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO dialog_state (conversation_id, user_id, state_json, updated_at)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT (conversation_id, user_id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at`,
     )
     .bind(conversationId, userId, JSON.stringify(state), now)
@@ -94,11 +92,16 @@ export async function attachMessage(db: D1Database, id: string, messageId: numbe
   await db.prepare("UPDATE pending_actions SET message_id = ? WHERE id = ?").bind(String(messageId), id).run();
 }
 
-type ClaimResult<P> =
-  | { ok: true; action: PendingAction<P> }
-  | { ok: false; reason: "done" | "cancelled" | "expired" | "unknown"; action?: PendingAction<P> };
+type ClaimResult<P> = { ok: true; action: PendingAction<P> } | { ok: false; reason: "done" | "cancelled" | "expired" | "unknown"; action?: PendingAction<P> };
 
-function rowToAction<P>(r: { id: string; conversation_id: string; user_id: string; kind: string; payload_json: string; message_id: string | null }): PendingAction<P> {
+function rowToAction<P>(r: {
+  id: string;
+  conversation_id: string;
+  user_id: string;
+  kind: string;
+  payload_json: string;
+  message_id: string | null;
+}): PendingAction<P> {
   return { id: r.id, conversationId: r.conversation_id, userId: r.user_id, kind: r.kind, payload: JSON.parse(r.payload_json) as P, messageId: r.message_id };
 }
 
@@ -106,7 +109,8 @@ function rowToAction<P>(r: { id: string; conversation_id: string; user_id: strin
 export async function claimPendingAction<P>(db: D1Database, id: string, userId: string, now: number): Promise<ClaimResult<P>> {
   const row = await db
     .prepare(
-      `UPDATE pending_actions SET status = 'done'
+      `UPDATE pending_actions
+       SET status = 'done'
        WHERE id = ? AND user_id = ? AND status = 'open' AND expires_at > ?
        RETURNING id, conversation_id, user_id, kind, payload_json, message_id`,
     )
@@ -115,17 +119,26 @@ export async function claimPendingAction<P>(db: D1Database, id: string, userId: 
   if (row) return { ok: true, action: rowToAction<P>(row) };
 
   const existing = await db
-    .prepare("SELECT id, conversation_id, user_id, kind, payload_json, message_id, status, expires_at FROM pending_actions WHERE id = ? AND user_id = ?")
+    .prepare(
+      `SELECT id, conversation_id, user_id, kind, payload_json, message_id, status, expires_at
+       FROM pending_actions
+       WHERE id = ? AND user_id = ?`,
+    )
     .bind(id, userId)
-    .first<{ id: string; conversation_id: string; user_id: string; kind: string; payload_json: string; message_id: string | null; status: string; expires_at: number }>();
+    .first<{
+      id: string;
+      conversation_id: string;
+      user_id: string;
+      kind: string;
+      payload_json: string;
+      message_id: string | null;
+      status: string;
+      expires_at: number;
+    }>();
   if (!existing) return { ok: false, reason: "unknown" };
   const action = rowToAction<P>(existing);
   if (existing.status === "open") return { ok: false, reason: "expired", action };
   return { ok: false, reason: existing.status === "cancelled" ? "cancelled" : "done", action };
-}
-
-export async function cancelPendingAction(db: D1Database, id: string): Promise<void> {
-  await db.prepare("UPDATE pending_actions SET status = 'cancelled' WHERE id = ? AND status = 'open'").bind(id).run();
 }
 
 /** Новая команда аннулирует открытые карточки этого разговора (US-05). Возвращает их, чтобы отредактировать сообщения. */
@@ -133,7 +146,8 @@ export async function cancelOpenCards(db: D1Database, conversationId: string, us
   if (kinds.length === 0) return [];
   const { results } = await db
     .prepare(
-      `UPDATE pending_actions SET status = 'cancelled'
+      `UPDATE pending_actions
+       SET status = 'cancelled'
        WHERE conversation_id = ? AND user_id = ? AND status = 'open' AND kind IN (${kinds.map(() => "?").join(",")})
        RETURNING id, conversation_id, user_id, kind, payload_json, message_id`,
     )
@@ -143,10 +157,18 @@ export async function cancelOpenCards(db: D1Database, conversationId: string, us
 }
 
 /** Открытое ожидание ответа на конкретное сообщение бота (ForceReply). */
-export async function findOpenByMessage<P>(db: D1Database, conversationId: string, userId: string, kind: string, messageId: number, now: number): Promise<PendingAction<P> | null> {
+export async function findOpenByMessage<P>(
+  db: D1Database,
+  conversationId: string,
+  userId: string,
+  kind: string,
+  messageId: number,
+  now: number,
+): Promise<PendingAction<P> | null> {
   const row = await db
     .prepare(
-      `SELECT id, conversation_id, user_id, kind, payload_json, message_id FROM pending_actions
+      `SELECT id, conversation_id, user_id, kind, payload_json, message_id
+       FROM pending_actions
        WHERE conversation_id = ? AND user_id = ? AND kind = ? AND message_id = ? AND status = 'open' AND expires_at > ?`,
     )
     .bind(conversationId, userId, kind, String(messageId), now)

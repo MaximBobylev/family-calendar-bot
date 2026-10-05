@@ -26,9 +26,19 @@ export async function recordUsage(db: D1Database, r: UsageRecord): Promise<void>
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      crypto.randomUUID(), r.userId, r.now, r.kind, r.provider, r.model,
-      r.audioMs ?? null, r.tokensIn ?? null, r.tokensOut ?? null, r.costMicroUsd ?? null, r.text ?? null,
-      r.result === undefined ? null : JSON.stringify(r.result), r.outcome,
+      crypto.randomUUID(),
+      r.userId,
+      r.now,
+      r.kind,
+      r.provider,
+      r.model,
+      r.audioMs ?? null,
+      r.tokensIn ?? null,
+      r.tokensOut ?? null,
+      r.costMicroUsd ?? null,
+      r.text ?? null,
+      r.result === undefined ? null : JSON.stringify(r.result),
+      r.outcome,
     )
     .run();
 }
@@ -39,7 +49,8 @@ export async function usageWindow(db: D1Database, userId: string, kind: UsageRec
     .prepare(
       `SELECT count(*) AS day_n, min(created_at) AS day_oldest,
               coalesce(sum(created_at > ?3), 0) AS hour_n, min(CASE WHEN created_at > ?3 THEN created_at END) AS hour_oldest
-       FROM usage_events WHERE user_id = ?1 AND kind = ?2 AND created_at > ?4`,
+       FROM usage_events
+       WHERE user_id = ?1 AND kind = ?2 AND created_at > ?4`,
     )
     .bind(userId, kind, now - HOUR_MS, now - DAY_MS)
     .first<{ day_n: number; day_oldest: number | null; hour_n: number; hour_oldest: number | null }>();

@@ -6,7 +6,15 @@
 
 import { EventConflict, EventGone, type CalendarProvider, type EventRef } from "../calendar/model";
 import type { Moment } from "../dates/calendar";
-import { attachMessage, CONTEXT_TTL_MS, claimPendingAction, createPendingAction, getDialogState, mergeDialogState, type PendingAction } from "../db/conversations";
+import {
+  attachMessage,
+  CONTEXT_TTL_MS,
+  claimPendingAction,
+  createPendingAction,
+  getDialogState,
+  mergeDialogState,
+  type PendingAction,
+} from "../db/conversations";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -41,8 +49,12 @@ export async function recordUndo(
 ): Promise<{ undoId: string; button: InlineKeyboardButton }> {
   const now = ctx.clock.now();
   const undoId = await createPendingAction(ctx.db, {
-    conversationId: a.conversationId, userId: a.user.id, kind: UNDO_CARD,
-    payload: { chatId: a.chatId, record: a.record, summary: a.summary } satisfies UndoPayload, now, ttlMs: CONTEXT_TTL_MS,
+    conversationId: a.conversationId,
+    userId: a.user.id,
+    kind: UNDO_CARD,
+    payload: { chatId: a.chatId, record: a.record, summary: a.summary } satisfies UndoPayload,
+    now,
+    ttlMs: CONTEXT_TTL_MS,
   });
   await mergeDialogState(ctx.db, a.conversationId, a.user.id, { lastUndo: { actionId: undoId, at: now } }, now);
   return { undoId, button: { text: t("undoButton", a.user.locale), callback_data: callbackData(undoId, "u") } };

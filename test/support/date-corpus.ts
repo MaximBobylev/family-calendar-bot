@@ -46,8 +46,6 @@ export function loadCorpus(): CorpusCase[] {
 /** Канонический JSON: ключи по алфавиту, чтобы порядок полей в YAML не влиял на сравнение. */
 export function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, v) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)))
-      : v,
+    v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v,
   );
 }
