@@ -3,17 +3,10 @@
 
 import type { AppContext } from "./bot/context";
 import { COST_ESTIMATES } from "./config";
+import { timingSafeEqual } from "./crypto";
 
 /** Цены Workers AI (docs/research/hosting-economics.md) — для оценки; одни на учёт и админку (config.ts). */
 const PRICE = COST_ESTIMATES;
-
-export function timingSafeEqual(a: string, b: string): boolean {
-  const x = new TextEncoder().encode(a);
-  const y = new TextEncoder().encode(b);
-  let diff = x.length ^ y.length;
-  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
-  return diff === 0;
-}
 
 export function checkAdminAuth(request: Request, user: string, password: string): boolean {
   if (!user || !password) return false;

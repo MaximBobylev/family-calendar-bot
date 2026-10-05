@@ -1,7 +1,8 @@
 // Фейки внешних API для приёмочных тестов (ADR-0006). Не импортирует код бота.
 //
 //   /telegram/bot<token>/<method>   — фейк Telegram Bot API: запоминает вызовы, отвечает успехом
-//   /google-oauth/token             — обмен кода на токены (код = "code-<email>")
+//   /google-oauth/token             — обмен кода на токены: код выдан /__fake/google/authorize, одноразовый;
+//                                     был code_challenge — нужен верный code_verifier (PKCE S256), иначе invalid_grant
 //   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>")
 //   /llm/v1/chat/completions        — фейк LLM: ответ берётся из фикстур по тексту пользователя
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
@@ -10,6 +11,7 @@
 // Управление для раннера:
 //   GET  /__fake/telegram/calls     — все вызовы Telegram с последнего сброса
 //   POST /__fake/google/accounts    — завести Google-аккаунт: {email, calendars: [...]}
+//   POST /__fake/google/authorize   — «согласие на экране Google»: {email, code_challenge?, code_challenge_method?} → {code}
 //   GET  /__fake/google/token-requests — все запросы обмена кода (для проверки параметров)
 //   POST /__fake/google/revoke      — отозвать доступ аккаунта: {email}
 //   POST /__fake/llm/fixtures       — {"<текст>": {tool, args} | {tools: [...]} | {error: status}}
@@ -25,6 +27,7 @@
 //   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
 //   POST /__fake/reset              — сброс состояния
 
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 interface TelegramCall {
@@ -67,6 +70,9 @@ let telegramCalls: TelegramCall[] = [];
 let nextMessageId = 1;
 let googleAccounts = new Map<string, { calendars: GoogleCalendar[]; revoked?: boolean }>();
 let tokenRequests: Record<string, string>[] = [];
+/** Выданные коды авторизации: кому и с каким code_challenge (PKCE). */
+let authCodes = new Map<string, { email: string; challenge?: string; method?: string; used: boolean }>();
+let authCodeSeq = 1;
 let llmFixtures = new Map<string, LlmFixture>();
 let telegramFiles = new Map<string, string>();
 let sttFixtures = new Map<string, { text?: string; error?: number }>();
@@ -160,6 +166,8 @@ const server = createServer(async (req, res) => {
       nextMessageId = 1;
       googleAccounts = new Map();
       tokenRequests = [];
+      authCodes = new Map();
+      authCodeSeq = 1;
       llmFixtures = new Map();
       llmRequests = [];
       telegramFiles = new Map();
@@ -178,6 +186,12 @@ const server = createServer(async (req, res) => {
       for (const c of body.calendars) for (const e of c.events ?? []) e.etag ??= newEtag();
       googleAccounts.set(body.email, { calendars: body.calendars });
       return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/google/authorize" && req.method === "POST") {
+      const b = (await readJson(req)) as { email: string; code_challenge?: string; code_challenge_method?: string };
+      const code = `code-${authCodeSeq++}-${b.email}`;
+      authCodes.set(code, { email: b.email, challenge: b.code_challenge, method: b.code_challenge_method, used: false });
+      return send(res, 200, { code });
     }
     if (url.pathname === "/__fake/google/token-requests") return send(res, 200, tokenRequests);
     if (url.pathname === "/__fake/google/revocations") return send(res, 200, revocations);
@@ -263,10 +277,21 @@ const server = createServer(async (req, res) => {
         if (!acc || acc.revoked) return send(res, 400, { error: "invalid_grant", error_description: "Token has been expired or revoked." });
         return send(res, 200, { access_token: `at-${email}`, expires_in: 3599, token_type: "Bearer" });
       }
-      const email = /^code-(.+)$/.exec(form.code ?? "")?.[1];
-      if (form.grant_type !== "authorization_code" || !email || !googleAccounts.has(email)) {
-        return send(res, 400, { error: "invalid_grant" });
+      const issued = authCodes.get(form.code ?? "");
+      if (form.grant_type !== "authorization_code" || !issued || issued.used || !googleAccounts.has(issued.email)) {
+        return send(res, 400, { error: "invalid_grant", error_description: "Bad Request" });
       }
+      // Как Google: код одноразовый, даже если обмен не удался
+      issued.used = true;
+      // PKCE (RFC 7636): при согласии был challenge — нужен verifier, дающий тот же S256
+      if (issued.challenge) {
+        const verifier = form.code_verifier ?? "";
+        const s256 = createHash("sha256").update(verifier, "ascii").digest("base64url");
+        if (issued.method !== "S256" || !verifier || s256 !== issued.challenge) {
+          return send(res, 400, { error: "invalid_grant", error_description: verifier ? "Invalid code verifier." : "Missing code verifier." });
+        }
+      }
+      const email = issued.email;
       // Новое согласие — новый действующий доступ
       googleAccounts.get(email)!.revoked = false;
       return send(res, 200, {

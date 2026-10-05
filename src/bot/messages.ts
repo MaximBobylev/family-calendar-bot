@@ -52,6 +52,10 @@ const messages = {
     en: "If this isn't you, close this page: the link was forwarded to you, and someone else would get your calendar.",
   },
   oauthConfirmButton: { ru: "Продолжить", en: "Continue" },
+  oauthBindFailedPage: {
+    ru: "Не удалось подтвердить, что вход начат в этом браузере. Начните заново из бота: нажмите «Подключить».",
+    en: "Couldn't confirm that sign-in was started in this browser. Start over from the bot: tap “Connect”.",
+  },
   oauthFailedPage: {
     ru: "Не получилось подключить календарь. Вернитесь в Telegram и попробуйте ещё раз.",
     en: "Couldn't connect the calendar. Go back to Telegram and try again.",

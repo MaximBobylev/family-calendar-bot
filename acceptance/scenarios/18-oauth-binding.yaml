@@ -1,0 +1,82 @@
+# Привязка к браузеру и PKCE (tracks/telegram-login.md, этап 1). Callback принимается только в браузере,
+# который нажал «Продолжить» (cookie oauth_bind, A4: login CSRF); код меняется на токены только с code_verifier
+# бота (PKCE S256, A5). Что PKCE используется в обычном подключении — проверяют раннер (code_challenge в ссылке)
+# и фейк Google (обмен без верного verifier — invalid_grant) во всех сценариях с подключением.
+
+- id: callback-without-binding-cookie
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    # Callback открыт в браузере без cookie (другой браузер, cookie запрещены) — отказ, ничего не привязано
+    - oauth:
+        consent: ivan@gmail.com
+        callback_without_bind_cookie: true
+        expect_status: 403
+        callback_contains: ["Не удалось подтвердить, что вход начат в этом браузере", "«Подключить»"]
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"] }
+    # State погашен неудачной попыткой: тот же callback и в «своём» браузере уже не принимается
+    - oauth_reuse_last_link: { expect_status: 400 }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"] }
+    # Заново из бота — подключается как обычно
+    - oauth: { consent: ivan@gmail.com }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["ivan@gmail.com", "подключён"] }
+
+# A4: злоумышленник (1002) проходит согласие своим Google, но callback не открывает, а подсовывает его жертве (1001).
+# У жертвы своя cookie (она сама начала подключение) — но от другого state.
+- id: callback-from-another-flow-is-rejected
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - google_account: { email: mallory@gmail.com, calendars: [{ id: mallory@gmail.com, summary: "M", accessRole: owner, primary: true, timeZone: Europe/London }] }
+    - telegram: { from: 1002, text: "/start" }
+    - oauth: { from: 1002, browser: mallory, consent: mallory@gmail.com, hold_callback: true }
+    - telegram: { from: 1001, text: "/start" }
+    - oauth: { from: 1001, browser: ivan, consent: ivan@gmail.com, hold_callback: true }
+    - expect_telegram_count: 2
+    - oauth_callback:
+        of: mallory@gmail.com
+        browser: ivan
+        expect_status: 403
+        page_contains: ["Не удалось подтвердить, что вход начат в этом браузере"]
+    - expect_no_telegram: true
+    # Своё подключение жертвы это не сломало
+    - oauth_callback: { of: ivan@gmail.com, browser: ivan, expect_status: 200 }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["ivan@gmail.com", "подключён"], text_not_contains: ["mallory"] }
+    # Подсунутый state погашен: и злоумышленнику в своём браузере он больше не годится
+    - oauth_callback: { of: mallory@gmail.com, browser: mallory, expect_status: 400 }
+    - telegram: { from: 1002, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["подключите Google Календарь"] }
+
+# Отказ на экране согласия, открытый в чужом браузере: тоже отказ по привязке, без сообщений в бот
+- id: denied-callback-without-binding-cookie
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    - oauth: { deny: true, callback_without_bind_cookie: true, expect_status: 403 }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"] }
+
+# A5: код, выданный под другой code_challenge (перехваченный), нашим verifier не обменять — «не получилось подключить»
+- id: callback-wrong-verifier
+  story: US-02
+  steps:
+    - google_account: { email: ivan@gmail.com, calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 1001, text: "/start" }
+    - oauth:
+        consent: ivan@gmail.com
+        tamper_challenge: true
+        expect_status: 502
+        callback_contains: ["Не получилось подключить календарь"]
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"] }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["подключите Google Календарь"] }

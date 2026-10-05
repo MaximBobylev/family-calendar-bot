@@ -34,6 +34,8 @@ type Step =
   | { google_account: { email: string; calendars: unknown[] } }
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
+  /** Открыть callback, придержанный шагом oauth с hold_callback (по email согласия), в браузере browser. */
+  | { oauth_callback: { of: string; browser?: string; without_bind_cookie?: boolean; expect_status: number; page_contains?: string[] } }
   | { google_revoke: string }
   /** Отзывы токена ботом (US-03): сколько было и какой токен отозван последним. */
   | { expect_token_revocations: { count: number; last?: string } }
@@ -67,6 +69,18 @@ interface OAuthStep {
   page_contains?: string[];
   /** Отправить форму страницы без её cookie — как чужой сайт (CSRF). */
   without_cookie?: boolean;
+  /** Кнопка «Подключить» из последнего сообщения этому чату (по умолчанию — последняя вообще). */
+  from?: number;
+  /** Именованный браузер со своими cookie (по умолчанию — один на сценарий). */
+  browser?: string;
+  /** Callback без cookie oauth_bind — как будто его открыли в другом браузере (login CSRF, A4). */
+  callback_without_bind_cookie?: boolean;
+  /** Ответ callback содержит эти строки. */
+  callback_contains?: string[];
+  /** Согласиться у Google, но callback не открывать: code+state «уносит» злоумышленник (шаг oauth_callback). */
+  hold_callback?: boolean;
+  /** Google получил другой code_challenge — verifier бота не подойдёт, обмен кода отвергается (PKCE, A5). */
+  tamper_challenge?: boolean;
 }
 
 interface TelegramInput {
@@ -133,9 +147,10 @@ async function allTelegramCalls(): Promise<TelegramCall[]> {
   return (await (await fetch(`${FAKES}/__fake/telegram/calls`)).json()) as TelegramCall[];
 }
 
-/** URL последней кнопки привязки Google из сообщений бота. */
-async function lastConnectUrl(): Promise<string> {
+/** URL последней кнопки привязки Google из сообщений бота (from — только в этот чат). */
+async function lastConnectUrl(from?: number): Promise<string> {
   const urls = (await allTelegramCalls())
+    .filter((c) => from === undefined || String(c.body.chat_id) === String(from))
     .flatMap((c) => (c.body.reply_markup?.inline_keyboard ?? []).flat())
     .map((b) => b.url)
     .filter((u): u is string => !!u && u.includes("/oauth/google/start"));
@@ -146,12 +161,73 @@ async function lastConnectUrl(): Promise<string> {
   return `${SUT}${u.pathname}${u.search}`;
 }
 
+/** Cookie браузера для бота: имя+путь → значение. Срок (Max-Age) не отслеживается, кроме удаления (Max-Age=0). */
+class CookieJar {
+  private items = new Map<string, { name: string; value: string; path: string }>();
+
+  store(res: Response): void {
+    for (const line of res.headers.getSetCookie()) {
+      const [pair = "", ...attrs] = line.split(";").map((x) => x.trim());
+      const eq = pair.indexOf("=");
+      const name = pair.slice(0, eq);
+      const opts = Object.fromEntries(attrs.map((a) => [a.split("=")[0]!.toLowerCase(), a.split("=").slice(1).join("=")]));
+      const path = opts.path || "/";
+      const key = `${name} ${path}`;
+      if (opts["max-age"] !== undefined && Number(opts["max-age"]) <= 0) this.items.delete(key);
+      else this.items.set(key, { name, value: pair.slice(eq + 1), path });
+    }
+  }
+
+  header(url: string): string {
+    const path = new URL(url).pathname;
+    return [...this.items.values()]
+      .filter((c) => path === c.path || path.startsWith(c.path.endsWith("/") ? c.path : `${c.path}/`))
+      .map((c) => `${c.name}=${c.value}`)
+      .join("; ");
+  }
+
+  has(name: string): boolean {
+    return [...this.items.values()].some((c) => c.name === name);
+  }
+}
+
+/** Запрос «из браузера»: его cookie уходят с запросом (кроме withoutCookies), Set-Cookie из ответа запоминаются. */
+async function browse(jar: CookieJar, url: string, init: RequestInit & { withoutCookies?: boolean } = {}): Promise<Response> {
+  const { withoutCookies, ...rest } = init;
+  const cookie = withoutCookies ? "" : jar.header(url);
+  const res = await fetch(url, { redirect: "manual", ...rest, headers: { ...(rest.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
+  jar.store(res);
+  return res;
+}
+
+/**
+ * Экран согласия Google (фейк): согласие выдаёт код, привязанный к code_challenge из ссылки (tamper — к чужому);
+ * отказ — error=access_denied. Возвращает URL callback, куда Google отправил бы браузер.
+ */
+async function googleConsent(consent: URL, o: { consent?: string; deny?: boolean; tamper_challenge?: boolean }): Promise<string> {
+  const p = consent.searchParams;
+  const callback = new URL(p.get("redirect_uri") ?? "");
+  let query: Record<string, string>;
+  if (o.deny) {
+    query = { error: "access_denied", state: p.get("state") ?? "" };
+  } else {
+    const challenge = o.tamper_challenge ? "tampered-challenge-0000000000000000000000000" : p.get("code_challenge");
+    const res = await post(`${FAKES}/__fake/google/authorize`, {
+      email: o.consent,
+      ...(challenge ? { code_challenge: challenge, code_challenge_method: p.get("code_challenge_method") } : {}),
+    });
+    const { code } = (await res.json()) as { code: string };
+    query = { code, state: p.get("state") ?? "" };
+  }
+  return `${SUT}${callback.pathname}?${new URLSearchParams(query)}`;
+}
+
 /**
  * Ссылка «Подключить» → страница «подключаете к Telegram-аккаунту …» → кнопка «Продолжить» (POST формы с cookie)
  * → редирект на экран согласия Google. status — первый ответ не по пути (страница или форма).
  */
-async function openConnectLink(startUrl: string, opts: { withoutCookie?: boolean } = {}): Promise<{ status: number; page: string; consent?: URL }> {
-  const start = await fetch(startUrl, { redirect: "manual" });
+async function openConnectLink(jar: CookieJar, startUrl: string, opts: { withoutCookie?: boolean } = {}): Promise<{ status: number; page: string; consent?: URL }> {
+  const start = await browse(jar, startUrl);
   const page = await start.text();
   if (start.status !== 200) return { status: start.status, page };
   const field = (name: string) => new RegExp(`name="${name}" value="([^"]*)"`).exec(page)?.[1];
@@ -159,11 +235,10 @@ async function openConnectLink(startUrl: string, opts: { withoutCookie?: boolean
   const state = field("state");
   const csrf = field("csrf");
   if (!action || state === undefined || csrf === undefined) throw new AssertionError(`connect page has no form: ${page}`);
-  const cookie = (start.headers.get("set-cookie") ?? "").split(";")[0]!;
-  const res = await fetch(`${SUT}${action}`, {
+  const res = await browse(jar, `${SUT}${action}`, {
     method: "POST",
-    redirect: "manual",
-    headers: { "content-type": "application/x-www-form-urlencoded", ...(opts.withoutCookie ? {} : { cookie }) },
+    withoutCookies: opts.withoutCookie,
+    headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ state, csrf }),
   });
   if (res.status !== 302 && res.status !== 303) return { status: res.status, page };
@@ -185,7 +260,14 @@ async function runScenario(s: Scenario): Promise<void> {
   let updateId = 1000;
   let seen = 0; // сколько вызовов Telegram уже проверено
 
-  let lastOAuth: { startUrl: string; callbackUrl: string } | undefined;
+  let lastOAuth: { startUrl: string; callbackUrl: string; jar: CookieJar } | undefined;
+  // Браузеры пользователей сценария (у каждого свои cookie) и придержанные callback (hold_callback) по email
+  const browsers = new Map<string, CookieJar>();
+  const browser = (name = "default") => browsers.get(name) ?? browsers.set(name, new CookieJar()).get(name)!;
+  const heldCallbacks = new Map<string, string>();
+  const checkPage = (where: string, what: string, body: string, parts: string[] = []) => {
+    for (const part of parts) if (!body.includes(part)) throw new AssertionError(`${where}: ${what} does not contain «${part}»:\n${body}`);
+  };
 
   const sendUpdate = async (t: TelegramInput, where = "") => {
     if (!t.redeliver) updateId++;
@@ -263,35 +345,47 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("google_account" in step) {
       await post(`${FAKES}/__fake/google/accounts`, step.google_account);
     } else if ("oauth" in step) {
-      const startUrl = await lastConnectUrl();
-      const start = await openConnectLink(startUrl, { withoutCookie: step.oauth.without_cookie });
-      for (const part of step.oauth.page_contains ?? []) {
-        if (!start.page.includes(part)) throw new AssertionError(`${where}: connect page does not contain «${part}»:\n${start.page}`);
-      }
+      const o = step.oauth;
+      const jar = browser(o.browser);
+      const startUrl = await lastConnectUrl(o.from);
+      const start = await openConnectLink(jar, startUrl, { withoutCookie: o.without_cookie });
+      checkPage(where, "connect page", start.page, o.page_contains);
       if (!start.consent) {
         // Плохая/протухшая ссылка или чужая форма отвергаются ещё до Google
-        if (step.oauth.expect_status === start.status) continue;
+        if (o.expect_status === start.status) continue;
         throw new AssertionError(`${where}: oauth start → ${start.status}, expected redirect to Google`);
       }
-      const consent = start.consent;
-      const p = consent.searchParams;
-      for (const [k, v] of [["access_type", "offline"], ["prompt", "consent"], ["response_type", "code"]] as const) {
+      const p = start.consent.searchParams;
+      for (const [k, v] of [["access_type", "offline"], ["prompt", "consent"], ["response_type", "code"], ["code_challenge_method", "S256"]] as const) {
         if (p.get(k) !== v) throw new AssertionError(`${where}: consent URL ${k}=${p.get(k)}, expected ${v}`);
       }
       if (!p.get("scope")?.includes("calendar.events")) throw new AssertionError(`${where}: consent URL scope ${p.get("scope")}`);
-      const callback = new URL(p.get("redirect_uri") ?? "");
-      const query: Record<string, string> = step.oauth.deny
-        ? { error: "access_denied", state: p.get("state") ?? "" }
-        : { code: `code-${step.oauth.consent}`, state: p.get("state") ?? "" };
-      const callbackUrl = `${SUT}${callback.pathname}?${new URLSearchParams(query)}`;
-      lastOAuth = { startUrl, callbackUrl };
-      const res = await fetch(callbackUrl);
-      const expected = step.oauth.expect_status ?? 200;
-      if (res.status !== expected) throw new AssertionError(`${where}: oauth callback → ${res.status}, expected ${expected}: ${await res.text()}`);
+      // S256 от verifier 43–128 символов — 43 символа base64url
+      if (!/^[A-Za-z0-9_-]{43}$/.test(p.get("code_challenge") ?? "")) throw new AssertionError(`${where}: consent URL code_challenge=${p.get("code_challenge")}`);
+      if (!jar.has("oauth_bind")) throw new AssertionError(`${where}: no oauth_bind cookie before redirect to Google`);
+      const callbackUrl = await googleConsent(start.consent, o);
+      lastOAuth = { startUrl, callbackUrl, jar };
+      if (o.hold_callback) {
+        heldCallbacks.set(o.consent ?? "deny", callbackUrl);
+        continue;
+      }
+      const res = await browse(jar, callbackUrl, { withoutCookies: o.callback_without_bind_cookie });
+      const body = await res.text();
+      const expected = o.expect_status ?? 200;
+      if (res.status !== expected) throw new AssertionError(`${where}: oauth callback → ${res.status}, expected ${expected}: ${body}`);
+      checkPage(where, "callback page", body, o.callback_contains);
+    } else if ("oauth_callback" in step) {
+      const c = step.oauth_callback;
+      const url = heldCallbacks.get(c.of);
+      if (!url) throw new AssertionError(`${where}: no held callback for ${c.of}`);
+      const res = await browse(browser(c.browser), url, { withoutCookies: c.without_bind_cookie });
+      const body = await res.text();
+      if (res.status !== c.expect_status) throw new AssertionError(`${where}: held callback ${c.of} → ${res.status}, expected ${c.expect_status}: ${body}`);
+      checkPage(where, "callback page", body, c.page_contains);
     } else if ("oauth_reuse_last_link" in step) {
       if (!lastOAuth) throw new AssertionError(`${where}: no previous oauth step`);
       for (const u of [lastOAuth.startUrl, lastOAuth.callbackUrl]) {
-        const res = await fetch(u, { redirect: "manual" });
+        const res = await browse(lastOAuth.jar, u);
         if (res.status !== step.oauth_reuse_last_link.expect_status) {
           throw new AssertionError(`${where}: reuse ${new URL(u).pathname} → ${res.status}, expected ${step.oauth_reuse_last_link.expect_status}`);
         }
@@ -398,11 +492,10 @@ async function runScenario(s: Scenario): Promise<void> {
       const c = step.connected_user;
       await post(`${FAKES}/__fake/google/accounts`, { email: c.email, calendars: c.calendars });
       await sendUpdate({ from: c.from, text: "/start", ...(c.language ? { language: c.language } : {}) });
-      const start = await openConnectLink(await lastConnectUrl());
+      const jar = browser(`user-${c.from}`);
+      const start = await openConnectLink(jar, await lastConnectUrl(c.from));
       if (!start.consent) throw new AssertionError(`${where}: connect ${c.email}: start → ${start.status}`);
-      const consent = start.consent;
-      const callback = new URL(consent.searchParams.get("redirect_uri") ?? "");
-      const res = await fetch(`${SUT}${callback.pathname}?${new URLSearchParams({ code: `code-${c.email}`, state: consent.searchParams.get("state") ?? "" })}`);
+      const res = await browse(jar, await googleConsent(start.consent, { consent: c.email }));
       if (res.status !== 200) throw new AssertionError(`${where}: connect ${c.email} → ${res.status}`);
       await newCalls(); // приветствие и «календарь подключён» — проверены отдельными сценариями
     } else if ("expect_telegram_count" in step) {

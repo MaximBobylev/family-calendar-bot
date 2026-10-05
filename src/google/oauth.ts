@@ -14,7 +14,8 @@ export function redirectUri(config: Config): string {
   return `${config.publicBaseUrl}/oauth/google/callback`;
 }
 
-export function consentUrl(config: Config, state: string): string {
+/** codeChallenge — PKCE S256 (RFC 7636): код без нашего code_verifier бесполезен (tracks/telegram-login.md, A5). */
+export function consentUrl(config: Config, state: string, codeChallenge: string): string {
   const params = new URLSearchParams({
     client_id: config.googleClientId,
     redirect_uri: redirectUri(config),
@@ -25,6 +26,8 @@ export function consentUrl(config: Config, state: string): string {
     prompt: "consent",
     include_granted_scopes: "true",
     state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
   return `${config.googleAccountsBase}/o/oauth2/v2/auth?${params}`;
 }
@@ -36,12 +39,14 @@ export interface TokenResponse {
   scope: string;
 }
 
-export async function exchangeCode(config: Config, code: string): Promise<TokenResponse> {
+/** client_secret остаётся (web-клиент Google — конфиденциальный); code_verifier — вдобавок к нему (PKCE). */
+export async function exchangeCode(config: Config, code: string, codeVerifier: string): Promise<TokenResponse> {
   const res = await fetchWithTimeout(`${config.googleOAuthBase}/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       code,
+      code_verifier: codeVerifier,
       client_id: config.googleClientId,
       client_secret: config.googleClientSecret,
       redirect_uri: redirectUri(config),

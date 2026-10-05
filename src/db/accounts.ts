@@ -25,15 +25,39 @@ export async function peekOAuthState(db: D1Database, state: string, now: number)
   return row ? { userId: row.user_id, tgName: row.tg_name, locale: row.locale } : null;
 }
 
-export type ConsumeStateResult = { ok: true; userId: string; tgName: string | null } | { ok: false; reason: "unknown" | "used" | "expired" };
+/**
+ * Переход на экран согласия (POST /oauth/google/start): к действующей ссылке привязываются PKCE verifier
+ * (зашифрован) и хеш cookie браузера (tracks/telegram-login.md, A4/A5). Повторный переход (вторая вкладка,
+ * другой браузер) перезаписывает: callback пройдёт только в браузере, нажавшем «Продолжить» последним.
+ * false — ссылка не действует (использована, истекла, неизвестна).
+ */
+export async function bindOAuthState(
+  db: D1Database,
+  state: string,
+  now: number,
+  bind: { codeVerifierEnc: string; browserBinding: string },
+): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE oauth_states SET code_verifier_enc = ?, browser_binding = ? WHERE state = ? AND used_at IS NULL AND expires_at > ?")
+    .bind(bind.codeVerifierEnc, bind.browserBinding, state, now)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+export type ConsumeStateResult =
+  | { ok: true; userId: string; tgName: string | null; codeVerifierEnc: string | null; browserBinding: string | null }
+  | { ok: false; reason: "unknown" | "used" | "expired" };
 
 /** Одноразово «гасит» state. Повторное использование и протухшие — ошибка (US-02). */
 export async function consumeOAuthState(db: D1Database, state: string, now: number): Promise<ConsumeStateResult> {
   const row = await db
-    .prepare("UPDATE oauth_states SET used_at = ? WHERE state = ? AND used_at IS NULL AND expires_at > ? RETURNING user_id, tg_name")
+    .prepare(
+      `UPDATE oauth_states SET used_at = ? WHERE state = ? AND used_at IS NULL AND expires_at > ?
+       RETURNING user_id, tg_name, code_verifier_enc, browser_binding`,
+    )
     .bind(now, state, now)
-    .first<{ user_id: string; tg_name: string | null }>();
-  if (row) return { ok: true, userId: row.user_id, tgName: row.tg_name };
+    .first<{ user_id: string; tg_name: string | null; code_verifier_enc: string | null; browser_binding: string | null }>();
+  if (row) return { ok: true, userId: row.user_id, tgName: row.tg_name, codeVerifierEnc: row.code_verifier_enc, browserBinding: row.browser_binding };
   const existing = await db.prepare("SELECT used_at, expires_at FROM oauth_states WHERE state = ?").bind(state).first<{ used_at: number | null; expires_at: number }>();
   if (!existing) return { ok: false, reason: "unknown" };
   return { ok: false, reason: existing.used_at ? "used" : "expired" };

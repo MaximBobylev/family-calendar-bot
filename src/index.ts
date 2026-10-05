@@ -11,7 +11,8 @@ import { cleanup, runQueuedJob, tick, type JobMessage } from "./scheduler";
 import { ensureDigests } from "./jobs/digest";
 import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
-import { adminPage, checkAdminAuth, timingSafeEqual } from "./admin";
+import { adminPage, checkAdminAuth } from "./admin";
+import { timingSafeEqual } from "./crypto";
 import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
 
