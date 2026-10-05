@@ -109,3 +109,17 @@ export function parseDuration(tokens: Token[]): ParseResult {
   if (!dur || i + dur.n !== tokens.length) return { error: "unparseable" };
   return { duration: toIso(dur.d) };
 }
+
+/**
+ * ISO-длительность или сдвиг («PT1H30M», «+P1D», «-PT30M») → минуты со знаком.
+ * Месяцы и годы в минуты не переводятся — null (вызывающий код должен сказать «не понял»).
+ */
+export function durationToMinutes(iso: string): number | null {
+  const sign = iso.startsWith("-") ? -1 : 1;
+  const body = iso.replace(/^[+-]/, "");
+  const d = /^P(\d+)D$/.exec(body);
+  if (d) return sign * Number(d[1]) * 1440;
+  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?$/.exec(body);
+  if (!m || (!m[1] && !m[2])) return null;
+  return sign * (Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0));
+}

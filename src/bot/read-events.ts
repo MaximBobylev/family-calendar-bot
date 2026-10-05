@@ -7,6 +7,7 @@ import { parseDateFragment, type ParseValue } from "../dates";
 import { mergeDialogState } from "../db/conversations";
 import type { AppContext } from "./context";
 import { dayTitle, formatEvents } from "./format-events";
+import { orderForDisplay } from "./format";
 import { t } from "./messages";
 
 interface Period {
@@ -97,10 +98,7 @@ export async function readEvents(
     (e) => !only || e.ref.calendarId === only.id,
   );
   // Порядок как в выводе — для «перенеси вторую» (US-60)
-  const ordered = [...events].sort((a, b) =>
-    Math.max(a.startDay, period.fromDay) - Math.max(b.startDay, period.fromDay) ||
-    (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) ||
-    (a.start?.minutes ?? 0) - (b.start?.minutes ?? 0) || a.title.localeCompare(b.title));
+  const ordered = orderForDisplay(events.filter((e) => e.endDay >= period.fromDay && Math.max(e.startDay, period.fromDay) <= period.toDay), period.fromDay);
   await mergeDialogState(ctx.db, args.conversationId, args.userId, { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() } }, ctx.clock.now());
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId);

@@ -5,7 +5,8 @@
 import { titleScore, queryWords } from "../calendar/match";
 import type { CalendarEvent, CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
 import { parseDateFragment, type ParseValue } from "../dates";
-import { formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
+import { addMinutes, formatMoment, localToUtc, minutesBetween, parseLocal, utcToLocal, type Moment } from "../dates/calendar";
+import { durationToMinutes } from "../dates/duration";
 import type { ModifySpans } from "../dates/extract";
 import { fragmentParts } from "../dates/point";
 import { tokenize } from "../dates/tokenize";
@@ -16,7 +17,7 @@ import type { User } from "../db/users";
 import { GoogleApiError } from "../google/calendar-api";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
-import { escapeHtml } from "./format-events";
+import { escapeHtml, eventLabel, spanLabel } from "./format";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
 
@@ -66,31 +67,8 @@ interface PickCardPayload {
   request: ModifyRequest;
 }
 
-// --- Формат ---------------------------------------------------------------
-
-const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-
-function dayLabel(day: Day, locale: string): string {
-  const d = new Date(day * 86_400_000);
-  return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", { weekday: "short", day: "numeric", month: "long", timeZone: "UTC" }).format(d);
-}
-
-function spanLabel(start: Moment, end: Moment, locale: string): string {
-  if (start.day === end.day) return `${dayLabel(start.day, locale)}, ${hhmm(start.minutes)}–${hhmm(end.minutes)}`;
-  return `${dayLabel(start.day, locale)}, ${hhmm(start.minutes)} — ${dayLabel(end.day, locale)}, ${hhmm(end.minutes)}`;
-}
-
-function eventLabel(e: CalendarEvent, locale: string): string {
-  const when = e.allDay ? `${dayLabel(e.startDay, locale)}, ${t("allDayLower", locale)}` : spanLabel(e.start!, e.end!, locale);
-  return `${when} — ${e.title}`;
-}
-
-const norm = (m: Moment): Moment => {
-  const extra = Math.floor(m.minutes / 1440);
-  return { day: m.day + extra, minutes: m.minutes - extra * 1440 };
-};
-const plus = (m: Moment, minutes: number) => norm({ day: m.day, minutes: m.minutes + minutes });
-const diff = (a: Moment, b: Moment) => (a.day - b.day) * 1440 + (a.minutes - b.minutes);
+const plus = addMinutes;
+const diff = minutesBetween;
 
 // --- Поиск события ----------------------------------------------------------
 
@@ -159,15 +137,6 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
 
 type ChangeResult = { options: Change[] } | { error: "nothingToChange" | "notUnderstood" | "inPast" | "allDayTime" };
 
-function isoToMinutes(iso: string): number | null {
-  const sign = iso.startsWith("-") ? -1 : 1;
-  const body = iso.replace(/^[+-]/, "");
-  const d = /^P(\d+)D$/.exec(body);
-  if (d) return sign * Number(d[1]) * 1440;
-  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?$/.exec(body);
-  return m ? sign * (Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) : null;
-}
-
 function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, tz: string): ChangeResult {
   const s = req.spans;
   const base: Change = {
@@ -185,7 +154,7 @@ function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, t
 
   if (s.shift) {
     const parsed = parseDateFragment({ text: s.shift, kind: "shift", now: formatMoment(nowLocal), tz });
-    const minutes = "shift" in parsed ? isoToMinutes(parsed.shift) : null;
+    const minutes = "shift" in parsed ? durationToMinutes(parsed.shift) : null;
     if (minutes === null) return { error: "notUnderstood" };
     options.push({ ...base, start: plus(start, minutes), end: plus(end, minutes) });
   } else if (s.target) {
@@ -214,7 +183,7 @@ function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, t
 
   if (s.duration) {
     const parsed = parseDateFragment({ text: s.duration, kind: "duration", now: formatMoment(nowLocal), tz });
-    const minutes = "duration" in parsed && parsed.duration !== "all_day" ? isoToMinutes(`+${parsed.duration}`) : null;
+    const minutes = "duration" in parsed && parsed.duration !== "all_day" ? durationToMinutes(parsed.duration) : null;
     if (!minutes) return { error: "notUnderstood" };
     for (const o of options) o.end = plus(o.start!, minutes);
   }
@@ -234,6 +203,7 @@ export interface ModifyArgs {
 export async function startModify(ctx: AppContext, provider: CalendarProvider, a: ModifyArgs): Promise<void> {
   const { user, chatId } = a;
   const locale = user.locale;
+  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
   const { events: candidates, fuzzy } = await findCandidates(ctx, provider, user, a.conversationId, a.request);
 
   if (candidates.length === 0) {
@@ -250,7 +220,7 @@ export async function startModify(ctx: AppContext, provider: CalendarProvider, a
       payload: { chatId, refs: candidates.map((c) => c.ref), request: a.request } satisfies PickCardPayload, now: ctx.clock.now(),
     });
     const buttons: InlineKeyboardButton[][] = [
-      ...candidates.map((c, i) => [{ text: eventLabel(c, locale).slice(0, 60), callback_data: callbackData(id, `e${i}`) }]),
+      ...candidates.map((c, i) => [{ text: eventLabel(c, today, locale).slice(0, 60), callback_data: callbackData(id, `e${i}`) }]),
       [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
     ];
     const header = fuzzy && a.request.query ? t("notFoundSuggest", locale, { query: a.request.query }) : t("whichEvent", locale);
@@ -277,6 +247,7 @@ async function proposeChange(ctx: AppContext, provider: CalendarProvider, user: 
   }
 
   const now = utcToLocal(ctx.clock.now(), tz);
+  const today = now.day;
   const res = computeChange(e, req, now, tz);
   if ("error" in res) {
     await ctx.telegram.sendMessage(chatId, t(`modify_${res.error}`, locale));
@@ -300,7 +271,7 @@ async function proposeChange(ctx: AppContext, provider: CalendarProvider, user: 
   const o = res.options[0]!;
   const lines = [`${t(o.start ? "modifyMoveConfirm" : "modifyConfirm", locale)}`, "", `<b>${escapeHtml(e.title)}</b>`];
   if (res.options.length === 1 && o.start) {
-    lines.push(`${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, locale)}`, `${t("now", locale)}: ${spanLabel(o.start, o.end!, locale)}`);
+    lines.push(`${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, today, locale)}`, `${t("now", locale)}: ${spanLabel(o.start, o.end!, today, locale)}`);
   }
   if (o.title) lines.push(`${t("newTitle", locale)}: <b>${escapeHtml(o.title)}</b>`);
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
@@ -310,7 +281,7 @@ async function proposeChange(ctx: AppContext, provider: CalendarProvider, user: 
   let buttons: InlineKeyboardButton[][];
   if (res.options.length > 1) {
     buttons = [
-      ...res.options.map((x, i) => [{ text: spanLabel(x.start!, x.end!, locale), callback_data: callbackData(id, `c${i}`) }]),
+      ...res.options.map((x, i) => [{ text: spanLabel(x.start!, x.end!, today, locale), callback_data: callbackData(id, `c${i}`) }]),
       [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
     ];
   } else if (payload.askScope) {
@@ -331,6 +302,7 @@ async function proposeChange(ctx: AppContext, provider: CalendarProvider, user: 
 /** Выбор события из нескольких кандидатов. */
 export async function confirmPick(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<PickCardPayload>, choice: string): Promise<void> {
   const { chatId, refs, request } = action.payload;
+  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", user.locale));
     return;
@@ -341,7 +313,7 @@ export async function confirmPick(ctx: AppContext, provider: CalendarProvider, u
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("eventGone", user.locale));
     return;
   }
-  if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, `${t("picked", user.locale)}: ${eventLabel(e, user.locale)}`);
+  if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, `${t("picked", user.locale)}: ${eventLabel(e, today, user.locale)}`);
   await proposeChange(ctx, provider, user, chatId, action.conversationId, e, request);
 }
 
@@ -349,6 +321,7 @@ export async function confirmPick(ctx: AppContext, provider: CalendarProvider, u
 export async function confirmModify(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<ModifyCardPayload>, choice: string): Promise<void> {
   const p = action.payload;
   const locale = user.locale;
+  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
   const edit = (text: string) => (action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve());
 
   if (choice === "x") {
@@ -385,7 +358,7 @@ export async function confirmModify(ctx: AppContext, provider: CalendarProvider,
   }
 
   const lines = [t("modified", locale), "", `<b>${escapeHtml(o.title ?? p.title)}</b>`];
-  if (o.start) lines.push(`🕒 ${spanLabel(o.start, o.end!, locale)}`);
+  if (o.start) lines.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
   if (wholeSeries) lines.push(t("wholeSeriesChanged", locale));
   await edit(lines.join("\n"));
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());

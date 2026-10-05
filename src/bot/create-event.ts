@@ -2,7 +2,8 @@
 // неоднозначных дат, вопрос «во сколько?», предупреждение о пересечениях, вопрос о названии.
 
 import type { CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
-import { formatMoment, localToUtc, parseLocal, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
+import { addMinutes, formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
+import { durationToMinutes } from "../dates/duration";
 import { parseDateFragment, type ParseValue } from "../dates";
 import {
   attachMessage, createPendingAction, mergeDialogState, type PendingAction,
@@ -11,7 +12,7 @@ import type { User } from "../db/users";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
-import { escapeHtml } from "./format-events";
+import { dateLabel, escapeHtml, hhmm, whenOf } from "./format";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
 
@@ -67,26 +68,7 @@ export function draftFromIntent(i: CreateEventIntent): CreateDraft {
 
 // --- Формат ---------------------------------------------------------------
 
-function dateLabel(day: Day, today: Day, locale: string): string {
-  const { year, month, date } = parts(day);
-  const withYear = year !== parts(today).year;
-  return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", {
-    weekday: "short", day: "numeric", month: "long", ...(withYear ? { year: "numeric" } : {}), timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, date)));
-}
-
-const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-
-export function whenLabel(o: CreateOption, today: Day, locale: string): string {
-  if (o.allDay) {
-    const range = o.startDay === o.endDay ? dateLabel(o.startDay, today, locale) : `${dateLabel(o.startDay, today, locale)} — ${dateLabel(o.endDay, today, locale)}`;
-    return `${range}, ${t("allDayLower", locale)}`;
-  }
-  const s = o.start!;
-  const e = o.end!;
-  if (s.day === e.day) return `${dateLabel(s.day, today, locale)}, ${hhmm(s.minutes)}–${hhmm(e.minutes)}`;
-  return `${dateLabel(s.day, today, locale)}, ${hhmm(s.minutes)} — ${dateLabel(e.day, today, locale)}, ${hhmm(e.minutes)}`;
-}
+export const whenLabel = (o: CreateOption, today: Day, locale: string) => whenOf(o, today, locale);
 
 function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boolean): string {
   const lines = [`<b>${escapeHtml(o.title)}</b>`, `🕒 ${whenLabel(o, today, locale)}`];
@@ -96,13 +78,6 @@ function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boo
 }
 
 // --- Разрешение черновика --------------------------------------------------
-
-function durationMinutes(iso: string): number {
-  const m = /^PT(?:(\d+)H)?(?:(\d+)M)?$/.exec(iso);
-  if (m) return Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0);
-  const d = /^P(\d+)D$/.exec(iso);
-  return d ? Number(d[1]) * 1440 : DEFAULT_DURATION_MIN;
-}
 
 type Resolution =
   | { kind: "options"; options: CreateOption[] }
@@ -128,7 +103,12 @@ function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: Calendar
     const d = parseDateFragment({ text: draft.durationText, kind: "duration", now: formatMoment(now), tz });
     if ("error" in d || !("duration" in d)) return { kind: "reply", text: t("durationUnparseable", locale) };
     if (d.duration === "all_day") allDay = true;
-    else duration = durationMinutes(d.duration);
+    else {
+      const minutes = durationToMinutes(d.duration);
+      // «на месяц» и т.п. — не длительность встречи
+      if (!minutes || minutes <= 0) return { kind: "reply", text: t("durationUnparseable", locale) };
+      duration = minutes;
+    }
   }
 
   const base = {
@@ -143,9 +123,8 @@ function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: Calendar
   const toOption = (v: ParseValue): CreateOption | "needTime" | null => {
     if ("datetime" in v) {
       const start = parseLocal(v.datetime);
-      const end = { day: start.day, minutes: start.minutes + duration };
-      const n = normalizeMoment(end);
-      return { ...base, allDay: false, start, end: n, startDay: start.day, endDay: n.day };
+      const end = addMinutes(start, duration);
+      return { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day };
     }
     if ("interval" in v) {
       const start = parseLocal(v.interval.start);
@@ -174,11 +153,6 @@ function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: Calendar
   const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
   if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
   return { kind: "options", options: ok };
-}
-
-function normalizeMoment(m: Moment): Moment {
-  const extra = Math.floor(m.minutes / 1440);
-  return { day: m.day + extra, minutes: m.minutes - extra * 1440 };
 }
 
 // --- Сценарий --------------------------------------------------------------
@@ -253,7 +227,7 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
   const events = await provider.listEvents(localToUtc(o.start!, o.tz), localToUtc(o.end!, o.tz), o.tz);
   return events
     .filter((e) => !e.allDay && !e.free && relevant.has(e.ref.calendarId))
-    .map((e) => `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)} ${escapeHtml(e.title)}`);
+    .map((e) => `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}${e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, "ru")})` : ""} ${escapeHtml(e.title)}`);
 }
 
 /** Нажатие кнопки на карточке создания. Карточка уже «забрана» атомарно (claimPendingAction). */

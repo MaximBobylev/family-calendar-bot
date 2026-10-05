@@ -3,14 +3,12 @@
 
 import type { CalendarEvent } from "../calendar/model";
 import { parts, type Day } from "../dates/calendar";
+import { escapeHtml, hhmm, orderForDisplay } from "./format";
 import { t } from "./messages";
 
 const TELEGRAM_LIMIT = 4000; // запас до 4096
 const pad = (n: number) => String(n).padStart(2, "0");
-const hhmm = (minutes: number) => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
-
-/** Сообщения уходят с parse_mode=HTML — пользовательский текст экранируем. */
-export const escapeHtml = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
+export { escapeHtml };
 
 export function dayTitle(day: Day, today: Day, locale: string): string {
   const { year, month, date } = parts(day);
@@ -68,10 +66,7 @@ export function formatEvents(
   }
 
   const blocks = [...byDay.keys()].sort((a, b) => a - b).map((day) => {
-    const list = byDay.get(day)!.sort((a, b) => {
-      if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
-      return (a.start?.minutes ?? 0) - (b.start?.minutes ?? 0) || a.title.localeCompare(b.title);
-    });
+    const list = orderForDisplay(byDay.get(day)!, fromDay);
     return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale))].join("\n");
   });
 

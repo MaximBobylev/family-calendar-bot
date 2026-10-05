@@ -133,3 +133,13 @@ export function convertZone(m: Moment, fromTz: string, toTz: string): Moment {
 export function addRealMinutes(m: Moment, minutes: number, tz: string): Moment {
   return utcToLocal(localToUtc(m, tz) + minutes * 60_000, tz);
 }
+
+/** Момент + минуты (локальное время, без учёта переходов — для этого addRealMinutes). */
+export function addMinutes(m: Moment, minutes: number): Moment {
+  return normalize({ day: m.day, minutes: m.minutes + minutes });
+}
+
+/** Разница a − b в минутах. */
+export function minutesBetween(a: Moment, b: Moment): number {
+  return (a.day - b.day) * 1440 + (a.minutes - b.minutes);
+}
