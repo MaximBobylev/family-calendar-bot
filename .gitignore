@@ -5,3 +5,4 @@ dist/
 coverage/
 reports/
 .env
+.claude/settings.local.json

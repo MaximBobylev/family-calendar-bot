@@ -10,9 +10,11 @@
     "lint": "biome lint",
     "format": "biome format --write",
     "format:check": "biome format",
-    "check": "npm run -s typecheck && biome ci",
+    "check": "npm run -s typecheck && biome ci --colors=off",
     "test": "vitest run",
-    "corpus:dates": "tsx scripts/date-corpus.ts"
+    "corpus:dates": "tsx scripts/date-corpus.ts",
+    "stories": "tsx scripts/story-coverage.ts",
+    "acceptance": "tsx acceptance/runner.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

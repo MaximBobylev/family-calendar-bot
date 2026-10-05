@@ -48,7 +48,7 @@ STT — REST Workers AI `/ai/run/@cf/openai/whisper-large-v3-turbo` (OpenAI-со
 ## Цепочки провайдеров (реализовано 2026-10-05)
 
 - Причина: бесплатный план Workers AI — 10 000 neurons/сутки на аккаунт; замеры промпта (≈3,8 тыс. вызовов) исчерпали их, и бот до сброса не разбирал команды. Для разработки — бесплатные внешние модели, Workers AI — запасной.
-- **LLM:** OpenRouter (`google/gemma-4-26b-a4b-it:free`, `reasoning.enabled=false` — победитель замеров, docs/research/llm-intents-eval.md) → Workers AI (Qwen3-30B).
+- **LLM:** OpenRouter, несколько моделей по очереди (`OPENROUTER_MODEL`; по умолчанию с 2026-10-05 — `nvidia/nemotron-3-super-120b-a12b:free` → `google/gemma-4-26b-a4b-it:free`, у Gemma `reasoning.enabled=false`; замеры — docs/research/llm-intents-eval.md) → Workers AI (Qwen3-30B). Актуальный порядок — `OPENROUTER_DEFAULT` в `scripts/deploy.ts`.
 - **STT:** Groq (`whisper-large-v3-turbo`, OpenAI-совместимый `/audio/transcriptions`, multipart) → Workers AI (Whisper, REST `/ai/run`). У Groq нет `vad_filter` — тишину ловит стоп-лист галлюцинаций.
 - Переключение — на любую ошибку провайдера (429, 5xx, таймаут, сеть); пустой ответ без tools — не ошибка. В журнале (`usage_events.provider`) — тот, кто ответил; упавшие до него — в `result_json.fallbackFrom`.
 - Конфиг: секреты `LLM_CHAIN` / `STT_CHAIN` (JSON), собирает `scripts/deploy.ts` из `OPENROUTER_API_KEY`, `GROQ_API_KEY` (+ необязательные `OPENROUTER_MODEL`, `GROQ_STT_MODEL`); без ключей — один Workers AI, как раньше.

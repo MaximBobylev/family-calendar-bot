@@ -27,7 +27,7 @@
 
 ### Временные исключения
 
-В `biome.jsonc` исключены файлы, которые на момент введения Biome правились параллельно: `src/nlu/**`, `scripts/eval-intents.ts`, `scripts/nlu-variants.ts`, `src/admin.ts`, `src/admin/**`, `src/db/ops-state.ts`, `src/index.ts`, `src/pages.ts`, `acceptance/runner.ts`. Когда эти работы влиты — убрать строки из `files.includes`, `npm run -s format` отдельным коммитом (только формат), поправить замечания линтера.
+Нет: исключения, введённые на время параллельных правок, сняты коммитом c746222 («Format the remaining files with Biome»). Biome проверяет весь `src/`, `scripts/`, `test/`, `acceptance/`. `npm run -s check` выводит `biome ci` без цвета (`--colors=off`) — вывод читают и агенты.
 
 ## SQL
 
@@ -70,7 +70,7 @@ SQL — строкой в `db.prepare(...)`, только prepared statements.
 
 Это структурные изменения, не косметика, — отдельными задачами:
 
-1. **Разделить `src/bot/handle-update.ts`** (≈470 строк, `handleCommand` ≈230 строк): router → normalize-input → dialog → `to-command` (чистая функция с YAML-кейсами) → dispatch. *tech-debt #9.*
+1. **Разделить `src/bot/handle-update.ts`** (≈690 строк на 2026-10-05): router → normalize-input → dialog → `to-command` (чистая функция с YAML-кейсами) → dispatch. *tech-debt #9.*
 2. **Логика отдельно от рендера** в `create-event.ts`, `modify-event.ts`, `settings.ts` (≈430/300/410 строк): `*-logic.ts` (findCandidates, computeChange, resolveDraft) и `*-view.ts`. *tech-debt #10.*
 3. **Реестр карточек** `kind → {guard, handler}` с версией payload вместо `JSON.parse as` и `action as Parameters<typeof confirmX>[3]` в `handleCallback`. *tech-debt #15.*
 4. **Сырой SQL только в `src/db/*`**: сейчас запросы есть в `scheduler.ts`, `inbox.ts`, `jobs/digest.ts`, `calendar/google-provider.ts`, `bot/settings.ts`, `bot/read-events.ts`, `bot/handle-update.ts`. *tech-debt «Низкий», архитектура #20.*

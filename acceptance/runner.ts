@@ -2,7 +2,12 @@
 // поэтому те же сценарии пригодны для любой реализации (TypeScript сейчас, Go потом).
 //
 // Окружение: SUT_URL (бот), FAKES_URL (фейки), WEBHOOK_SECRET.
-// Запуск: docker compose run --rm acceptance [-- фильтр-по-id]
+// Запуск: docker compose run --rm acceptance                       — все сценарии
+//         docker compose run --rm -e SCENARIO=undo,US-61 acceptance — выборочно (или аргументами:
+//         docker compose run --rm acceptance npx tsx acceptance/runner.ts undo US-61)
+//         … --list (или SCENARIO_LIST=1) — только список id / story / файл, без запуска
+// Фильтр — через запятую или пробел; сценарий выбран, если подходит хоть одно слово: US-xx — по story,
+// «10-undo» / «10-undo.yaml» — по файлу, иначе — подстрока id. Фильтр ничего не выбрал — ошибка.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,7 +16,9 @@ import { parse as parseYaml } from "yaml";
 const SUT = process.env.SUT_URL ?? "http://localhost:8787";
 const FAKES = process.env.FAKES_URL ?? "http://localhost:9100";
 const SECRET = process.env.WEBHOOK_SECRET ?? "test-secret";
-const filter = process.argv[2];
+const cliArgs = process.argv.slice(2);
+const listOnly = cliArgs.includes("--list") || !!process.env.SCENARIO_LIST;
+const filters = [...cliArgs.filter((a) => a !== "--list"), process.env.SCENARIO ?? ""].flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
 
 // --- Формат сценария ---------------------------------------------------------
 
@@ -661,12 +668,30 @@ function checkCall(where: string, call: TelegramCall, exp: TelegramExpectation) 
 
 // --- Main ----------------------------------------------------------------------
 
+/** Сценарий подходит под слово фильтра: US-xx — story, имя файла (с .yaml или без) — файл, иначе подстрока id. */
+function matches(s: Scenario & { file: string }, word: string): boolean {
+  if (/^(US|ADR)-/i.test(word)) return s.story.toUpperCase() === word.toUpperCase();
+  if (/^\d\d-/.test(word) || word.endsWith(".yaml")) return s.file === word || s.file === `${word}.yaml`;
+  return s.id.includes(word);
+}
+
 const dir = join(import.meta.dirname, "scenarios");
-const scenarios = readdirSync(dir)
+const all = readdirSync(dir)
   .filter((f) => f.endsWith(".yaml"))
   .sort()
-  .flatMap((f) => parseYaml(readFileSync(join(dir, f), "utf8")) as Scenario[])
-  .filter((s) => !filter || s.id.includes(filter));
+  .flatMap((file) => (parseYaml(readFileSync(join(dir, file), "utf8")) as Scenario[]).map((s) => ({ ...s, file })));
+const scenarios = filters.length ? all.filter((s) => filters.some((w) => matches(s, w))) : all;
+
+if (filters.length && !scenarios.length) {
+  // Опечатка в фильтре не должна выглядеть как «0 / 0 passed»
+  console.error(`No scenarios match ${JSON.stringify(filters)} (by story US-xx, file NN-name, or id substring); try --list`);
+  process.exit(2);
+}
+if (listOnly) {
+  for (const s of scenarios) console.log(`${s.id}\t${s.story}\t${s.file}`);
+  console.log(`\n${scenarios.length} scenario(s)`);
+  process.exit(0);
+}
 
 let failed = 0;
 for (const s of scenarios) {
@@ -675,7 +700,7 @@ for (const s of scenarios) {
     console.log(`  ✓ ${s.id}  (${s.story})`);
   } catch (e) {
     failed++;
-    console.log(`  ✗ ${s.id}  (${s.story})\n      ${String(e instanceof Error ? e.message : e).replaceAll("\n", "\n      ")}`);
+    console.log(`  ✗ ${s.id}  (${s.story}, ${s.file})\n      ${String(e instanceof Error ? e.message : e).replaceAll("\n", "\n      ")}`);
   }
 }
 console.log(`\n${scenarios.length - failed} / ${scenarios.length} scenarios passed`);

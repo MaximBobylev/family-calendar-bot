@@ -7,6 +7,8 @@
 //     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8,or:google/gemma-4-26b-a4b-it --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
 //     [--concurrency 4] [--delay-ms 8000] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
+//   --dry-run — только посчитать вызовы и расход квоты Workers AI, ничего не вызывая (можно в сервисе test).
+//   --spend-quota — разрешить больше WORKERS_AI_SAFE_CALLS вызовов Workers AI (квота общая с ботом в проде!).
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,6 +81,12 @@ const MODEL_OPTS: Record<string, { maxTokens?: number; extraBody?: Record<string
 };
 
 // --- Аргументы ------------------------------------------------------------------------------------
+
+/** Оценка расхода Workers AI: Qwen3 с промптом E ≈ 10 neurons за вызов, Gemma-4 ≈ 16 (llm-intents-eval.md). */
+const NEURONS_PER_CALL = 16;
+const WORKERS_AI_FREE_NEURONS = 10_000;
+/** Порог без --spend-quota: ≈ 30 % дневной квоты — бот в проде продолжает работать. */
+const WORKERS_AI_SAFE_CALLS = 200;
 
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -376,7 +384,6 @@ if (reportFiles.length) {
     .map(grade);
   console.log(summarize(runs, process.argv.includes("--failures")));
 } else {
-  if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.LLM_API_KEY) throw new Error("нужны CLOUDFLARE_ACCOUNT_ID и LLM_API_KEY (сервис deploy)");
   const variants = list(arg("variants") ?? "A");
   const models = list(arg("models") ?? "@cf/qwen/qwen3-30b-a3b-fp8");
   const n = Number(arg("n") ?? 1);
@@ -390,6 +397,20 @@ if (reportFiles.length) {
   const jobs: (() => Promise<Run>)[] = [];
   for (const model of models) for (const v of variants) for (let rep = 0; rep < n; rep++) for (const c of selected) jobs.push(() => runOne(v, model, c, rep));
   console.error(`${jobs.length} вызовов: ${variants.join(",")} × ${models.length} моделей × ${selected.length} фраз × ${n}`);
+  // Квота Workers AI Free — 10 000 neurons/сутки на весь аккаунт, общая с ботом в проде (docs/research/llm-intents-eval.md):
+  // замер 2026-10-05 выбрал её целиком, и бот до сброса не разбирал команды. Большой прогон — только осознанно.
+  const workersAiCalls = models.filter((m) => !m.startsWith("or:") && !m.startsWith("gg:")).length * variants.length * n * selected.length;
+  if (workersAiCalls)
+    console.error(`  из них Workers AI: ${workersAiCalls} ≈ ${workersAiCalls * NEURONS_PER_CALL} neurons из ${WORKERS_AI_FREE_NEURONS}/сутки`);
+  const freeOrCalls = models.filter((m) => m.startsWith("or:") && m.endsWith(":free")).length * variants.length * n * selected.length;
+  if (freeOrCalls) console.error(`  из них бесплатный OpenRouter: ${freeOrCalls} (лимит ~50/сутки без кредитов, 1000 с балансом ≥ $10 — общий с ботом)`);
+  if (process.argv.includes("--dry-run")) process.exit(0);
+  if (workersAiCalls > WORKERS_AI_SAFE_CALLS && !process.argv.includes("--spend-quota")) {
+    throw new Error(
+      `больше ${WORKERS_AI_SAFE_CALLS} вызовов Workers AI съедят квоту прода; уменьшите набор или добавьте --spend-quota (с разрешения владельца)`,
+    );
+  }
+  if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.LLM_API_KEY) throw new Error("нужны CLOUDFLARE_ACCOUNT_ID и LLM_API_KEY (сервис deploy)");
   const runs = await pool(jobs, Number(arg("concurrency") ?? 4), (d) => {
     if (d % 25 === 0 || d === jobs.length) console.error(`  ${d}/${jobs.length}`);
   });

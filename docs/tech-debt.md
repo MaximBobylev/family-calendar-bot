@@ -49,7 +49,7 @@
 
 | # | Что | Усилие | Источник |
 |---|---|---|---|
-| 9 | Разделить `handle-update.ts` (291 строка): router → normalize-input → dialog → `to-command` (чистая функция, YAML-кейсы) → dispatch | M | архитектура #14 |
+| 9 | Разделить `handle-update.ts` (≈690 строк на 2026-10-05): router → normalize-input → dialog → `to-command` (чистая функция, YAML-кейсы) → dispatch | M | архитектура #14 |
 | 10 | Чистая логика отдельно от рендера: `*-logic.ts` (findCandidates, computeChange, resolveDraft) и `*-view.ts` | M | архитектура #15 |
 | 11 | ✅ *сделано 2026-10-05* — Общие хелперы: `bot/format.ts` (hhmm, метка дня с опциями, escapeHtml ×3), одна `durationToMinutes` (сейчас «на месяц» тихо = 60 мин), одна сортировка событий для вывода и `lastList`, один резолвер календаря по имени/алиасу | S | архитектура #7, #8, #9, #19 |
 | 12 | ✅ *сделано 2026-10-05* — Провайдер-нейтральные ошибки в `calendar/model.ts` (`EventGone`, `EventConflict`, `PermissionDenied`, `AuthRevoked`, `ProviderUnavailable`); адаптер переводит ошибки Google (`calendar/google-errors.ts`, 403 с rate limit — недоступность; таймауты — недоступность), `bot/*` не импортирует ошибки `google/*`. `listEvents` → `{events, failed}` через `allSettled`: недоступный календарь не роняет чтение, в списке и дайджесте — пометка; не загрузился ни один — ошибка. Сценарии `16-calendar-errors.yaml` | S | архитектура #6, #10 |

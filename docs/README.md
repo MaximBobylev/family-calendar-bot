@@ -5,12 +5,15 @@
 Ядро — общий календарь и передача дел внутри семьи; управление личным календарём голосом и текстом — базовая функция (R0). Обоснование — [research/pivot-options.md](research/pivot-options.md).
 Хостинг — Cloudflare Workers (TypeScript), распознавание речи и интентов — Cloudflare Workers AI (с fallback на внешних провайдеров), даты — детерминированный парсер.
 
-> Статус: **спецификация R0 готова** (2026-10-04). Кода нет. Следующий шаг — тестовые данные (золотой корпус дат, NLU-корпус) и каркас проекта.
+> Статус (2026-10-05): **R0 реализован и в проде** (функционально ≈ 90%, пробелы — [roadmap.md](roadmap.md), «Аудит R0»); начат R1 (US-72). Карта кода — [architecture-map.md](architecture-map.md), правила для агентов — [../CLAUDE.md](../CLAUDE.md).
 
 ## Структура
 
 | Файл | Что внутри |
 |---|---|
+| [architecture-map.md](architecture-map.md) | Карта кода: модуль → назначение, где искать фичу, точки входа |
+| [ai-first.md](ai-first.md) | Аудит готовности репозитория к разработке агентами: оценка, что сделано, что осталось |
+| [code-style.md](code-style.md) | Стиль кода: Biome, SQL, комментарии, раскладка файлов |
 | [tech-debt.md](tech-debt.md) | Ревью (архитектура, безопасность, надёжность) и технический долг |
 | [roadmap.md](roadmap.md) | Разбивка на релизы: что в MVP, что позже |
 | [user-stories.md](user-stories.md) | Пользовательские сценарии с критериями приёмки |
@@ -26,6 +29,7 @@
 | [admin-console.md](admin-console.md) | Админка: функции по этапам, приватность и доступ, алерты, «из ошибки — в тест» (предложение) |
 | [research/commercial-viability.md](research/commercial-viability.md) | Сводка независимых оценок коммерческого потенциала |
 | [research/pivot-options.md](research/pivot-options.md) | Как подкрутить идею: сводка 4 независимых оценок |
+| [research/date-parser-baseline.md](research/date-parser-baseline.md) | Замер chrono-node на золотом корпусе дат — почему свой парсер (ADR-0005 п.8) |
 | [research/llm-intents-eval.md](research/llm-intents-eval.md) | Замер разбора интентов: варианты промпта × модели Workers AI, решение и оставшиеся ошибки (2026-10-05) |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
 | [research/monetization-market.md](research/monetization-market.md) | Обзор рынка: модели монетизации и цены |
