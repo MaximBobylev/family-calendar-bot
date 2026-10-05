@@ -29,7 +29,7 @@ LLM вызывается по **OpenAI-совместимому HTTP API** (`/ch
 - переносимо на Go без изменений.
 
 Цена: для прода нужны account id Cloudflare (в `LLM_BASE`) и API-токен с правом Workers AI (секрет `LLM_API_KEY`).
-STT — тем же способом, когда дойдём до голоса (проверить OpenAI-совместимый `/audio/transcriptions` у Workers AI; иначе — REST `/ai/run`).
+STT — REST Workers AI `/ai/run/@cf/openai/whisper-large-v3-turbo` (OpenAI-совместимого `/audio/transcriptions` у Workers AI нет — проверено). Замер 2026-10-04 на синтетическом голосе: OGG/Opus из Telegram принимается как есть, 1–4.5 с; числа и даты распознаются хорошо («в 15.30», «с 10 по 20 ноября»), имена искажаются («Созвон с Петей» → «Созван спеть и») — поэтому карточка перед созданием; на тишине без `vad_filter` — «Thank you.», с `vad_filter` — пусто; жёсткий `language` ломает английский, `initial_prompt` не помогает.
 
 ## Замер на Workers AI (2026-10-04)
 

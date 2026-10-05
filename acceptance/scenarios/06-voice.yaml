@@ -1,0 +1,91 @@
+# US-10: голосовые сообщения. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: voice-read-events
+  story: US-10
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Созван спеть и завтра в 15.30 на полчаса.": { tool: create_event, args: { start: "завтра в 15.30", title: "Созван спеть и" } }
+          "Ревью дизайна": { tool: unsupported }
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Что у меня завтра?</i>"] }
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+
+- id: voice-create-event-with-whisper-output
+  story: US-10
+  steps:
+    - *setup
+    # Реальный вывод Whisper на синтетическом голосе (замер 2026-10-04): «15.30» через точку, искажённое имя
+    - voice: { from: 1001, transcript: "Созван спеть и завтра в 15.30 на полчаса." }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Создать событие?", "чт, 8 октября, 15:30–16:00"], buttons: ["Создать", "Отмена"] }
+
+- id: voice-reply-renames-event
+  story: US-30
+  steps:
+    - *setup
+    - llm: { "Поставь встречу в пятницу в 3": { tool: create_event, args: { start: "в пятницу в 3" } } }
+    - telegram: { from: 1001, text: "Поставь встречу в пятницу в 3" }
+    - press: "Создать"
+    - voice: { from: 1001, transcript: "Ревью дизайна", reply_to_question: true }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { text_contains: ["Как назвать встречу?"] }
+        - { text_contains: ["🎙 <i>Ревью дизайна</i>"] }
+        - { text_contains: ["назвал «Ревью дизайна»"] }
+
+- id: voice-too-long-refused-without-stt
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, duration: 75, stt_error: 500 }
+    - expect_telegram:
+        - { text_contains: ["длиннее минуты"] }
+
+- id: voice-silence
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "" }
+    - expect_telegram:
+        - { text_contains: ["Не расслышал"] }
+
+- id: voice-whisper-hallucination
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Продолжение следует..." }
+    - expect_telegram:
+        - { text_contains: ["Не расслышал"] }
+
+- id: voice-stt-unavailable
+  story: US-14
+  steps:
+    - *setup
+    - voice: { from: 1001, stt_error: 503 }
+    - expect_telegram:
+        - { text_contains: ["напишите, пожалуйста, текстом"] }
+
+- id: voice-download-failed
+  story: US-14
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Что у меня завтра?", download_fails: true }
+    - expect_telegram:
+        - { text_contains: ["Не смог получить голосовое"] }

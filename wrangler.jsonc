@@ -14,6 +14,7 @@
     // Модель Workers AI по OpenAI-совместимому API (ADR-0002). Адрес API (LLM_BASE, содержит account id)
     // и PUBLIC_BASE_URL зависят от деплоя — задаются секретами (scripts/deploy.sh), а не здесь.
     "LLM_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "STT_MODEL": "@cf/openai/whisper-large-v3-turbo",
     "TEST_MODE": "false"
   },
 
@@ -49,6 +50,8 @@
         "LLM_BASE": "http://fakes:9100/llm/v1",
         "LLM_MODEL": "fake-model",
         "LLM_API_KEY": "test-llm-key",
+        "STT_BASE": "http://fakes:9100/stt",
+        "STT_MODEL": "fake-whisper",
         "TEST_MODE": "true",
         "GOOGLE_CLIENT_ID": "test-client-id",
         "GOOGLE_CLIENT_SECRET": "test-client-secret",

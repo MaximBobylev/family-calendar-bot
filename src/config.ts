@@ -1,6 +1,7 @@
 // Конфигурация из Env. Все внешние URL — отсюда (ADR-0006: в тестах указывают на фейки).
 
 import type { LlmConfig } from "./nlu/llm";
+import type { SttConfig } from "./stt/whisper";
 
 export interface Config {
   telegramApiBase: string;
@@ -19,6 +20,7 @@ export interface Config {
   allowedTelegramIds: Set<string>;
   testMode: boolean;
   llm: LlmConfig;
+  stt: SttConfig;
 }
 
 export function loadConfig(env: Env): Config {
@@ -38,5 +40,7 @@ export function loadConfig(env: Env): Config {
     ),
     testMode: env.TEST_MODE === "true",
     llm: { baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL },
+    // Тот же API-токен Cloudflare, что и для LLM
+    stt: { baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
   };
 }

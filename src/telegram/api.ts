@@ -38,6 +38,15 @@ export class TelegramApi {
     });
   }
 
+  /** Скачать файл (голосовое) по file_id: getFile → /file/bot<token>/<path>. */
+  async downloadFile(fileId: string): Promise<ArrayBuffer> {
+    const file = await this.call<{ file_path?: string }>("getFile", { file_id: fileId });
+    if (!file.file_path) throw new Error("telegram getFile: no file_path");
+    const res = await fetch(`${this.base}/file/bot${this.token}/${file.file_path}`);
+    if (!res.ok) throw new Error(`telegram file download: ${res.status}`);
+    return res.arrayBuffer();
+  }
+
   sendChatAction(chatId: number | string, action: "typing" = "typing") {
     return this.call<true>("sendChatAction", { chat_id: chatId, action });
   }

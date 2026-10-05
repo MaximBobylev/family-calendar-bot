@@ -102,6 +102,17 @@ const messages = {
   cardExpired: { ru: "Карточка устарела — повторите команду.", en: "This card has expired — please repeat the command." },
   defaultTitle: { ru: "Встреча", en: "Meeting" },
   allDayLower: { ru: "весь день", en: "all day" },
+  heard: { ru: "🎙 <i>{text}</i>", en: "🎙 <i>{text}</i>" },
+  voiceTooLong: {
+    ru: "Голосовое длиннее минуты — запишите покороче, пожалуйста.",
+    en: "The voice message is longer than a minute — please record a shorter one.",
+  },
+  notHeard: { ru: "Не расслышал, повторите, пожалуйста.", en: "I didn't catch that, please repeat." },
+  sttUnavailable: {
+    ru: "Не могу распознать голос сейчас — напишите, пожалуйста, текстом.",
+    en: "I can't recognize voice right now — please type it.",
+  },
+  voiceDownloadFailed: { ru: "Не смог получить голосовое, пришлите ещё раз.", en: "I couldn't get the voice message, please send it again." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

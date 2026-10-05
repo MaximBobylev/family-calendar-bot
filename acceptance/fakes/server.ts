@@ -4,6 +4,8 @@
 //   /google-oauth/token             — обмен кода на токены (код = "code-<email>")
 //   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>")
 //   /llm/v1/chat/completions        — фейк LLM: ответ берётся из фикстур по тексту пользователя
+//   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
+//   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые)
 //
 // Управление для раннера:
 //   GET  /__fake/telegram/calls     — все вызовы Telegram с последнего сброса
@@ -12,6 +14,8 @@
 //   POST /__fake/google/revoke      — отозвать доступ аккаунта: {email}
 //   POST /__fake/llm/fixtures       — {"<текст>": {tool, args} | {tools: [...]} | {error: status}}
 //   GET  /__fake/llm/requests       — все запросы к LLM
+//   POST /__fake/telegram/files     — {file_id, content}: файл для getFile и скачивания
+//   POST /__fake/stt/fixtures       — {"<содержимое аудио>": {text} | {error: status}}
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
 //   POST /__fake/reset              — сброс состояния
 
@@ -56,6 +60,8 @@ let nextMessageId = 1;
 let googleAccounts = new Map<string, { calendars: GoogleCalendar[]; revoked?: boolean }>();
 let tokenRequests: Record<string, string>[] = [];
 let llmFixtures = new Map<string, LlmFixture>();
+let telegramFiles = new Map<string, string>();
+let sttFixtures = new Map<string, { text?: string; error?: number }>();
 let llmRequests: unknown[] = [];
 
 /** Полночь даты `date` в поясе `tz`, мс UTC — для событий на весь день. */
@@ -119,6 +125,10 @@ function send(res: ServerResponse, status: number, body: unknown) {
 
 function telegramResult(method: string, body: Record<string, unknown>): unknown {
   switch (method) {
+    case "getFile":
+      return telegramFiles.has(String(body.file_id))
+        ? { file_id: body.file_id, file_path: `voice/${encodeURIComponent(String(body.file_id))}.oga` }
+        : { file_id: body.file_id };
     case "sendMessage":
       return { message_id: nextMessageId++, date: 0, chat: { id: body.chat_id, type: "private" }, text: body.text };
     case "editMessageText":
@@ -138,6 +148,8 @@ const server = createServer(async (req, res) => {
       tokenRequests = [];
       llmFixtures = new Map();
       llmRequests = [];
+      telegramFiles = new Map();
+      sttFixtures = new Map();
       nextEventId = 1;
       return send(res, 200, { ok: true });
     }
@@ -159,6 +171,34 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/llm/requests") return send(res, 200, llmRequests);
+    if (url.pathname === "/__fake/telegram/files" && req.method === "POST") {
+      const { file_id, content } = (await readJson(req)) as { file_id: string; content: string };
+      telegramFiles.set(file_id, content);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/stt/fixtures" && req.method === "POST") {
+      for (const [content, fx] of Object.entries(await readJson(req))) sttFixtures.set(content, fx as { text?: string; error?: number });
+      return send(res, 200, { ok: true });
+    }
+
+    // --- Whisper (Workers AI REST) ---
+    if (url.pathname.startsWith("/stt/run/") && req.method === "POST") {
+      const { audio } = (await readJson(req)) as { audio?: string };
+      const content = Buffer.from(audio ?? "", "base64").toString("utf8");
+      const fx = sttFixtures.get(content);
+      if (!fx) return send(res, 400, { success: false, errors: [{ message: `fake stt: no fixture for «${content}»` }] });
+      if (fx.error) return send(res, fx.error, { success: false, errors: [{ message: "fake stt error" }] });
+      return send(res, 200, { success: true, result: { text: fx.text ?? "", transcription_info: { language: "ru", duration: 3 } } });
+    }
+
+    // --- Файлы Telegram ---
+    const tgFile = /^\/telegram\/file\/bot[^/]+\/voice\/(.+)\.oga$/.exec(url.pathname);
+    if (tgFile) {
+      const content = telegramFiles.get(decodeURIComponent(tgFile[1]!));
+      if (content === undefined) return send(res, 404, { ok: false });
+      res.writeHead(200, { "content-type": "audio/ogg" });
+      return res.end(content);
+    }
     if (url.pathname === "/__fake/google/events") {
       const acc = googleAccounts.get(url.searchParams.get("email") ?? "");
       return send(res, 200, acc?.calendars ?? []);

@@ -20,7 +20,9 @@ import {
 } from "./create-event";
 import { connectKeyboard, parseCallbackData } from "./keyboards";
 import { t } from "./messages";
+import { escapeHtml } from "./format-events";
 import { readEvents } from "./read-events";
+import { isEmptySpeech, transcribe, type Transcript } from "../stt/whisper";
 
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
@@ -69,9 +71,13 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   // «печатает…» сразу: дальше LLM и Google (US-10). Не критично — ошибку игнорируем
   if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId).catch(() => undefined);
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
-  const text = message.text?.trim();
+  let text = message.text?.trim();
+  if (!text && (message.voice || message.audio)) {
+    text = (await recognizeVoice(ctx, user, message)) ?? undefined;
+    if (!text) return;
+  }
   if (!text) {
-    // Голос, фото и прочее — позже (US-10, US-66)
+    // Фото, файлы и прочее — позже (US-66)
     await ctx.telegram.sendMessage(chatId, t("notImplemented", user.locale));
     return;
   }
@@ -171,6 +177,45 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       );
       return;
   }
+}
+
+const MAX_VOICE_SEC = 60;
+
+/** Голосовое → текст (US-10). null — уже ответили пользователю (слишком длинное, не расслышал, ошибка). */
+async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): Promise<string | null> {
+  const chatId = message.chat.id;
+  const voice = (message.voice ?? message.audio)!;
+  // Длинное — отказ без скачивания и без затрат на STT
+  if (voice.duration > MAX_VOICE_SEC) {
+    await ctx.telegram.sendMessage(chatId, t("voiceTooLong", user.locale));
+    return null;
+  }
+  let audio: ArrayBuffer;
+  try {
+    audio = await ctx.telegram.downloadFile(voice.file_id);
+  } catch (e) {
+    console.error("voice download failed", e);
+    await ctx.telegram.sendMessage(chatId, t("voiceDownloadFailed", user.locale));
+    return null;
+  }
+  const usage = { userId: user.id, kind: "stt" as const, provider: ctx.config.stt.baseUrl, model: ctx.config.stt.model, audioMs: voice.duration * 1000 };
+  let transcript: Transcript;
+  try {
+    transcript = await transcribe(ctx.config.stt, audio);
+  } catch (e) {
+    console.error("stt failed", e);
+    await recordUsage(ctx.db, { ...usage, result: String(e), outcome: "error", now: ctx.clock.now() });
+    await ctx.telegram.sendMessage(chatId, t("sttUnavailable", user.locale));
+    return null;
+  }
+  await recordUsage(ctx.db, { ...usage, text: transcript.text, result: { language: transcript.language }, outcome: "ok", now: ctx.clock.now() });
+  if (isEmptySpeech(transcript.text)) {
+    await ctx.telegram.sendMessage(chatId, t("notHeard", user.locale));
+    return null;
+  }
+  // Показываем, что услышали, — до долгой обработки (US-10)
+  await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(transcript.text) }), undefined, { html: true });
+  return transcript.text;
 }
 
 /** Нажатие кнопки на карточке: атомарно «забираем» карточку — повторное нажатие ничего не делает (US-05). */

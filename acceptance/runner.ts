@@ -25,6 +25,8 @@ type Step =
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
   | { google_revoke: string }
+  /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
+  | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
   | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string } }
   | { llm: Record<string, unknown> }
   /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
@@ -57,6 +59,7 @@ interface TelegramInput {
   redeliver?: boolean;
   /** message_id сообщения бота, на которое это reply. */
   reply_to?: number;
+  voice?: { file_id: string; duration: number };
 }
 
 interface ExpectedEvent {
@@ -118,6 +121,9 @@ async function lastConnectUrl(): Promise<string> {
 
 // --- Выполнение --------------------------------------------------------------
 
+/** Служебные вызовы Telegram — не сообщения пользователю; в expect_telegram не учитываются. */
+const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction"]);
+
 class AssertionError extends Error {}
 
 async function runScenario(s: Scenario): Promise<void> {
@@ -137,6 +143,7 @@ async function runScenario(s: Scenario): Promise<void> {
       from: { id: t.from, is_bot: false, first_name: "Test", language_code: t.language ?? "ru" },
       ...(t.text !== undefined ? { text: t.text } : {}),
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
+      ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
     };
     const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
     const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
@@ -150,10 +157,11 @@ async function runScenario(s: Scenario): Promise<void> {
     const all = await allTelegramCalls();
     const fresh = all.slice(seen);
     seen = all.length;
-    return fresh.filter((c) => c.method !== "answerCallbackQuery");
+    return fresh.filter((c) => !SERVICE_METHODS.has(c.method));
   };
 
   let callbackSeq = 0;
+  let voiceSeq = 0;
   let lastPress: { from: number; chatId: number; messageId: number; data: string } | undefined;
 
   const sendCallback = async (p: { from: number; chatId: number; messageId: number; data: string }, where: string) => {
@@ -226,6 +234,20 @@ async function runScenario(s: Scenario): Promise<void> {
           throw new AssertionError(`${where}: reuse ${new URL(u).pathname} → ${res.status}, expected ${step.oauth_reuse_last_link.expect_status}`);
         }
       }
+    } else if ("voice" in step) {
+      const v = step.voice;
+      voiceSeq++;
+      const fileId = `voice-${voiceSeq}`;
+      const content = `audio-${voiceSeq}`;
+      if (!v.download_fails) await post(`${FAKES}/__fake/telegram/files`, { file_id: fileId, content });
+      await post(`${FAKES}/__fake/stt/fixtures`, { [content]: v.stt_error ? { error: v.stt_error } : { text: v.transcript ?? "" } });
+      let replyTo: number | undefined;
+      if (v.reply_to_question) {
+        const q = [...(await allTelegramCalls())].reverse().find((c) => c.body.reply_markup?.force_reply && c.messageId);
+        if (!q) throw new AssertionError(`${where}: no question with ForceReply`);
+        replyTo = q.messageId;
+      }
+      await sendUpdate({ from: v.from, voice: { file_id: fileId, duration: v.duration ?? 3 }, ...(replyTo ? { reply_to: replyTo } : {}) }, where);
     } else if ("http_get" in step) {
       const h = step.http_get;
       const res = await fetch(`${SUT}${h.path}`, { redirect: "manual" });

@@ -15,6 +15,8 @@ interface Env {
   LLM_API_KEY: string;
   /** Адрес OpenAI-совместимого API: https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1 */
   LLM_BASE: string;
+  /** Workers AI REST: https://api.cloudflare.com/client/v4/accounts/<id>/ai (ключ — LLM_API_KEY). */
+  STT_BASE: string;
   /** Публичный адрес Worker'а (https://…workers.dev) — для OAuth redirect_uri и ссылок. */
   PUBLIC_BASE_URL: string;
 }
