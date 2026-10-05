@@ -24,8 +24,16 @@ export interface ModifyEventIntent {
   scope?: "this" | "all";
 }
 
+/** «Какая следующая встреча?», «Когда встреча с Петей?» (US-21). */
+export interface FindEventIntent {
+  name: "find_event";
+  event?: string;
+  next?: boolean;
+}
+
 export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
+  | FindEventIntent
   | CreateEventIntent
   | ModifyEventIntent
   | { name: "delete_event"; event?: string }
@@ -47,6 +55,21 @@ export const TOOLS: ToolDefinition[] = [
           calendar: str("If the user named a calendar, its name exactly as written in the user's calendar list. Omit otherwise."),
         },
         required: ["range"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_event",
+      description:
+        "WHEN is a specific existing event, or what is the next one: «какая у меня следующая встреча», «когда встреча с Петей», «когда у меня стоматолог». Not for a period overview.",
+      parameters: {
+        type: "object",
+        properties: {
+          event: str("Which event, without date/time words: «встреча с Петей», «стоматолог». Omit for «следующая встреча»."),
+          next: { type: "boolean", description: "true for «следующая», «ближайшая» (the next event)." },
+        },
       },
     },
   },
@@ -139,6 +162,10 @@ Examples:
 "Ужин в детский календарь в субботу в 19" → create_event {"calendar":"Дети","start":"в субботу в 19","title":"Ужин"}   (when «Дети» is in the user's calendars)
 "Поставь в новый календарь завтра в 15" → create_event {"start":"завтра в 15"}   (no such calendar)
 "Что у меня в пятницу после обеда?" → list_events {"range":"в пятницу после обеда"}
+"Что у меня на следующей неделе?" → list_events {"range":"на следующей неделе"}
+"Какая у меня следующая встреча?" → find_event {"next":true}
+"Когда встреча с Петей?" → find_event {"event":"встреча с Петей"}
+"Когда у меня стоматолог?" → find_event {"event":"стоматолог"}
 "Покажи пятницу и удали обед" → list_events {"range":"пятницу"} + delete_event {"event":"обед"}
 "Перенеси встречу с Петей на пятницу" → modify_event {"event":"встречу с Петей"}
 "Сдвинь следующую встречу на час позже" → modify_event {"reference":"next"}
@@ -218,6 +245,10 @@ export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   if (call?.name === "list_events" && typeof call.arguments.range === "string" && call.arguments.range.trim()) {
     const calendar = typeof call.arguments.calendar === "string" && call.arguments.calendar.trim() ? call.arguments.calendar : undefined;
     return { name: "list_events", range: call.arguments.range, ...(calendar ? { calendar } : {}) };
+  }
+  if (call?.name === "find_event") {
+    const event = typeof call.arguments.event === "string" && call.arguments.event.trim() ? call.arguments.event.trim() : undefined;
+    return { name: "find_event", ...(event ? { event } : {}), ...(call.arguments.next === true ? { next: true } : {}) };
   }
   if (call?.name === "create_event") {
     // start может отсутствовать — даты всё равно извлекаются из текста (src/dates/extract.ts)

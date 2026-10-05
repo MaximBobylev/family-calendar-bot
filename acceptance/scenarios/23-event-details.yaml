@@ -1,0 +1,193 @@
+# US-41: место и описание события. US-42: напоминания конкретного события. US-61: отмена возвращает прежнее.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: details-location-for-last-event
+  story: US-41
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+                - id: e3
+                  summary: "Обед"
+                  location: "Столовая"
+                  reminders: { useDefault: false, overrides: [{ method: popup, minutes: 30 }] }
+                  start: { dateTime: "2026-10-09T13:00:00+03:00" }
+                  end: { dateTime: "2026-10-09T14:00:00+03:00" }
+                - { id: e6, summary: "Созвон с Машей", start: { dateTime: "2026-10-09T16:00:00+03:00" }, end: { dateTime: "2026-10-09T16:30:00+03:00" } }
+                - { id: e7, summary: "Встреча с юристом", description: "Офис 5", start: { dateTime: "2026-10-07T12:00:00+03:00" }, end: { dateTime: "2026-10-07T13:00:00+03:00" } }
+                - { id: s1, summary: "Стендап", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO"], start: { dateTime: "2026-10-05T11:00:00+03:00" }, end: { dateTime: "2026-10-05T11:15:00+03:00" } }
+                - { id: s1_20261012, recurringEventId: s1, summary: "Стендап", start: { dateTime: "2026-10-12T11:00:00+03:00" }, end: { dateTime: "2026-10-12T11:15:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              events: []
+      - llm:
+          "Когда у меня планёрка?": { tool: find_event, args: { event: "планёрка" } }
+          # Живая модель может принять «добавь …» за создание — код поправляет (effectiveIntent)
+          "Добавь место: кафе Пушкин": { tool: create_event, args: { start: "", title: "Место кафе Пушкин" } }
+          "Обед в пятницу будет в офисе на Лесной": { tool: modify_event, args: { event: "обед", new_location: "офис на Лесной" } }
+          "Обед в пятницу будет в семейном календаре": { tool: modify_event, args: { event: "обед", new_location: "семейный календарь" } }
+          "Добавь к встрече в 12 описание: взять документы": { tool: modify_event, args: {} }
+          "Поставь напоминания за час и за сутки до планёрки": { tool: modify_event, args: { event: "планёрки" } }
+          "Убери напоминания с обеда": { tool: delete_event, args: { event: "обед" } }
+          "Напомни на почту за день до созвона с Машей": { tool: create_event, args: { start: "за день", title: "Созвон с Машей" } }
+          "Напомни за 5 недель до планёрки": { tool: modify_event, args: {} }
+          "Напомни за 5 минут, за 10 минут, за 15 минут, за 30 минут, за час и за день до планёрки": { tool: modify_event, args: {} }
+          "Напомни за 15 минут до стендапа": { tool: modify_event, args: { event: "стендап" } }
+    - telegram: { from: 1001, text: "Когда у меня планёрка?" }
+    - expect_telegram:
+        - { text_contains: ["Ближайшее:", "Планёрка"] }
+    # Событие не названо — последнее показанное (US-60)
+    - telegram: { from: 1001, text: "Добавь место: кафе Пушкин" }
+    - expect_telegram:
+        - text_contains: ["Изменить?", "<b>Планёрка</b>", "📍 Место: кафе Пушкин"]
+          text_not_contains: ["Было:"]
+          buttons: ["Подтвердить", "Отмена"]
+    - press: "Подтвердить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Изменено", "📍 кафе Пушкин"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", location: "кафе Пушкин", start: "2026-10-08T10:00:00+03:00", end: "2026-10-08T11:00:00+03:00" }]
+    - press: "↩ Отменить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["↩ Отменено"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", location: "", start: "2026-10-08T10:00:00+03:00", end: "2026-10-08T11:00:00+03:00" }]
+
+- id: details-location-was-now
+  story: US-41
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Обед в пятницу будет в офисе на Лесной" }
+    - expect_telegram:
+        - { text_contains: ["Изменить?", "<b>Обед</b>", "📍 Место: Столовая → офис на Лесной"] }
+    - press: "Подтвердить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Обед", location: "офис на Лесной", start: "2026-10-09T13:00:00+03:00", end: "2026-10-09T14:00:00+03:00" }]
+
+- id: details-calendar-is-not-a-place
+  story: US-41
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Обед в пятницу будет в семейном календаре" }
+    - expect_telegram:
+        - { text_contains: ["Переносить событие в другой календарь пока не умею"] }
+    - expect_google_patches: { count: 0 }
+
+- id: details-description-append-and-undo
+  story: US-41
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Добавь к встрече в 12 описание: взять документы" }
+    - expect_telegram:
+        - { text_contains: ["Изменить?", "<b>Встреча с юристом</b>", "📝 Описание: «Офис 5» → «Офис 5\nвзять документы»"] }
+    - press: "Подтвердить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Встреча с юристом", description: "Офис 5\nвзять документы", start: "2026-10-07T12:00:00+03:00", end: "2026-10-07T13:00:00+03:00" }]
+    - press: "↩ Отменить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Встреча с юристом", description: "Офис 5", start: "2026-10-07T12:00:00+03:00", end: "2026-10-07T13:00:00+03:00" }]
+
+- id: details-reminders-set-and-undo
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь напоминания за час и за сутки до планёрки" }
+    - expect_telegram:
+        - text_contains: ["Изменить?", "<b>Планёрка</b>", "🔔 Напоминания: как в календаре → за 1 ч, за 1 дн."]
+          buttons: ["Подтвердить", "Отмена"]
+    - press: "Подтвердить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Изменено", "🔔 за 1 ч, за 1 дн."] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - summary: "Планёрка"
+            start: "2026-10-08T10:00:00+03:00"
+            end: "2026-10-08T11:00:00+03:00"
+            reminders: { useDefault: false, overrides: [{ method: popup, minutes: 60 }, { method: popup, minutes: 1440 }] }
+    # Отмена возвращает напоминания «как в календаре»
+    - press: "↩ Отменить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", start: "2026-10-08T10:00:00+03:00", end: "2026-10-08T11:00:00+03:00", reminders: { useDefault: true, overrides: [] } }]
+
+- id: details-reminders-remove-is-not-delete
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Убери напоминания с обеда" }
+    - expect_telegram:
+        - { text_contains: ["Изменить?", "<b>Обед</b>", "🔔 Напоминания: за 30 мин → без напоминаний"], text_not_contains: ["Удалить?"] }
+    - press: "Подтвердить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Обед", start: "2026-10-09T13:00:00+03:00", end: "2026-10-09T14:00:00+03:00", reminders: { useDefault: false, overrides: [] } }]
+    - expect_google_deletes: { count: 0 }
+
+- id: details-reminders-email
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Напомни на почту за день до созвона с Машей" }
+    - expect_telegram:
+        - { text_contains: ["<b>Созвон с Машей</b>", "→ за 1 дн. (на почту)"] }
+    - press: "Подтвердить"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - { summary: "Созвон с Машей", start: "2026-10-09T16:00:00+03:00", end: "2026-10-09T16:30:00+03:00", reminders: { useDefault: false, overrides: [{ method: email, minutes: 1440 }] } }
+
+- id: details-reminders-google-limits
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Напомни за 5 недель до планёрки" }
+    - expect_telegram:
+        - { text_contains: ["раньше чем за 4 недели"] }
+    - telegram: { from: 1001, text: "Напомни за 5 минут, за 10 минут, за 15 минут, за 30 минут, за час и за день до планёрки" }
+    - expect_telegram:
+        - { text_contains: ["не больше 5 напоминаний"] }
+    - expect_google_patches: { count: 0 }
+
+- id: details-reminders-whole-series
+  story: US-42
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Напомни за 15 минут до стендапа" }
+    - expect_telegram:
+        - text_contains: ["Изменить?", "<b>Стендап</b>", "🔔 Напоминания: как в календаре → за 15 мин"]
+          buttons: ["Только эту", "Всю серию", "Отмена"]
+    - press: "Всю серию"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Изменено", "Изменена вся серия"] }
+    - expect_google_patches: { count: 1, id: s1 }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - { summary: "Стендап", start: "2026-10-05T11:00:00+03:00", end: "2026-10-05T11:15:00+03:00", reminders: { useDefault: false, overrides: [{ method: popup, minutes: 15 }] } }

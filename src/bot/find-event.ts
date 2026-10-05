@@ -2,7 +2,7 @@
 // из фразы, «следующую», «её», «вторую» (US-60); несколько — кнопками, по названию не нашлось — события дня.
 
 import { queryWords, titleScore } from "../calendar/match";
-import type { CalendarEvent, CalendarProvider, EventRef } from "../calendar/model";
+import type { CalendarEvent, CalendarProvider, EventRef, EventReminders } from "../calendar/model";
 import { parseDateFragment, type ParseValue } from "../dates";
 import { formatMoment, localToUtc, minutesBetween, parseLocal, utcToLocal, type Moment } from "../dates/calendar";
 import type { ModifySpans } from "../dates/extract";
@@ -30,7 +30,13 @@ export interface EventRequest {
   reference?: "next" | "last" | "list";
   listIndex?: number;
   newTitle?: string;
+  /** "" — убрать место. */
   newLocation?: string;
+  /** "" — убрать описание; appendDescription — дописать к существующему (US-41). */
+  newDescription?: string;
+  appendDescription?: boolean;
+  /** Напоминания события (US-42): overrides [] — без напоминаний. */
+  reminders?: EventReminders;
   scope?: "this" | "all";
   spans: ModifySpans;
 }

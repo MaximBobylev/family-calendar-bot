@@ -1,0 +1,81 @@
+# US-10: пересланное сообщение (forward_origin) — чужой текст, не команда пользователя. Бот не исполняет его,
+# а спрашивает «Выполнить как команду?». «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: forwarded-text-not-executed
+  story: US-10
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Удали планёрку": { tool: delete_event, args: { event: "планёрку" } }
+          "Поставь встречу завтра в 12": { tool: create_event, args: { start: "завтра в 12" } }
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    - telegram: { from: 1001, text: "Удали планёрку", forwarded: true }
+    - expect_telegram:
+        - text_contains: ["Это пересланное сообщение: «Удали планёрку». Выполнить как команду?"]
+          buttons: ["Выполнить", "Не выполнять"]
+    # До нажатия — ни разбора LLM, ни действий с календарём
+    - expect_llm_requests: 0
+    - press: "Не выполнять"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Не выполняю"] }
+    - expect_llm_requests: 0
+    - expect_google_deletes: { count: 0 }
+
+- id: forwarded-text-run-on-request
+  story: US-10
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Удали планёрку", forwarded: true }
+    - press: "Выполнить"
+    # Дальше — как обычная команда: разбор LLM и карточка удаления (подтверждение — как всегда)
+    - expect_telegram:
+        - { text_contains: ["Выполнить как команду?"] }
+        - { method: editMessageText, text_contains: ["Выполняю: «Удали планёрку»"] }
+        - { text_contains: ["Удалить?", "<b>Планёрка</b>"], buttons: ["Удалить", "Отмена"] }
+    - expect_llm_requests: 1
+    - press: "Удалить"
+    - expect_google_deletes: { count: 1, id: e1 }
+    # Повторное нажатие «Выполнить» — уже сделано, второй раз не выполняется
+    - press: "Выполнить"
+    - expect_callback_answer: { text_contains: ["Уже сделано"] }
+    - expect_llm_requests: 1
+
+- id: forwarded-voice-transcribed-then-asked
+  story: US-10
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Поставь встречу завтра в 12", forwarded: true }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Поставь встречу завтра в 12</i>"] }
+        - { text_contains: ["Это пересланное сообщение: «Поставь встречу завтра в 12»"], buttons: ["Выполнить", "Не выполнять"] }
+    - expect_llm_requests: 0
+    - press: "Выполнить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Выполняю"] }
+        - { text_contains: ["Создать событие?", "чт, 8 октября, 12:00"] }
+
+- id: forwarded-card-cancelled-by-new-command
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Удали планёрку", forwarded: true }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Выполнить как команду?"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Планёрка"] }
+    - press: "Выполнить"
+    - expect_callback_answer: { text_contains: ["устарела"] }
+    - expect_google_deletes: { count: 0 }

@@ -118,6 +118,17 @@ cases:
   - { id: l13, cat: list, text: "Какие праздники в ноябре?", intent: list_events, calendar: ["Праздники", null] }
   - { id: l14, cat: list, text: "Show my work calendar for next week", intent: list_events, calendar: "Работа" }
   - { id: l15, cat: list, text: "Чё там у меня послезавтра", intent: list_events, calendar: null }
+  - { id: l16, cat: list, text: "Что у меня на следующей неделе?", intent: list_events, calendar: null }
+
+  # --- find: следующая / конкретная встреча (US-21) -----------------------------------------------
+  - { id: f01, cat: find, text: "Какая у меня следующая встреча?", intent: find_event }
+  - { id: f02, cat: find, text: "Когда встреча с Петей?", intent: find_event }
+  - { id: f03, cat: find, text: "Когда у меня стоматолог?", intent: find_event }
+  - { id: f04, cat: find, text: "Что у меня дальше?", intent: find_event }
+  - { id: f05, cat: find, text: "When is my next meeting?", intent: find_event }
+  - { id: f06, cat: find, text: "Когда следующая планёрка?", intent: find_event }
+  - { id: f07, cat: find, text: "Ближайший созвон с Машей когда?", intent: find_event }
+  - { id: f08, cat: find, text: "А когда у Сони день рождения?", intent: find_event }
 
   # --- modify -------------------------------------------------------------------------------------
   - { id: m01, cat: modify, text: "Перенеси встречу с Петей на пятницу", intent: modify_event }
@@ -134,6 +145,15 @@ cases:
   - { id: m12, cat: modify, text: "Move the dentist to Friday", intent: modify_event }
   - { id: m13, cat: modify, text: "Продли созвон до пяти", intent: modify_event }
   - { id: m14, cat: modify, text: "Вторую встречу сделай на полчаса позже", intent: modify_event }
+
+  # --- modify: место, описание, напоминания (US-41, US-42) ----------------------------------------
+  - { id: m15, cat: details, text: "Добавь место: кафе Пушкин", intent: modify_event }
+  - { id: m16, cat: details, text: "Встреча в среду будет в офисе на Лесной", intent: modify_event }
+  - { id: m17, cat: details, text: "Добавь к встрече в 12 описание: взять документы", intent: modify_event }
+  - { id: m18, cat: details, text: "Поставь напоминания за час и за сутки до встречи в среду", intent: modify_event }
+  - { id: m19, cat: details, text: "Напомни за 15 минут до планёрки", intent: modify_event }
+  - { id: m20, cat: details, text: "Убери напоминания с обеда", intent: modify_event }
+  - { id: m21, cat: details, text: "Напомни на почту за день до встречи с Петей", intent: modify_event }
 
   # --- delete -------------------------------------------------------------------------------------
   - { id: d01, cat: delete, text: "Отмени встречу с Петей в пятницу", intent: delete_event }

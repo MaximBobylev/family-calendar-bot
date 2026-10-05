@@ -1,0 +1,100 @@
+# US-21: «Какая у меня следующая встреча?», «Когда встреча с Петей?». US-60: найденное — контекст для «её», «вторую».
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК. Идёт планёрка (9:30–10:30), следующая — созвон в 12.
+
+- id: find-next-event-with-running
+  story: US-21
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: r1, summary: "Планёрка", start: { dateTime: "2026-10-07T09:30:00+03:00" }, end: { dateTime: "2026-10-07T10:30:00+03:00" } }
+                - { id: a1, summary: "День рождения мамы", start: { date: "2026-10-07" }, end: { date: "2026-10-08" } }
+                - { id: e1, summary: "Созвон с Петей", location: "Zoom", start: { dateTime: "2026-10-07T12:00:00+03:00" }, end: { dateTime: "2026-10-07T12:30:00+03:00" } }
+                - { id: e3, summary: "Встреча с Петей", start: { dateTime: "2026-10-10T11:00:00+03:00" }, end: { dateTime: "2026-10-10T12:00:00+03:00" } }
+                - { id: e4, summary: "Созвон с Петей", start: { dateTime: "2026-10-14T15:00:00+03:00" }, end: { dateTime: "2026-10-14T15:30:00+03:00" } }
+                - { id: e5, summary: "Обед с Петей", start: { dateTime: "2026-10-16T13:00:00+03:00" }, end: { dateTime: "2026-10-16T14:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              events:
+                - { id: f1, summary: "Стоматолог", start: { dateTime: "2026-10-09T15:00:00+03:00" }, end: { dateTime: "2026-10-09T16:00:00+03:00" } }
+                # Дальше 30 дней — не ищем
+                - { id: f2, summary: "Стоматолог", start: { dateTime: "2026-11-20T15:00:00+03:00" }, end: { dateTime: "2026-11-20T16:00:00+03:00" } }
+      - llm:
+          # Живые модели путают такие вопросы со списком за период — код поправляет (effectiveIntent)
+          "Какая у меня следующая встреча?": { tool: list_events, args: { range: "следующая встреча" } }
+          "Когда встреча с Петей?": { tool: find_event, args: { event: "встреча с Петей" } }
+          "Когда у меня стоматолог?": { tool: unsupported }
+          "Когда у меня теннис?": { tool: find_event, args: { event: "теннис" } }
+          "Когда следующий созвон с Петей?": { tool: find_event, args: { event: "созвон с Петей", next: true } }
+          "Перенеси её на час позже": { tool: modify_event, args: { reference: last } }
+          "Перенеси вторую на час позже": { tool: modify_event, args: { reference: list, list_index: 2 } }
+    - telegram: { from: 1001, text: "Какая у меня следующая встреча?" }
+    - expect_telegram:
+        - text_contains:
+            - "Сейчас идёт: <b>Планёрка</b> (до 10:30)"
+            - "Следующая встреча:\n<b>Созвон с Петей</b>\n🕒 ср, 7 октября, 12:00–12:30\n📍 Zoom"
+          text_not_contains: ["День рождения", "Семья"]
+    # Найденное — «её» для следующей команды (US-60)
+    - telegram: { from: 1001, text: "Перенеси её на час позже" }
+    - expect_telegram:
+        - { text_contains: ["<b>Созвон с Петей</b>", "Было: ср, 7 октября, 12:00–12:30", "Стало: ср, 7 октября, 13:00–13:30"] }
+
+- id: find-by-title-several
+  story: US-21
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Когда встреча с Петей?" }
+    - expect_telegram:
+        - text_contains:
+            - "Ближайшие:"
+            - "• ср, 7 октября, 12:00–12:30 — <b>Созвон с Петей</b>"
+            - "• сб, 10 октября, 11:00–12:00 — <b>Встреча с Петей</b>"
+            - "• ср, 14 октября, 15:00–15:30 — <b>Созвон с Петей</b>"
+          # Не больше трёх
+          text_not_contains: ["Обед с Петей"]
+    - telegram: { from: 1001, text: "Перенеси вторую на час позже" }
+    - expect_telegram:
+        - { text_contains: ["<b>Встреча с Петей</b>", "Стало: сб, 10 октября, 12:00–13:00"] }
+
+- id: find-by-title-calendar-label
+  story: US-21
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Когда у меня стоматолог?" }
+    - expect_telegram:
+        - { text_contains: ["Ближайшее:", "• пт, 9 октября, 15:00–16:00 — <b>Стоматолог</b> · Семья"], text_not_contains: ["20 ноября"] }
+
+- id: find-next-by-title
+  story: US-21
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Когда следующий созвон с Петей?" }
+    - expect_telegram:
+        - { text_contains: ["Ближайшее:", "ср, 7 октября, 12:00–12:30 — <b>Созвон с Петей</b>"], text_not_contains: ["14 октября"] }
+
+- id: find-not-found
+  story: US-21
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Когда у меня теннис?" }
+    - expect_telegram:
+        - { text_contains: ["В ближайшие 30 дней «теннис» не нашёл."] }
+
+- id: find-next-none-ahead
+  story: US-21
+  steps:
+    - *setup
+    - clock: "2026-12-01T07:00:00Z"
+    - telegram: { from: 1001, text: "Какая у меня следующая встреча?" }
+    - expect_telegram:
+        - { text_contains: ["В ближайшие 30 дней встреч нет."], text_not_contains: ["Сейчас идёт"] }

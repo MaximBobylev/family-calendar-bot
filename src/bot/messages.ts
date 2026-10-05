@@ -360,6 +360,40 @@ const messages = {
     en: "✅ Your data is deleted. I didn't revoke Google access: this Google account is also connected by another bot user, and revoking would disconnect them too. To remove access completely: https://myaccount.google.com/permissions\n\nTo start over, send /start.",
   },
   settingsDisconnectHint: { ru: "Отключить календарь и удалить данные — /disconnect.", en: "Disconnect the calendar and delete your data: /disconnect." },
+  // --- Детали события (US-41, US-42) ---
+  placeLabel: { ru: "Место", en: "Place" },
+  descriptionLabel: { ru: "Описание", en: "Description" },
+  remindersLabel: { ru: "Напоминания", en: "Reminders" },
+  remindersCalendarDefault: { ru: "как в календаре", en: "calendar default" },
+  reminderByEmail: { ru: "(на почту)", en: "(email)" },
+  remindersTooMany: {
+    ru: "Google позволяет не больше 5 напоминаний у события — назовите поменьше.",
+    en: "Google allows at most 5 reminders per event — please name fewer.",
+  },
+  remindersTooFar: {
+    ru: "Google не ставит напоминания раньше чем за 4 недели до события — назовите срок поменьше.",
+    en: "Google doesn't allow reminders more than 4 weeks before an event — please pick a shorter time.",
+  },
+  moveToCalendarUnsupported: {
+    ru: "Переносить событие в другой календарь пока не умею.",
+    en: "I can't move events to another calendar yet.",
+  },
+  // --- Следующая / конкретная встреча (US-21) ---
+  lookupNext: { ru: "Следующая встреча:", en: "Next event:" },
+  lookupRunning: { ru: "Сейчас идёт: <b>{title}</b> (до {until})", en: "Happening now: <b>{title}</b> (until {until})" },
+  lookupNoneAhead: { ru: "В ближайшие {days} дней встреч нет.", en: "No events in the next {days} days." },
+  lookupFoundOne: { ru: "Ближайшее:", en: "Coming up:" },
+  lookupFound: { ru: "Ближайшие:", en: "Coming up:" },
+  lookupNotFound: { ru: "В ближайшие {days} дней «{query}» не нашёл.", en: "Couldn't find “{query}” in the next {days} days." },
+  // --- Пересланные сообщения (US-10) ---
+  forwardedConfirm: {
+    ru: "Это пересланное сообщение: «{text}». Выполнить как команду?",
+    en: "This is a forwarded message: “{text}”. Run it as a command?",
+  },
+  forwardRunButton: { ru: "Выполнить", en: "Run" },
+  forwardSkipButton: { ru: "Не выполнять", en: "Don't run" },
+  forwardRunning: { ru: "▶️ Выполняю: «{text}»", en: "▶️ Running: “{text}”" },
+  forwardSkipped: { ru: "Не выполняю.", en: "Not running it." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

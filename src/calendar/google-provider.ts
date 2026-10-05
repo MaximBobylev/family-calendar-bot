@@ -37,6 +37,8 @@ export function toDomainEvent(e: GoogleEvent, cal: CalendarInfo, tz: string): Ca
     calendarTitle: cal.title,
     title: e.summary?.trim() || "—",
     ...(e.location ? { location: e.location } : {}),
+    ...(e.description ? { description: e.description } : {}),
+    ...(e.reminders ? { reminders: { useDefault: e.reminders.useDefault ?? false, overrides: e.reminders.overrides ?? [] } } : {}),
     ...(e.hangoutLink ? { conferenceUrl: e.hangoutLink } : {}),
     free: e.transparency === "transparent",
     organizerIsSelf: e.organizer?.self ?? true,
@@ -192,6 +194,11 @@ export class GoogleCalendarProvider implements CalendarProvider {
         {
           ...(patch.title !== undefined ? { summary: patch.title } : {}),
           ...(patch.location !== undefined ? { location: patch.location } : {}),
+          ...(patch.description !== undefined ? { description: patch.description } : {}),
+          // PATCH сливает вложенные объекты: overrides передаём всегда (пустой — при useDefault), иначе старые останутся
+          ...(patch.reminders
+            ? { reminders: { useDefault: patch.reminders.useDefault, overrides: patch.reminders.useDefault ? [] : patch.reminders.overrides } }
+            : {}),
           ...(patch.start ? { start: time(patch.start) } : {}),
           ...(patch.end ? { end: time(patch.end) } : {}),
         },

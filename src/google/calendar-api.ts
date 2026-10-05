@@ -33,6 +33,8 @@ export interface GoogleEvent {
   status?: "confirmed" | "tentative" | "cancelled";
   summary?: string;
   location?: string;
+  description?: string;
+  reminders?: { useDefault?: boolean; overrides?: { method: "popup" | "email"; minutes: number }[] };
   hangoutLink?: string;
   start: { dateTime?: string; date?: string; timeZone?: string };
   end: { dateTime?: string; date?: string; timeZone?: string };

@@ -62,6 +62,8 @@ type Step =
         stt_error?: number;
         download_fails?: boolean;
         reply_to_question?: boolean;
+        /** Пересланное голосовое (forward_origin) — не команда пользователя (US-10). */
+        forwarded?: boolean;
         heard?: { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number };
       };
     }
@@ -124,6 +126,8 @@ interface TelegramInput {
   voice?: { file_id: string; duration: number };
   first_name?: string;
   username?: string;
+  /** Пересланное сообщение (forward_origin от другого пользователя) — не команда (US-10). */
+  forwarded?: boolean;
 }
 
 interface ExpectedEvent {
@@ -131,7 +135,10 @@ interface ExpectedEvent {
   /** Момент со смещением («2026-10-08T15:00:00+03:00») или дата для событий на весь день. */
   start: string;
   end: string;
+  /** "" — места нет. */
   location?: string;
+  /** "" — описания нет. */
+  description?: string;
   /** Правила повторения как в Google: ["RRULE:FREQ=WEEKLY;BYDAY=MO"]. */
   recurrence?: string[];
   /** Напоминания как в Google: { useDefault: false, overrides: [{ method: popup, minutes: 60 }] }; null — поля нет. */
@@ -334,6 +341,7 @@ async function runScenario(s: Scenario): Promise<void> {
       ...(t.text !== undefined ? { text: t.text } : {}),
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
       ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
+      ...(t.forwarded ? { forward_origin: { type: "user", date: 0, sender_user: { id: 777, is_bot: false, first_name: "Friend" } } } : {}),
     };
     const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
     const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
@@ -466,7 +474,15 @@ async function runScenario(s: Scenario): Promise<void> {
         if (!q) throw new AssertionError(`${where}: no question with ForceReply`);
         replyTo = q.messageId;
       }
-      await sendUpdate({ from: v.from, voice: { file_id: fileId, duration: v.duration ?? 3 }, ...(replyTo ? { reply_to: replyTo } : {}) }, where);
+      await sendUpdate(
+        {
+          from: v.from,
+          voice: { file_id: fileId, duration: v.duration ?? 3 },
+          ...(replyTo ? { reply_to: replyTo } : {}),
+          ...(v.forwarded ? { forwarded: true } : {}),
+        },
+        where,
+      );
     } else if ("http_get" in step || "http_post" in step) {
       const isPost = "http_post" in step;
       const h: HttpCheck & { form?: Record<string, string> } = isPost ? step.http_post : step.http_get;
@@ -570,7 +586,8 @@ async function runScenario(s: Scenario): Promise<void> {
             g.summary === want.summary &&
             same(g.start, want.start) &&
             same(g.end, want.end) &&
-            (!want.location || g.location === want.location) &&
+            (want.location === undefined || (g.location ?? "") === want.location) &&
+            (want.description === undefined || ((g as { description?: string }).description ?? "") === want.description) &&
             (!want.recurrence || JSON.stringify((g as { recurrence?: string[] }).recurrence) === JSON.stringify(want.recurrence)) &&
             (want.reminders === undefined || JSON.stringify((g as { reminders?: unknown }).reminders ?? null) === JSON.stringify(want.reminders)),
         );

@@ -11,10 +11,10 @@ LLM получает текст + контекст (текущие дата/вр
 | Интент | Слоты | Обязательные | Подтверждение (US-05) | Приоритет |
 |---|---|---|---|---|
 | `list_events` | `range`, `query?`, `calendar?`, `limit?` | `range` | нет | MVP |
-| `find_event` | `event_ref` | `event_ref` | нет | MVP |
+| `find_event` | `event_ref` (в реализации: `event?`, `next?`) | — («следующая встреча» — без слотов) | нет | MVP |
 | `create_event` | `calendar?`, `title?`, `start`, `end?` / `duration?`, `all_day?`, `location?`, `description?`, `reminders?`, `recurrence?`, `conference?` | `start` | по режиму; серия — всегда | MVP |
 | `modify_event` | `event_ref`, `scope?`, `reschedule?`, `duration?`, `title?`, `description?`, `location?`, `recurrence?`, `target_calendar?` | `event_ref` + хотя бы одно изменение | по режиму; `following`/`all` — всегда | MVP |
-| `set_reminders` | `event_ref`, `reminders[]` (`minutes`, `method`), `scope?` | оба | по режиму | MVP |
+| `set_reminders` | `event_ref`, `reminders[]` (`minutes`, `method`), `scope?` | оба | по режиму | MVP — реализован как `modify_event`: напоминания, место и описание разбираются из текста детерминированно (`src/nlu/detail-hints.ts`), отдельного tool у LLM нет |
 | `delete_event` | `event_ref` **или** `range`, `scope?` | одно из двух | всегда | MVP |
 | `set_setting` | `setting` (enum), `value` | оба | нет; `confirmation_mode` — да | MVP |
 | `set_calendar_alias` | `calendar`, `alias?`, `make_default?` | `calendar` | нет | MVP |

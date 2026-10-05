@@ -2,7 +2,8 @@
 // Поиск события по описанию → расчёт изменений (детерминированно, по фрагментам из текста) →
 // карточка «Было → Стало» → подтверждение. Повторяющиеся — «только эту / все».
 
-import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventRef } from "../calendar/model";
+import { findCalendarByName } from "../calendar/match";
+import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventRef, type EventReminders } from "../calendar/model";
 import { parseDateFragment } from "../dates";
 import { addMinutes, formatMoment, minutesBetween, parseLocal, utcToLocal, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
@@ -17,6 +18,7 @@ import { escapeHtml, spanLabel } from "./format";
 import { callbackData } from "./keyboards";
 import { attachUndoMessage, recordUndo, type UndoRecord } from "./undo";
 import { t } from "./messages";
+import { beforeLabel } from "./settings";
 
 export const MODIFY_CARD = "modify";
 export type ModifyRequest = EventRequest;
@@ -26,8 +28,17 @@ interface Change {
   start?: Moment;
   end?: Moment;
   title?: string;
+  /** "" — убрать. */
   location?: string;
+  /** "" — убрать. */
+  description?: string;
+  reminders?: EventReminders;
 }
+
+/** Нет напоминаний у события в Google — значит, как в календаре. */
+const DEFAULT_REMINDERS: EventReminders = { useDefault: true, overrides: [] };
+/** Сколько описания показываем в карточке. */
+const MAX_SHOWN_DESCRIPTION = 200;
 
 interface ModifyCardPayload {
   chatId: number;
@@ -37,6 +48,8 @@ interface ModifyCardPayload {
   etag?: string;
   title: string;
   oldLocation?: string;
+  oldDescription?: string;
+  oldReminders?: EventReminders;
   oldStart: Moment;
   oldEnd: Moment;
   notify: boolean;
@@ -54,9 +67,16 @@ type ChangeResult = { options: Change[] } | { error: "nothingToChange" | "notUnd
 
 function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, tz: string): ChangeResult {
   const s = req.spans;
+  // «Добавь описание» дописывает к существующему, «измени описание» — заменяет (US-41)
+  const description =
+    req.newDescription !== undefined && req.appendDescription && e.description && req.newDescription
+      ? `${e.description}\n${req.newDescription}`
+      : req.newDescription;
   const base: Change = {
     ...(req.newTitle ? { title: req.newTitle } : {}),
-    ...(req.newLocation ? { location: req.newLocation } : {}),
+    ...(req.newLocation !== undefined ? { location: req.newLocation } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(req.reminders ? { reminders: req.reminders } : {}),
   };
   const wantsTime = !!(s.shift || s.target || s.duration);
   if (!wantsTime) return Object.keys(base).length ? { options: [base] } : { error: "nothingToChange" };
@@ -143,6 +163,12 @@ export async function proposeChange(
     return;
   }
 
+  // «Встреча будет в семейном календаре» — это перенос в другой календарь, а не место (R2)
+  if (req.newLocation && (/календар|calendar/i.test(req.newLocation) || findCalendarByName(calendars, req.newLocation))) {
+    await ctx.telegram.sendMessage(chatId, t("moveToCalendarUnsupported", locale));
+    return;
+  }
+
   const now = utcToLocal(ctx.clock.now(), tz);
   const today = now.day;
   const res = computeChange(e, req, now, tz);
@@ -159,6 +185,8 @@ export async function proposeChange(
     ref: e.ref,
     title: e.title,
     ...(e.location ? { oldLocation: e.location } : {}),
+    ...(e.description ? { oldDescription: e.description } : {}),
+    oldReminders: e.reminders ?? DEFAULT_REMINDERS,
     oldStart: e.start ?? { day: e.startDay, minutes: 0 },
     oldEnd: e.end ?? { day: e.endDay, minutes: 0 },
     notify: e.hasOtherAttendees,
@@ -183,7 +211,7 @@ export async function proposeChange(
     );
   }
   if (o.title) lines.push(`${t("newTitle", locale)}: <b>${escapeHtml(o.title)}</b>`);
-  if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
+  lines.push(...detailLines(o, payload, locale));
   if (e.recurring && !payload.askScope && req.scope !== "all") lines.push(t("onlyThisOccurrence", locale));
   if (payload.notify) lines.push("", t("attendeesNotified", locale));
 
@@ -236,10 +264,12 @@ export async function confirmModify(
   if (!o) return;
 
   // Что вернуть при отмене (US-61): только изменённые поля
-  const beforeOf = (cur: { start?: Moment; end?: Moment; title: string; location?: string }) => ({
+  const beforeOf = (cur: { start?: Moment; end?: Moment; title: string; location?: string; description?: string; reminders?: EventReminders }) => ({
     ...(o.start ? { start: cur.start!, end: cur.end! } : {}),
     ...(o.title !== undefined ? { title: cur.title } : {}),
     ...(o.location !== undefined ? { location: cur.location ?? "" } : {}),
+    ...(o.description !== undefined ? { description: cur.description ?? "" } : {}),
+    ...(o.reminders !== undefined ? { reminders: cur.reminders ?? DEFAULT_REMINDERS } : {}),
   });
   let undoRecord: UndoRecord;
   try {
@@ -247,17 +277,21 @@ export async function confirmModify(
       // Серия: тот же сдвиг и длительность применяются к мастер-событию (только в пределах дня)
       const masterRef = { ...p.ref, providerEventId: p.seriesId };
       const master = await provider.getEvent(masterRef, p.tz);
-      if (!master || master.allDay) throw new EventGone("series not found");
-      const delta = o.start ? diff(o.start, p.oldStart) : 0;
-      const length = o.start ? diff(o.end!, o.start) : diff(master.end!, master.start!);
-      const ms = plus(master.start!, delta);
-      const res = await provider.updateEvent(masterRef, { tz: p.tz, ...o, start: ms, end: plus(ms, length) }, { notify: p.notify });
+      // Время серии меняем только у событий со временем; детали (место, напоминания) — у любых
+      if (!master || (o.start && master.allDay)) throw new EventGone("series not found");
+      let patch = { tz: p.tz, ...o };
+      if (o.start) {
+        const length = diff(o.end!, o.start);
+        const ms = plus(master.start!, diff(o.start, p.oldStart));
+        patch = { ...patch, start: ms, end: plus(ms, length) };
+      }
+      const res = await provider.updateEvent(masterRef, patch, { notify: p.notify });
       undoRecord = {
         kind: "update",
         ref: masterRef,
         tz: p.tz,
         notify: p.notify,
-        before: { start: master.start!, end: master.end!, ...beforeOf(master) },
+        before: beforeOf(master),
         ...(res.etag ? { etag: res.etag } : {}),
       };
     } else {
@@ -267,7 +301,14 @@ export async function confirmModify(
         ref: p.ref,
         tz: p.tz,
         notify: p.notify,
-        before: beforeOf({ start: p.oldStart, end: p.oldEnd, title: p.title, ...(p.oldLocation ? { location: p.oldLocation } : {}) }),
+        before: beforeOf({
+          start: p.oldStart,
+          end: p.oldEnd,
+          title: p.title,
+          ...(p.oldLocation ? { location: p.oldLocation } : {}),
+          ...(p.oldDescription ? { description: p.oldDescription } : {}),
+          ...(p.oldReminders ? { reminders: p.oldReminders } : {}),
+        }),
         ...(res.etag ? { etag: res.etag } : {}),
       };
     }
@@ -285,6 +326,9 @@ export async function confirmModify(
 
   const details = [`<b>${escapeHtml(o.title ?? p.title)}</b>`];
   if (o.start) details.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
+  if (o.location) details.push(`📍 ${escapeHtml(o.location)}`);
+  if (o.description) details.push(`📝 ${escapeHtml(clip(o.description))}`);
+  if (o.reminders) details.push(`🔔 ${remindersText(o.reminders, locale)}`);
   if (wholeSeries) details.push(t("wholeSeriesChanged", locale));
   const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
   if (action.messageId) {
@@ -298,4 +342,36 @@ export async function confirmModify(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
+}
+
+// --- Детали в карточке ---------------------------------------------------------
+
+const clip = (s: string) => (s.length > MAX_SHOWN_DESCRIPTION ? `${s.slice(0, MAX_SHOWN_DESCRIPTION)}…` : s);
+
+/** «за 1 ч, за 1 дн. (на почту)», «без напоминаний», «как в календаре». */
+function remindersText(r: EventReminders, locale: string): string {
+  if (r.useDefault) return t("remindersCalendarDefault", locale);
+  if (r.overrides.length === 0) return t("remindersNone", locale);
+  return [...r.overrides]
+    .sort((a, b) => a.minutes - b.minutes)
+    .map((x) => `${beforeLabel(x.minutes, locale)}${x.method === "email" ? ` ${t("reminderByEmail", locale)}` : ""}`)
+    .join(", ");
+}
+
+/** Строки «Было → Стало» по изменённым деталям: место, описание, напоминания (US-41, US-42). */
+function detailLines(o: Change, p: ModifyCardPayload, locale: string): string[] {
+  const lines: string[] = [];
+  const none = "—";
+  const wasNow = (was: string | undefined, now: string) => (was ? `${was} → ${now}` : now);
+  if (o.location !== undefined) {
+    lines.push(`📍 ${t("placeLabel", locale)}: ${wasNow(p.oldLocation && escapeHtml(p.oldLocation), o.location ? escapeHtml(o.location) : none)}`);
+  }
+  if (o.description !== undefined) {
+    const was = p.oldDescription ? `«${escapeHtml(clip(p.oldDescription))}»` : undefined;
+    lines.push(`📝 ${t("descriptionLabel", locale)}: ${wasNow(was, o.description ? `«${escapeHtml(clip(o.description))}»` : none)}`);
+  }
+  if (o.reminders) {
+    lines.push(`🔔 ${t("remindersLabel", locale)}: ${remindersText(p.oldReminders ?? DEFAULT_REMINDERS, locale)} → ${remindersText(o.reminders, locale)}`);
+  }
+  return lines;
 }

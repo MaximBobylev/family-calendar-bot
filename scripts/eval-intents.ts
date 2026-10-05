@@ -16,7 +16,7 @@ import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from
 import { parseDateFragment } from "../src/dates";
 import { intentFromCalls, parseIntent, type Intent } from "../src/nlu/intents";
 import { safeParse, LlmHttpError } from "../src/nlu/llm";
-import { DELETE_VERBS, MODIFY_VERBS } from "../src/nlu/modify-hints";
+import { effectiveIntent } from "../src/nlu/intent-overrides";
 import { VARIANTS } from "./nlu-variants";
 
 // --- Набор ----------------------------------------------------------------------------------------
@@ -95,7 +95,7 @@ const list = (s: string | undefined) =>
 // --- Оценка ---------------------------------------------------------------------------------------
 
 interface Outcome {
-  intent: string; // после переопределения глаголами
+  intent: string; // после детерминированных поправок (effectiveIntent)
   rawIntent: string;
   title?: string;
   calendar?: string;
@@ -105,12 +105,8 @@ interface Outcome {
 }
 
 function downstream(c: Case, intent: Intent): Outcome {
-  let eff: Intent = intent;
-  if (eff.name !== "multiple") {
-    if (DELETE_VERBS.test(c.text)) {
-      if (eff.name !== "delete_event") eff = { name: "delete_event" };
-    } else if (eff.name !== "modify_event" && MODIFY_VERBS.test(c.text)) eff = { name: "modify_event" };
-  }
+  // Те же поправки, что в боте (routeIntent): глаголы, «когда …?», «следующая встреча»
+  const eff: Intent = effectiveIntent(c.text, intent);
   const out: Outcome = { intent: eff.name, rawIntent: intent.name };
   if (eff.name === "create_event") {
     const rec = extractRecurrenceSpan(c.text, now, tz);

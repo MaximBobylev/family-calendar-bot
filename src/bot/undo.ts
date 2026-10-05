@@ -4,7 +4,7 @@
 // Не отменяются (US-61): удаление (новое событие было бы с другим id, участники получили бы приглашения заново)
 // и отклонение приглашения.
 
-import { EventConflict, EventGone, type CalendarProvider, type EventRef } from "../calendar/model";
+import { EventConflict, EventGone, type CalendarProvider, type EventRef, type EventReminders } from "../calendar/model";
 import type { Moment } from "../dates/calendar";
 import {
   attachMessage,
@@ -31,8 +31,8 @@ export type UndoRecord =
       etag?: string;
       tz: string;
       notify: boolean;
-      /** Что вернуть. location: "" — убрать место. */
-      before: { start?: Moment; end?: Moment; title?: string; location?: string };
+      /** Что вернуть. location / description: "" — убрать. */
+      before: { start?: Moment; end?: Moment; title?: string; location?: string; description?: string; reminders?: EventReminders };
     };
 
 interface UndoPayload {

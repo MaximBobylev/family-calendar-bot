@@ -9,11 +9,24 @@ export interface EventRef {
   providerEventId: string;
 }
 
+/** Напоминания события (US-42). useDefault — как настроено в календаре, overrides тогда пуст. */
+export interface EventReminders {
+  useDefault: boolean;
+  overrides: { method: "popup" | "email"; minutes: number }[];
+}
+
+/** Google: не больше 5 напоминаний у события, каждое — не раньше чем за 4 недели. */
+export const MAX_REMINDERS = 5;
+export const MAX_REMINDER_MIN = 40320;
+
 export interface CalendarEvent {
   ref: EventRef;
   calendarTitle: string;
   title: string;
   location?: string;
+  description?: string;
+  /** Нет — как в календаре (useDefault). */
+  reminders?: EventReminders;
   conferenceUrl?: string;
   /** Событие на весь день: startDay…endDay включительно. */
   allDay: boolean;
@@ -76,6 +89,9 @@ export interface EventPatch {
   title?: string;
   /** Пустая строка — убрать место. */
   location?: string;
+  /** Пустая строка — убрать описание. */
+  description?: string;
+  reminders?: EventReminders;
   start?: Moment;
   end?: Moment;
 }

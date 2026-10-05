@@ -5,7 +5,9 @@ import { AuthRevoked, CalendarError, PermissionDenied } from "../calendar/model"
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractRecurrenceSpan, extractModifySpans, looksAllDay } from "../dates/extract";
-import { BARE_CANCEL, DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
+import { BARE_CANCEL, MASS_DELETE, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
+import { effectiveIntent, lookupQuery, NEXT_WORD } from "../nlu/intent-overrides";
+import { detailHints } from "../nlu/detail-hints";
 import { hasGoogleAccount } from "../db/accounts";
 import {
   cancelOpenCards,
@@ -39,8 +41,11 @@ import { MODIFY_CARD, confirmModify, proposeChange, startModify } from "./modify
 import { connectKeyboard, parseCallbackData } from "./keyboards";
 import { t } from "./messages";
 import { escapeHtml, telegramName } from "./format";
+import { FORWARD_CARD, confirmForwarded, proposeForwarded, type ForwardCardPayload } from "./forwarded";
+import { keepTyping } from "./typing";
 import { UNDO_CARD, attachUndoMessage, performUndo, recordUndo, undoLast } from "./undo";
 import { readEvents } from "./read-events";
+import { lookupEvent } from "./event-lookup";
 import { handleSettingsCallback, handleSettingsInput, parseSettingsCallback, sendReconnect, showSettings } from "./settings";
 import { fixTranscript, isEmptySpeech, transcribeChain, type Transcript } from "../stt/whisper";
 import { isNotRight, NOT_RIGHT_WINDOW_MS, REPEAT_WINDOW_MS, similarTranscripts } from "../voice/signals";
@@ -94,25 +99,74 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
   await handleCommand(ctx, user, message);
 }
 
+/** «печатает…» до ответа (US-10); в тестах не шлём — сценарии не проверяют служебные вызовы. */
+async function withTyping(ctx: AppContext, chatId: number, work: () => Promise<void>): Promise<void> {
+  const stop = ctx.config.testMode ? () => undefined : keepTyping(() => ctx.telegram.sendChatAction(chatId));
+  try {
+    await work();
+  } finally {
+    stop();
+  }
+}
+
 async function handleCommand(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
   const chatId = message.chat.id;
-  // «печатает…» сразу: дальше LLM и Google (US-10). Не критично — ошибку игнорируем
-  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId);
-  const conversationId = await ensureConversation(ctx.db, chatId, "private");
-  let text = message.text?.trim();
-  let voice: { fileId: string; durationSec: number } | undefined;
-  if (!text && (message.voice || message.audio)) {
-    text = (await recognizeVoice(ctx, user, message)) ?? undefined;
-    if (!text) return;
-    const v = (message.voice ?? message.audio)!;
-    voice = { fileId: v.file_id, durationSec: v.duration };
-  }
-  if (!text) {
-    // Фото, файлы и прочее — позже (US-66)
-    await ctx.telegram.sendMessage(chatId, t("notImplemented", user.locale));
-    return;
-  }
+  await withTyping(ctx, chatId, async () => {
+    const conversationId = await ensureConversation(ctx.db, chatId, "private");
+    let text = message.text?.trim();
+    let voice: { fileId: string; durationSec: number } | undefined;
+    if (!text && (message.voice || message.audio)) {
+      text = (await recognizeVoice(ctx, user, message)) ?? undefined;
+      if (!text) return;
+      const v = (message.voice ?? message.audio)!;
+      voice = { fileId: v.file_id, durationSec: v.duration };
+    }
+    if (!text) {
+      // Фото, файлы и прочее — позже (US-66)
+      await ctx.telegram.sendMessage(chatId, t("notImplemented", user.locale));
+      return;
+    }
+    // Пересланное — чужой текст, не команда пользователя: только по кнопке «Выполнить» (US-10)
+    if (message.forward_origin) {
+      await cancelCards(ctx, user, conversationId);
+      await proposeForwarded(ctx, user, chatId, conversationId, text);
+      return;
+    }
+    await runCommand(ctx, user, chatId, conversationId, text, {
+      ...(voice ? { voice } : {}),
+      ...(message.reply_to_message ? { replyTo: message.reply_to_message.message_id } : {}),
+    });
+  });
+}
 
+/** Новая команда аннулирует открытые карточки (US-05): сообщения карточек — в «Отменено». */
+async function cancelCards(ctx: AppContext, user: User, conversationId: string): Promise<PendingAction[]> {
+  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [
+    CREATE_CARD,
+    TITLE_QUESTION,
+    MODIFY_CARD,
+    PICK_CARD,
+    DELETE_CARD,
+    DISCONNECT_CARD,
+    FORWARD_CARD,
+  ]);
+  for (const c of cancelled) {
+    const cardChat = (c.payload as { chatId?: number }).chatId;
+    if (c.kind !== TITLE_QUESTION && c.messageId && cardChat) await ctx.telegram.editMessageText(cardChat, c.messageId, t("cancelled", user.locale));
+  }
+  return cancelled;
+}
+
+/** Команда текстом (или распознанное голосовое, или пересланное после «Выполнить»): от /settings до routeIntent. */
+async function runCommand(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  text: string,
+  opts: { voice?: { fileId: string; durationSec: number }; replyTo?: number } = {},
+): Promise<void> {
+  const { voice } = opts;
   if (/^\/connect(@\w+)?$/i.test(text)) {
     await sendReconnect(ctx, user, chatId);
     return;
@@ -123,15 +177,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   }
 
   // Ответ (reply) на вопрос о названии — переименовать созданное событие (US-30)
-  if (message.reply_to_message) {
-    const q = await findOpenByMessage<TitleQuestionPayload>(
-      ctx.db,
-      conversationId,
-      user.id,
-      TITLE_QUESTION,
-      message.reply_to_message.message_id,
-      ctx.clock.now(),
-    );
+  if (opts.replyTo) {
+    const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, opts.replyTo, ctx.clock.now());
     if (q && (await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) {
       await withCalendar(ctx, user, chatId, async (provider) => {
         const res = await provider.updateEvent(q.payload.ref, { tz: user.home_tz, title: text }, { notify: false });
@@ -173,12 +220,7 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
     }
   }
 
-  // Новая команда аннулирует открытые карточки (US-05)
-  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION, MODIFY_CARD, PICK_CARD, DELETE_CARD, DISCONNECT_CARD]);
-  for (const c of cancelled) {
-    const cardChat = (c.payload as { chatId?: number }).chatId;
-    if (c.kind !== TITLE_QUESTION && c.messageId && cardChat) await ctx.telegram.editMessageText(cardChat, c.messageId, t("cancelled", user.locale));
-  }
+  const cancelled = await cancelCards(ctx, user, conversationId);
 
   // «Отмени последнее» — отмена действия (US-61); голое «отмена» при открытой карточке — отмена карточки
   if (UNDO_PHRASE.test(text)) {
@@ -250,7 +292,7 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   }
 
   // Голосовое, на которое текстовый путь сказал бы «не понимаю», — сначала переслушать
-  if (voice && parsed.intent.name === "unsupported") {
+  if (voice && effectiveIntent(text, parsed.intent).name === "unsupported") {
     if (await escalateVoice(ctx, user, chatId, conversationId, { ...voice, transcript: text, at: nowMs })) return;
   }
   await routeIntent(ctx, user, chatId, conversationId, text, parsed.intent);
@@ -258,13 +300,8 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
 
 /** Интент → действие. Общий путь для текста, голоса и переслушанного голосового. */
 async function routeIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, parsedIntent: Intent): Promise<void> {
-  let intent = parsedIntent;
-  // Сильные глаголы — это изменение/удаление, даже если LLM решила иначе (замер Qwen3, 2026-10-04)
-  if (intent.name !== "multiple") {
-    if (DELETE_VERBS.test(text)) {
-      if (intent.name !== "delete_event") intent = { name: "delete_event" };
-    } else if (intent.name !== "modify_event" && MODIFY_VERBS.test(text)) intent = { name: "modify_event" };
-  }
+  // Сильные слова в тексте важнее выбора LLM: глаголы изменения/удаления, «когда …?» (замер Qwen3, 2026-10-04)
+  const intent = effectiveIntent(text, parsedIntent);
   // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
   const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
   switch (intent.name) {
@@ -304,26 +341,51 @@ async function routeIntent(ctx: AppContext, user: User, chatId: number, conversa
       }
       // От LLM — только сам интент; что и как менять, определяем по тексту детерминированно:
       // Qwen3 не заполняет «event» и выдумывает reference/scope (замер 2026-10-04)
-      const hints = modifyHints(text);
-      const spans = extractModifySpans(text, localNow, user.home_tz);
       const isModify = intent.name === "modify_event";
       const llmModify = intent.name === "modify_event" ? intent : undefined;
+      // Место, описание, напоминания (US-41, US-42): вырезаем из фразы — остаток описывает само событие
+      const details = isModify ? detailHints(text) : { rest: text };
+      if (details.reminders && "error" in details.reminders) {
+        await ctx.telegram.sendMessage(chatId, t(details.reminders.error === "tooMany" ? "remindersTooMany" : "remindersTooFar", user.locale));
+        return;
+      }
+      const eventText = details.rest;
+      const hints = modifyHints(eventText);
+      const spans = extractModifySpans(eventText, localNow, user.home_tz);
       const newTitle = isModify ? (hints.newTitle ?? llmModify?.newTitle) : undefined;
+      // Место: явное («место: …») — из текста; иначе — от LLM; «будет в офисе» — догадка, если LLM промолчала
+      const newLocation = details.location ?? llmModify?.newLocation ?? details.locationGuess;
       const fragments = [spans.reference, spans.target, spans.shift, spans.duration].filter((x): x is string => !!x);
-      const query = modifyQuery(text, fragments, newTitle) ?? intent.event;
+      const llmLocationInText =
+        details.location === undefined && llmModify?.newLocation && eventText.toLowerCase().includes(llmModify.newLocation.toLowerCase());
+      const queryText = llmLocationInText ? eventText.replace(new RegExp(escapeRe(llmModify!.newLocation!), "i"), " ") : eventText;
+      const query = modifyQuery(queryText, fragments, newTitle) ?? intent.event;
+      const changesDetails = newLocation !== undefined || !!details.description || !!details.reminders;
+      // «Добавь место: кафе Пушкин» без указания события — про последнее созданное/изменённое (US-60)
+      const reference = hints.reference ?? (changesDetails && !query && !spans.reference ? "last" : undefined);
       const request: EventRequest = {
         spans,
         ...(query ? { query } : {}),
-        ...(hints.reference ? { reference: hints.reference } : {}),
+        ...(reference ? { reference } : {}),
         ...(hints.listIndex ? { listIndex: hints.listIndex } : {}),
         ...(newTitle ? { newTitle } : {}),
-        ...(llmModify?.newLocation ? { newLocation: llmModify.newLocation } : {}),
+        ...(newLocation !== undefined ? { newLocation } : {}),
+        ...(details.description ? { newDescription: details.description.text, appendDescription: details.description.append } : {}),
+        ...(details.reminders && "overrides" in details.reminders ? { reminders: { useDefault: false, overrides: details.reminders.overrides } } : {}),
         ...(hints.scope ? { scope: hints.scope } : {}),
       };
       await withCalendar(ctx, user, chatId, (provider) =>
         isModify
           ? startModify(ctx, provider, { user, chatId, conversationId, request })
           : startDelete(ctx, provider, { user, chatId, conversationId, request }),
+      );
+      return;
+    }
+    case "find_event": {
+      const query = lookupQuery(text) ?? intent.event;
+      const next = intent.next || NEXT_WORD.test(text);
+      await withCalendar(ctx, user, chatId, (provider) =>
+        lookupEvent(ctx, provider, { user, chatId, conversationId, ...(query ? { query } : {}), ...(next ? { next } : {}) }),
       );
       return;
     }
@@ -457,6 +519,12 @@ async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery):
   await ctx.telegram.answerCallbackQuery(cq.id);
   const chatId = cq.message?.chat.id ?? cq.from.id;
   const action = claim.action;
+  if (action.kind === FORWARD_CARD) {
+    const text = await confirmForwarded(ctx, user, action as PendingAction<ForwardCardPayload>, parsed.choice);
+    // Выполняем от имени нажавшего — как если бы он сам написал это (US-10)
+    if (text) await withTyping(ctx, chatId, () => runCommand(ctx, user, chatId, action.conversationId, text));
+    return;
+  }
   if (action.kind === DISCONNECT_CARD) {
     try {
       await confirmDisconnect(ctx, user, cq.from.id, action as Parameters<typeof confirmDisconnect>[3], parsed.choice);
@@ -557,7 +625,6 @@ async function escalateVoice(
   }
   if (!(await withinLimit(ctx, user, "llm", chatId))) return true;
   await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: { ...voice, reheard: true } }, ctx.clock.now());
-  if (!ctx.config.testMode) await ctx.telegram.sendChatAction(chatId);
 
   let audio: ArrayBuffer;
   try {
@@ -613,4 +680,8 @@ async function escalateVoice(
   await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: { ...voice, transcript: result.transcript, reheard: true } }, ctx.clock.now());
   await routeIntent(ctx, user, chatId, conversationId, result.transcript, result.intent);
   return true;
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

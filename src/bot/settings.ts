@@ -46,7 +46,8 @@ function durationLabel(min: number, locale: string): string {
   return [h ? `${h} ч` : "", m ? `${m} мин` : ""].filter(Boolean).join(" ");
 }
 
-function beforeLabel(min: number, locale: string): string {
+/** «за 1 ч», «за 2 дн.» — напоминание до начала. */
+export function beforeLabel(min: number, locale: string): string {
   if (min % DAY_MIN === 0) return t("reminderBefore", locale, { value: locale === "en" ? `${min / DAY_MIN} d` : `${min / DAY_MIN} дн.` });
   return t("reminderBefore", locale, { value: durationLabel(min, locale) });
 }
