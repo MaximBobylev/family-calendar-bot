@@ -1,0 +1,10 @@
+# Публичные страницы для экрана согласия Google (заглушки на время беты).
+
+- id: public-pages
+  story: ADR-0001
+  steps:
+    - http_get: { path: "/homepage", text_contains: ["Calendar Assist Bot", "/privacy-policy"] }
+    - http_get: { path: "/privacy-policy", text_contains: ["Политика конфиденциальности", "Limited Use", "в зашифрованном виде"] }
+    - http_get: { path: "/terms-of-service", text_contains: ["Условия использования"] }
+    - http_get: { path: "/", expect_status: 302, location: "/homepage" }
+    - http_get: { path: "/nope", expect_status: 404 }

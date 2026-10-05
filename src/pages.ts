@@ -1,0 +1,110 @@
+// Публичные страницы для экрана согласия Google: домашняя, политика конфиденциальности, условия.
+// ЗАГЛУШКИ на время закрытой беты — перед публичным релизом заменить полноценными (roadmap.md, R3).
+
+const UPDATED = "4 октября 2026";
+
+function layout(title: string, body: string): Response {
+  const html = `<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} — Calendar Assist Bot</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 17px/1.55 system-ui, sans-serif; margin: 0 auto; max-width: 42em; padding: 2em 1em 4em; }
+  h1 { font-size: 1.6em; line-height: 1.2; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; }
+  nav { display: flex; gap: 1.2em; flex-wrap: wrap; font-size: .95em; margin-bottom: 2em; }
+  .note { padding: .8em 1em; border-radius: 8px; background: color-mix(in srgb, currentColor 8%, transparent); font-size: .95em; }
+  small { opacity: .7; }
+</style>
+</head>
+<body>
+<nav><a href="/homepage">Calendar Assist Bot</a><a href="/privacy-policy">Конфиденциальность</a><a href="/terms-of-service">Условия</a></nav>
+${body}
+</body>
+</html>`;
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=3600" } });
+}
+
+const homepage = () =>
+  layout(
+    "Главная",
+    `<h1>Calendar Assist Bot</h1>
+<p>Telegram-бот для Google Календаря: создавайте встречи, смотрите расписание и получайте напоминания голосом или текстом прямо в Telegram.</p>
+<p class="note">Сейчас бот работает в закрытом режиме для ограниченного круга пользователей.</p>
+<h2>Как это работает</h2>
+<ul>
+  <li>Вы подключаете свой Google Календарь через стандартный экран согласия Google.</li>
+  <li>Пишете или говорите боту: «Что у меня завтра?», «Поставь встречу в среду в 12».</li>
+  <li>Перед изменениями в календаре бот показывает карточку с подтверждением.</li>
+</ul>
+<p><a href="/privacy-policy">Политика конфиденциальности</a> · <a href="/terms-of-service">Условия использования</a></p>`,
+  );
+
+const privacy = () =>
+  layout(
+    "Политика конфиденциальности",
+    `<h1>Политика конфиденциальности</h1>
+<p><small>Обновлено: ${UPDATED}. Предварительная версия на время закрытой беты.</small></p>
+
+<h2>Какие данные мы получаем</h2>
+<ul>
+  <li><b>Telegram:</b> ваш идентификатор пользователя и сообщения, которые вы отправляете боту.</li>
+  <li><b>Google:</b> адрес электронной почты основного календаря, список ваших календарей, часовой пояс, а также события календаря — только в момент выполнения вашей команды.</li>
+</ul>
+
+<h2>Как мы используем данные</h2>
+<ul>
+  <li>Только чтобы выполнять ваши команды: показывать расписание, создавать, изменять и удалять события, присылать дайджесты и напоминания.</li>
+  <li>Текст команды обрабатывается языковой моделью (Cloudflare Workers AI), чтобы понять, что нужно сделать.</li>
+  <li>Мы не продаём данные, не используем их для рекламы и не передаём третьим лицам, кроме перечисленных ниже обработчиков.</li>
+</ul>
+
+<h2>Что мы храним</h2>
+<ul>
+  <li>Токен доступа Google — в зашифрованном виде.</li>
+  <li>Настройки, список календарей и их псевдонимы.</li>
+  <li>Распознанный текст команд и результат их разбора — до 90 дней, для отладки.</li>
+  <li>Содержимое календаря целиком не копируется и не хранится.</li>
+</ul>
+
+<h2>Обработчики</h2>
+<ul>
+  <li>Cloudflare — хостинг, база данных, обработка языковой моделью.</li>
+  <li>Telegram — доставка сообщений.</li>
+  <li>Google — доступ к вашему календарю.</li>
+</ul>
+
+<h2>Использование данных Google</h2>
+<p>Использование и передача информации, полученной через API Google, соответствует <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, включая требования Limited Use.</p>
+
+<h2>Удаление данных</h2>
+<p>Вы можете в любой момент отозвать доступ бота на странице <a href="https://myaccount.google.com/permissions">разрешений аккаунта Google</a>. Чтобы удалить все данные, связанные с вашим аккаунтом, обратитесь к владельцу бота.</p>`,
+  );
+
+const terms = () =>
+  layout(
+    "Условия использования",
+    `<h1>Условия использования</h1>
+<p><small>Обновлено: ${UPDATED}. Предварительная версия на время закрытой беты.</small></p>
+<ul>
+  <li>Бот предоставляется «как есть» в рамках закрытого тестирования, без гарантий бесперебойной работы.</li>
+  <li>Перед изменениями в календаре бот запрашивает подтверждение; ответственность за подтверждённые действия несёт пользователь.</li>
+  <li>Распознавание речи и текста может ошибаться — проверяйте карточку перед подтверждением.</li>
+  <li>Доступ может быть ограничен или прекращён в любой момент.</li>
+  <li>Обработка данных описана в <a href="/privacy-policy">политике конфиденциальности</a>.</li>
+</ul>`,
+  );
+
+const PAGES: Record<string, () => Response> = {
+  "/homepage": homepage,
+  "/privacy-policy": privacy,
+  "/terms-of-service": terms,
+};
+
+export function handlePage(url: URL): Response | null {
+  if (url.pathname === "/") return Response.redirect(new URL("/homepage", url).toString(), 302);
+  return PAGES[url.pathname]?.() ?? null;
+}

@@ -9,6 +9,7 @@ import { processInboxUpdate } from "./process";
 import { tick } from "./scheduler";
 import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
+import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
 
 async function context(env: Env): Promise<AppContext> {
@@ -41,6 +42,10 @@ export default {
   async fetch(request, env, exec): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") return Response.json({ ok: true });
+    if (request.method === "GET") {
+      const page = handlePage(url);
+      if (page) return page;
+    }
 
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request, exec);

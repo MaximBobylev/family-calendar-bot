@@ -25,6 +25,7 @@ type Step =
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
   | { google_revoke: string }
+  | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string } }
   | { llm: Record<string, unknown> }
   /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
   | { press: string | { button: string; from?: number; again?: boolean } }
@@ -225,6 +226,13 @@ async function runScenario(s: Scenario): Promise<void> {
           throw new AssertionError(`${where}: reuse ${new URL(u).pathname} → ${res.status}, expected ${step.oauth_reuse_last_link.expect_status}`);
         }
       }
+    } else if ("http_get" in step) {
+      const h = step.http_get;
+      const res = await fetch(`${SUT}${h.path}`, { redirect: "manual" });
+      if (res.status !== (h.expect_status ?? 200)) throw new AssertionError(`${where}: GET ${h.path} → ${res.status}`);
+      if (h.location && !res.headers.get("location")?.endsWith(h.location)) throw new AssertionError(`${where}: location ${res.headers.get("location")}`);
+      const body = await res.text();
+      for (const part of h.text_contains ?? []) if (!body.includes(part)) throw new AssertionError(`${where}: GET ${h.path} does not contain «${part}»`);
     } else if ("google_revoke" in step) {
       await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
     } else if ("llm" in step) {
