@@ -94,7 +94,11 @@ const diff = (a: Moment, b: Moment) => (a.day - b.day) * 1440 + (a.minutes - b.m
 
 // --- Поиск события ----------------------------------------------------------
 
-async function findCandidates(ctx: AppContext, provider: CalendarProvider, user: User, conversationId: string, req: ModifyRequest): Promise<CalendarEvent[]> {
+/**
+ * Кандидаты. fuzzy=true — по названию ничего не совпало, но день указан: предлагаем все события дня
+ * («Не нашёл „созвон“ — может, одна из этих?»), это закрывает и синонимы («созвон» ↔ «звонок»).
+ */
+async function findCandidates(ctx: AppContext, provider: CalendarProvider, user: User, conversationId: string, req: ModifyRequest): Promise<{ events: CalendarEvent[]; fuzzy: boolean }> {
   const tz = user.home_tz;
   const nowUtc = ctx.clock.now();
   const now = utcToLocal(nowUtc, tz);
@@ -106,9 +110,9 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
     if (req.reference === "list" && state.lastList && fresh(state.lastList.at) && req.listIndex) ref = state.lastList.refs[req.listIndex - 1];
     if (ref) {
       const e = await provider.getEvent(ref, tz);
-      return e ? [e] : [];
+      return { events: e ? [e] : [], fuzzy: false };
     }
-    if (!req.query && !req.spans.reference) return [];
+    if (!req.query && !req.spans.reference) return { events: [], fuzzy: false };
   }
 
   // Окно поиска: день/время из фразы или ближайшие 30 дней
@@ -129,12 +133,18 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
     }
   }
 
-  let events = await provider.listEvents(from, to, tz);
-  if (exact) events = events.filter((e) => !e.allDay && e.start!.day === exact!.day && e.start!.minutes === exact!.minutes);
+  const inWindow = await provider.listEvents(from, to, tz);
+  let events = exact ? inWindow.filter((e) => !e.allDay && e.start!.day === exact!.day && e.start!.minutes === exact!.minutes) : inWindow;
+  let fuzzy = false;
   if (req.query && queryWords(req.query).length) {
     const scored = events.map((e) => ({ e, s: titleScore(req.query!, e.title) })).filter((x) => x.s > 0);
     const best = Math.max(0, ...scored.map((x) => x.s));
     events = scored.filter((x) => x.s === best).map((x) => x.e);
+    // Название не совпало, но день назван — предложить события этого дня
+    if (events.length === 0 && req.spans.reference) {
+      events = inWindow.filter((e) => !e.allDay);
+      fuzzy = events.length > 0;
+    }
   }
   if (req.reference === "next" || (!req.spans.reference && !exact)) {
     // Без указания дня — ближайшие ещё не начавшиеся (US-21)
@@ -142,7 +152,7 @@ async function findCandidates(ctx: AppContext, provider: CalendarProvider, user:
   }
   events.sort((a, b) => (a.start ? localToUtc(a.start, tz) : a.startDay * 86_400_000) - (b.start ? localToUtc(b.start, tz) : b.startDay * 86_400_000));
   if (req.reference === "next") events = events.slice(0, 1);
-  return events;
+  return { events, fuzzy };
 }
 
 // --- Расчёт изменений ---------------------------------------------------------
@@ -224,13 +234,13 @@ export interface ModifyArgs {
 export async function startModify(ctx: AppContext, provider: CalendarProvider, a: ModifyArgs): Promise<void> {
   const { user, chatId } = a;
   const locale = user.locale;
-  const candidates = await findCandidates(ctx, provider, user, a.conversationId, a.request);
+  const { events: candidates, fuzzy } = await findCandidates(ctx, provider, user, a.conversationId, a.request);
 
   if (candidates.length === 0) {
     await ctx.telegram.sendMessage(chatId, a.request.query ? t("eventNotFound", locale, { query: a.request.query }) : t("eventNotFoundGeneric", locale));
     return;
   }
-  if (candidates.length > 1) {
+  if (candidates.length > 1 || fuzzy) {
     if (candidates.length > MAX_CANDIDATES) {
       await ctx.telegram.sendMessage(chatId, t("tooManyCandidates", locale, { n: String(candidates.length) }));
       return;
@@ -243,7 +253,8 @@ export async function startModify(ctx: AppContext, provider: CalendarProvider, a
       ...candidates.map((c, i) => [{ text: eventLabel(c, locale).slice(0, 60), callback_data: callbackData(id, `e${i}`) }]),
       [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
     ];
-    const sent = await ctx.telegram.sendMessage(chatId, t("whichEvent", locale), { inline_keyboard: buttons });
+    const header = fuzzy && a.request.query ? t("notFoundSuggest", locale, { query: a.request.query }) : t("whichEvent", locale);
+    const sent = await ctx.telegram.sendMessage(chatId, header, { inline_keyboard: buttons });
     await attachMessage(ctx.db, id, sent.message_id);
     return;
   }

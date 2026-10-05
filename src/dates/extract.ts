@@ -133,6 +133,8 @@ export function extractModifySpans(text: string, now: string, tz: string): Modif
     let matched = false;
     for (let j = ws.length; j > i; j--) {
       if (isFiller(ws[j - 1]!) && j - i > 1) continue;
+      // «во вторник на 11 утра» — «на …» начинает новое время: кусок про событие не заходит за него
+      if (!TARGET_PREFIXES.has(ws[i]!.toLowerCase()) && ws.slice(i + 1, j).some((w) => TARGET_PREFIXES.has(w.toLowerCase()))) continue;
       const fragment = ws.slice(i, j).join(" ");
       if (j - i > 1 && !out.shift && !out.duration && ok(fragment, wantsDuration ? "duration" : "shift")) {
         if (wantsDuration) out.duration = fragment;

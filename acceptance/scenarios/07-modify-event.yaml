@@ -248,3 +248,34 @@
     - expect_telegram:
         - { method: editMessageText, text_contains: ["Отменено"] }
         - { text_contains: ["Перенести?", "<b>Обед</b>", "Стало: чт, 8 октября, 13:00–14:00"] }
+
+# Реальная фраза (2026-10-05): «встречу» — без названия, «во вторник» — день события, «на 11 утра» — новое время
+- id: modify-generic-event-by-day
+  story: US-40
+  steps:
+    - *setup
+    - llm: { "Перенеси встречу в пятницу на 11 утра.": { tool: modify_event, args: {} } }
+    - telegram: { from: 1001, text: "Перенеси встречу в пятницу на 11 утра." }
+    - expect_telegram:
+        - text_contains: ["Какую встречу?"]
+          buttons: ["пт, 9 октября, 13:00–14:00 — Обед", "пт, 9 октября, 16:00–16:30 — Созвон с Машей", "Отмена"]
+    - press: "пт, 9 октября, 13:00–14:00 — Обед"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Выбрано"] }
+        - { text_contains: ["<b>Обед</b>", "Стало: пт, 9 октября, 11:00–12:00"] }
+
+- id: modify-title-mismatch-suggests-day
+  story: US-40
+  steps:
+    - *setup
+    - llm: { "Перенеси звонок с Машей в пятницу на 17": { tool: modify_event, args: {} } }
+    - telegram: { from: 1001, text: "Перенеси звонок с Машей в пятницу на 17" }
+    - expect_telegram:
+        - text_contains: ["Созвон с Машей"]
+          text_not_contains: ["Может, одна из этих"]
+    - llm: { "Перенеси звонок стоматологу в пятницу на 17": { tool: modify_event, args: {} } }
+    - telegram: { from: 1001, text: "Перенеси звонок стоматологу в пятницу на 17" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - text_contains: ["Не нашёл «звонок стоматологу». Может, одна из этих?"]
+          buttons: ["пт, 9 октября, 13:00–14:00 — Обед", "пт, 9 октября, 16:00–16:30 — Созвон с Машей", "Отмена"]

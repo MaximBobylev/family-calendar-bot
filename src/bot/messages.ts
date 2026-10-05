@@ -116,6 +116,7 @@ const messages = {
   eventNotFound: { ru: "Не нашёл встречу «{query}». Уточните день или название.", en: "I couldn't find “{query}”. Please specify the day or the name." },
   eventNotFoundGeneric: { ru: "Не понял, какую встречу изменить — назовите её или время.", en: "Which event? Please name it or its time." },
   tooManyCandidates: { ru: "Подходящих встреч {n} — уточните день или время.", en: "There are {n} matching events — please specify the day or time." },
+  notFoundSuggest: { ru: "Не нашёл «{query}». Может, одна из этих?", en: "I couldn't find “{query}”. Maybe one of these?" },
   whichEvent: { ru: "Какую встречу?", en: "Which event?" },
   picked: { ru: "Выбрано", en: "Selected" },
   eventGone: { ru: "Эта встреча уже удалена.", en: "This event has already been deleted." },
