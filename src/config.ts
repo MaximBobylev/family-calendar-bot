@@ -19,6 +19,7 @@ export interface Config {
   tokenEncryptionKey: string;
   allowedTelegramIds: Set<string>;
   testMode: boolean;
+  admin: { user: string; password: string };
   llm: LlmConfig;
   stt: SttConfig;
 }
@@ -39,6 +40,7 @@ export function loadConfig(env: Env): Config {
       (env.ALLOWED_TELEGRAM_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     ),
     testMode: env.TEST_MODE === "true",
+    admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
     llm: { baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL },
     // Тот же API-токен Cloudflare, что и для LLM
     stt: { baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },

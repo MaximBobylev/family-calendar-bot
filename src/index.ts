@@ -9,6 +9,7 @@ import { processInboxUpdate } from "./process";
 import { tick } from "./scheduler";
 import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
+import { adminPage, checkAdminAuth } from "./admin";
 import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
 
@@ -50,6 +51,12 @@ export default {
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request, exec);
     if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
+    if (url.pathname === "/admin" && request.method === "GET") {
+      if (!checkAdminAuth(request, ctx.config.admin.user, ctx.config.admin.password)) {
+        return new Response("Unauthorized", { status: 401, headers: { "www-authenticate": 'Basic realm="admin", charset="UTF-8"' } });
+      }
+      return adminPage(ctx);
+    }
     if (ctx.config.testMode && url.pathname.startsWith("/__test/")) return handleTestRoute(ctx, request, url.pathname);
     return new Response("Not found", { status: 404 });
   },

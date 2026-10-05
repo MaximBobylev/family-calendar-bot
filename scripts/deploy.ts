@@ -44,6 +44,8 @@ const secrets: Record<string, string> = {
   TELEGRAM_WEBHOOK_SECRET: need("TELEGRAM_WEBHOOK_SECRET"),
   ALLOWED_TELEGRAM_IDS: need("ALLOWED_TELEGRAM_IDS"),
   TOKEN_ENCRYPTION_KEY: need("TOKEN_ENCRYPTION_KEY"),
+  ADMIN_USER: env.ADMIN_USER?.trim() || "admin",
+  ADMIN_PASSWORD: need("ADMIN_PASSWORD"),
   LLM_API_KEY: need("LLM_API_KEY"),
   LLM_BASE: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
   STT_BASE: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`,

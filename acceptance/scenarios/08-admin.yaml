@@ -1,0 +1,22 @@
+# Страница статистики для владельца: HTTP Basic, только чтение.
+
+- id: admin-requires-auth
+  story: US-13
+  steps:
+    - http_get: { path: "/admin", expect_status: 401 }
+    - http_get: { path: "/admin", expect_status: 401, basic_auth: "admin:wrong" }
+
+- id: admin-shows-stats-and-journal
+  story: US-13
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - llm: { "Что у меня <завтра>?": { tool: list_events, args: { range: "завтра" } } }
+    - telegram: { from: 1001, text: "Что у меня <завтра>?" }
+    - http_get:
+        path: "/admin"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["статистика", "Пользователи", "list_events", "Что у меня &lt;завтра&gt;?", "fake-model"]

@@ -17,6 +17,9 @@ interface Env {
   LLM_BASE: string;
   /** Workers AI REST: https://api.cloudflare.com/client/v4/accounts/<id>/ai (ключ — LLM_API_KEY). */
   STT_BASE: string;
+  /** Вход на /admin (HTTP Basic). Пустой пароль — страница недоступна. */
+  ADMIN_USER: string;
+  ADMIN_PASSWORD: string;
   /** Публичный адрес Worker'а (https://…workers.dev) — для OAuth redirect_uri и ссылок. */
   PUBLIC_BASE_URL: string;
 }

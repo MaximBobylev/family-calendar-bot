@@ -29,7 +29,7 @@ type Step =
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
   | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
-  | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string } }
+  | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string; basic_auth?: string } }
   | { llm: Record<string, unknown> }
   /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
   | { press: string | { button: string; from?: number; again?: boolean } }
@@ -252,7 +252,7 @@ async function runScenario(s: Scenario): Promise<void> {
       await sendUpdate({ from: v.from, voice: { file_id: fileId, duration: v.duration ?? 3 }, ...(replyTo ? { reply_to: replyTo } : {}) }, where);
     } else if ("http_get" in step) {
       const h = step.http_get;
-      const res = await fetch(`${SUT}${h.path}`, { redirect: "manual" });
+      const res = await fetch(`${SUT}${h.path}`, { redirect: "manual", headers: h.basic_auth ? { authorization: `Basic ${btoa(h.basic_auth)}` } : {} });
       if (res.status !== (h.expect_status ?? 200)) throw new AssertionError(`${where}: GET ${h.path} → ${res.status}`);
       if (h.location && !res.headers.get("location")?.endsWith(h.location)) throw new AssertionError(`${where}: location ${res.headers.get("location")}`);
       const body = await res.text();

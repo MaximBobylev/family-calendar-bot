@@ -51,6 +51,8 @@
         "LLM_MODEL": "fake-model",
         "LLM_API_KEY": "test-llm-key",
         "STT_BASE": "http://fakes:9100/stt",
+        "ADMIN_USER": "admin",
+        "ADMIN_PASSWORD": "test-admin-password",
         "STT_MODEL": "fake-whisper",
         "TEST_MODE": "true",
         "GOOGLE_CLIENT_ID": "test-client-id",

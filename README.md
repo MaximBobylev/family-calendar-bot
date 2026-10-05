@@ -20,6 +20,12 @@ docker compose up dev                             # wrangler dev (окружен
 
 Секреты и токены — в `.env` (не коммитится): `cp .env.example .env` и заполнить — там же описано, где взять каждое значение.
 
+## Эксплуатация
+
+- Деплой: `docker compose run --rm test npm run deploy` (миграции, код, секреты из `.env`, webhook).
+- Статистика: `https://<воркер>/admin` — логин/пароль `ADMIN_USER` / `ADMIN_PASSWORD` из `.env`.
+- Проверка интентов на реальной модели: `docker compose run --rm test npx tsx scripts/probe-intents.ts "фраза" …`.
+
 ## Структура
 
 | Путь | Что |
