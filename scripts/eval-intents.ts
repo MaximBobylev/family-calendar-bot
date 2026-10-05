@@ -5,7 +5,7 @@
 // Запуск (секреты есть только в сервисе deploy):
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-intents.ts \
 //     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8,or:google/gemma-4-26b-a4b-it --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
-//     [--concurrency 4] [--out reports/nlu-eval/run.json] [--failures]
+//     [--concurrency 4] [--delay-ms 8000] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -191,7 +191,8 @@ async function withRetry<T>(f: () => Promise<T>): Promise<T> {
     } catch (e) {
       const msg = String(e);
       if (attempt < 3 && /llm (429|5\d\d)|timeout|aborted|fetch failed/i.test(msg)) {
-        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        // Квота (429) — ждём минуту: короткие повторы только сжигают лимит (урок 2026-10-05)
+        await new Promise((r) => setTimeout(r, /llm 429/.test(msg) ? 60_000 : 2000 * (attempt + 1)));
         continue;
       }
       throw e;
@@ -199,7 +200,11 @@ async function withRetry<T>(f: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Пауза между вызовами (--delay-ms) — под поминутные лимиты бесплатных тарифов. */
+const DELAY_MS = Number(arg("delay-ms") ?? 0);
+
 async function runOne(variant: string, model: string, c: Case, rep: number): Promise<Run> {
+  if (DELAY_MS) await new Promise((r) => setTimeout(r, DELAY_MS));
   const v = VARIANTS[variant]!;
   // «or:<модель>» — OpenRouter (без «размышления», как в проде); «gg:<модель>» — Google AI Studio (OpenAI-совместимый
   // эндпоинт Gemini API); иначе — Workers AI
