@@ -242,7 +242,11 @@ async function googleConsent(consent: URL, o: { consent?: string; deny?: boolean
  * Ссылка «Подключить» → страница «подключаете к Telegram-аккаунту …» → кнопка «Продолжить» (POST формы с cookie)
  * → редирект на экран согласия Google. status — первый ответ не по пути (страница или форма).
  */
-async function openConnectLink(jar: CookieJar, startUrl: string, opts: { withoutCookie?: boolean } = {}): Promise<{ status: number; page: string; consent?: URL }> {
+async function openConnectLink(
+  jar: CookieJar,
+  startUrl: string,
+  opts: { withoutCookie?: boolean } = {},
+): Promise<{ status: number; page: string; consent?: URL }> {
   const start = await browse(jar, startUrl);
   const page = await start.text();
   if (start.status !== 200) return { status: start.status, page };
@@ -299,7 +303,13 @@ async function runScenario(s: Scenario): Promise<void> {
       message_id: updateId,
       date: 0,
       chat: { id: t.chat_id ?? t.from, type: t.chat_type ?? "private" },
-      from: { id: t.from, is_bot: false, first_name: t.first_name ?? "Test", ...(t.username ? { username: t.username } : {}), language_code: t.language ?? "ru" },
+      from: {
+        id: t.from,
+        is_bot: false,
+        first_name: t.first_name ?? "Test",
+        ...(t.username ? { username: t.username } : {}),
+        language_code: t.language ?? "ru",
+      },
       ...(t.text !== undefined ? { text: t.text } : {}),
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
       ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
@@ -342,8 +352,7 @@ async function runScenario(s: Scenario): Promise<void> {
 
   // Общая подготовка подключается YAML-якорем как вложенный список шагов; repeat разворачивается
   const expand = (list: unknown[]): Step[] =>
-    (list.flat(Infinity) as Step[]).flatMap((st) =>
-      "repeat" in st ? Array.from({ length: st.repeat.times }, () => expand(st.repeat.steps)).flat() : [st]);
+    (list.flat(Infinity) as Step[]).flatMap((st) => ("repeat" in st ? Array.from({ length: st.repeat.times }, () => expand(st.repeat.steps)).flat() : [st]));
   const steps = expand(s.steps);
   for (const [n, step] of steps.entries()) {
     const where = `step ${n + 1}`;
@@ -363,9 +372,11 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("expect_telegram" in step) {
       const calls = await newCalls();
       if (calls.length !== step.expect_telegram.length) {
-        throw new AssertionError(`${where}: expected ${step.expect_telegram.length} Telegram call(s), got ${calls.length}: ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);
+        throw new AssertionError(
+          `${where}: expected ${step.expect_telegram.length} Telegram call(s), got ${calls.length}: ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`,
+        );
       }
-      step.expect_telegram.forEach((exp, k) => checkCall(`${where}.${k + 1}`, calls[k]!, exp));
+      for (const [k, exp] of step.expect_telegram.entries()) checkCall(`${where}.${k + 1}`, calls[k]!, exp);
     } else if ("google_account" in step) {
       await post(`${FAKES}/__fake/google/accounts`, step.google_account);
     } else if ("oauth" in step) {
@@ -380,12 +391,18 @@ async function runScenario(s: Scenario): Promise<void> {
         throw new AssertionError(`${where}: oauth start → ${start.status}, expected redirect to Google`);
       }
       const p = start.consent.searchParams;
-      for (const [k, v] of [["access_type", "offline"], ["prompt", "consent"], ["response_type", "code"], ["code_challenge_method", "S256"]] as const) {
+      for (const [k, v] of [
+        ["access_type", "offline"],
+        ["prompt", "consent"],
+        ["response_type", "code"],
+        ["code_challenge_method", "S256"],
+      ] as const) {
         if (p.get(k) !== v) throw new AssertionError(`${where}: consent URL ${k}=${p.get(k)}, expected ${v}`);
       }
       if (!p.get("scope")?.includes("calendar.events")) throw new AssertionError(`${where}: consent URL scope ${p.get("scope")}`);
       // S256 от verifier 43–128 символов — 43 символа base64url
-      if (!/^[A-Za-z0-9_-]{43}$/.test(p.get("code_challenge") ?? "")) throw new AssertionError(`${where}: consent URL code_challenge=${p.get("code_challenge")}`);
+      if (!/^[A-Za-z0-9_-]{43}$/.test(p.get("code_challenge") ?? ""))
+        throw new AssertionError(`${where}: consent URL code_challenge=${p.get("code_challenge")}`);
       if (!jar.has("oauth_bind")) throw new AssertionError(`${where}: no oauth_bind cookie before redirect to Google`);
       const callbackUrl = await googleConsent(start.consent, o);
       lastOAuth = { startUrl, callbackUrl, jar };
@@ -459,14 +476,16 @@ async function runScenario(s: Scenario): Promise<void> {
       if (e.count !== undefined && list.length !== e.count) throw new AssertionError(`${where}: ${list.length} patches, expected ${e.count}`);
       const last = list.at(-1);
       if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last patch id ${last?.id}, expected ${e.id}`);
-      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
+      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates)
+        throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
     } else if ("expect_google_deletes" in step) {
       const e = step.expect_google_deletes;
       const list = (await (await fetch(`${FAKES}/__fake/google/deletes`)).json()) as { id: string; sendUpdates: string | null }[];
       if (e.count !== undefined && list.length !== e.count) throw new AssertionError(`${where}: ${list.length} deletes, expected ${e.count}`);
       const last = list.at(-1);
       if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last delete id ${last?.id}, expected ${e.id}`);
-      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
+      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates)
+        throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
     } else if ("expect_token_revocations" in step) {
       const e = step.expect_token_revocations;
       const list = (await (await fetch(`${FAKES}/__fake/google/revocations`)).json()) as { token: string }[];
@@ -519,14 +538,24 @@ async function runScenario(s: Scenario): Promise<void> {
         events?: { summary?: string; location?: string; start: { dateTime?: string; date?: string }; end: { dateTime?: string; date?: string } }[];
       }[];
       const events = (cals.find((c) => c.id === e.calendar)?.events ?? []).filter((g) => (g as { status?: string }).status !== "cancelled");
-      if (e.count !== undefined && events.length !== e.count) throw new AssertionError(`${where}: ${events.length} events in ${e.calendar}, expected ${e.count}`);
+      if (e.count !== undefined && events.length !== e.count)
+        throw new AssertionError(`${where}: ${events.length} events in ${e.calendar}, expected ${e.count}`);
       const same = (got: { dateTime?: string; date?: string }, want: string) =>
         want.includes("T") ? !!got.dateTime && Date.parse(got.dateTime) === Date.parse(want) : got.date === want;
       for (const want of e.events) {
-        const found = events.find((g) => g.summary === want.summary && same(g.start, want.start) && same(g.end, want.end) && (!want.location || g.location === want.location)
-          && (!want.recurrence || JSON.stringify((g as { recurrence?: string[] }).recurrence) === JSON.stringify(want.recurrence))
-          && (want.reminders === undefined || JSON.stringify((g as { reminders?: unknown }).reminders ?? null) === JSON.stringify(want.reminders)));
-        if (!found) throw new AssertionError(`${where}: event ${JSON.stringify(want)} not found in ${e.calendar}: ${JSON.stringify(events.map((g) => [g.summary, g.start, g.end]))}`);
+        const found = events.find(
+          (g) =>
+            g.summary === want.summary &&
+            same(g.start, want.start) &&
+            same(g.end, want.end) &&
+            (!want.location || g.location === want.location) &&
+            (!want.recurrence || JSON.stringify((g as { recurrence?: string[] }).recurrence) === JSON.stringify(want.recurrence)) &&
+            (want.reminders === undefined || JSON.stringify((g as { reminders?: unknown }).reminders ?? null) === JSON.stringify(want.reminders)),
+        );
+        if (!found)
+          throw new AssertionError(
+            `${where}: event ${JSON.stringify(want)} not found in ${e.calendar}: ${JSON.stringify(events.map((g) => [g.summary, g.start, g.end]))}`,
+          );
       }
     } else if ("connected_user" in step) {
       const c = step.connected_user;
@@ -540,7 +569,8 @@ async function runScenario(s: Scenario): Promise<void> {
       await newCalls(); // приветствие и «календарь подключён» — проверены отдельными сценариями
     } else if ("expect_telegram_count" in step) {
       const calls = await newCalls();
-      if (calls.length !== step.expect_telegram_count) throw new AssertionError(`${where}: expected ${step.expect_telegram_count} Telegram call(s), got ${calls.length}`);
+      if (calls.length !== step.expect_telegram_count)
+        throw new AssertionError(`${where}: expected ${step.expect_telegram_count} Telegram call(s), got ${calls.length}`);
     } else if ("expect_llm_requests" in step) {
       const list = (await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as unknown[];
       if (list.length !== step.expect_llm_requests) throw new AssertionError(`${where}: ${list.length} LLM requests, expected ${step.expect_llm_requests}`);
@@ -570,7 +600,8 @@ function checkCall(where: string, call: TelegramCall, exp: TelegramExpectation) 
   }
   if (exp.buttons) {
     const got = (call.body.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text);
-    if (JSON.stringify(got) !== JSON.stringify(exp.buttons)) throw new AssertionError(`${where}: buttons ${JSON.stringify(got)}, expected ${JSON.stringify(exp.buttons)}`);
+    if (JSON.stringify(got) !== JSON.stringify(exp.buttons))
+      throw new AssertionError(`${where}: buttons ${JSON.stringify(got)}, expected ${JSON.stringify(exp.buttons)}`);
   }
 }
 

@@ -11,9 +11,14 @@ export interface ModifyHints {
 // \b в JS не работает с кириллицей — границы слова через Unicode-lookaround
 const word = (stem: string) => new RegExp(`(?<!\\p{L})${stem}(?!\\p{L})`, "iu");
 const ORDINALS: [RegExp, number][] = [
-  [word("перв(ую|ой|ое|ый)"), 1], [word("втор(ую|ой|ое)"), 2], [word("треть(ю|ей|е)"), 3],
-  [word("четв[её]рт(ую|ой|ое)"), 4], [word("пят(ую|ой|ое)"), 5],
-  [word("first"), 1], [word("second"), 2], [word("third"), 3],
+  [word("перв(ую|ой|ое|ый)"), 1],
+  [word("втор(ую|ой|ое)"), 2],
+  [word("треть(ю|ей|е)"), 3],
+  [word("четв[её]рт(ую|ой|ое)"), 4],
+  [word("пят(ую|ой|ое)"), 5],
+  [word("first"), 1],
+  [word("second"), 2],
+  [word("third"), 3],
 ];
 
 export function modifyHints(text: string): ModifyHints {
@@ -21,8 +26,9 @@ export function modifyHints(text: string): ModifyHints {
   const t = text.trim();
 
   // «переименуй завтрашнюю встречу в Ревью дизайна», «назови её Стендап»
-  const rename = /(?:переименуй|переименовать|rename)\s+(?:.*?\s)?(?:в|на|to)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t)
-    ?? /(?:назови|назвать|call)\s+(?:её|ее|его|эту встречу|it)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t);
+  const rename =
+    /(?:переименуй|переименовать|rename)\s+(?:.*?\s)?(?:в|на|to)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t) ??
+    /(?:назови|назвать|call)\s+(?:её|ее|его|эту встречу|it)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t);
   if (rename?.[1]) h.newTitle = rename[1].trim();
 
   if (/следующ|ближайш|\bnext\b/i.test(t)) h.reference = "next";
@@ -42,7 +48,9 @@ export function modifyHints(text: string): ModifyHints {
 }
 
 /** Глаголы, при которых команда — точно изменение существующего события (LLM путает с созданием). */
-export const MODIFY_VERBS = word("(перенеси|перенести|перенесите|передвинь|сдвинь|сдвинуть|переставь|переименуй|переименовать|продли|продлить|укороти|move|reschedule|rename|postpone)");
+export const MODIFY_VERBS = word(
+  "(перенеси|перенести|перенесите|передвинь|сдвинь|сдвинуть|переставь|переименуй|переименовать|продли|продлить|укороти|move|reschedule|rename|postpone)",
+);
 
 /** Глаголы удаления. «Отмени последнее» — это отмена действия (US-61), а не удаление. */
 export const DELETE_VERBS = word("(удали|удалить|удалите|отмени|отменить|отмените|убери|убрать|delete|remove|cancel)");

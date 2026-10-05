@@ -46,7 +46,13 @@ ${table(
   v.byModel.map((m) => [m.kind, m.model, m.n, m.errors, m.kind === "llm" ? `${m.tin} / ${m.tout}` : `${(m.audio_ms / 60_000).toFixed(1)} мин`, usd(m.cost)]),
 )}
 <h2>Интенты (7 дней)</h2>
-${table(["Интент", "Раз"], v.intents.map((i) => [i.intent, i.n]))}
+${table(
+  ["Интент", "Раз"],
+  v.intents.map((i) => [i.intent, i.n]),
+)}
 <h2>Карточки (7 дней)</h2>
-${table(["Тип", "Статус", "Количество"], v.cards.map((c) => [c.kind, c.status, c.n]))}`;
+${table(
+  ["Тип", "Статус", "Количество"],
+  v.cards.map((c) => [c.kind, c.status, c.n]),
+)}`;
 }

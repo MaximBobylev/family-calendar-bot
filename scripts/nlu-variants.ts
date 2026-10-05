@@ -101,15 +101,27 @@ const D_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
       type: "function",
       function: {
         name: "create_event",
-        description: "Create a NEW calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
+        description:
+          "Create a NEW calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
         parameters: {
           type: "object",
           properties: {
-            start: str("All date and time words copied verbatim, including the day and the end of an interval: «завтра в 15:30», «в пятницу с часу до двух», «с 10 по 20 ноября». Omit if the message has no date or time."),
-            duration: str("Only an explicitly said length, verbatim: «на полчаса», «на два часа». The end of an interval («до 14») belongs to start. Omit if not said."),
-            all_day: { type: "boolean", description: "true only for birthdays, anniversaries, holidays, days off, vacations and trips. Do not set it just because no time was said." },
-            calendar: str("If the user explicitly named or clearly referred to a calendar, its exact name from the user's calendar list; resolve informal forms («в семейный» → «Семья» if listed). Never invent a calendar. Omit if none was referred to or none matches."),
-            title: str("Event name only, without date/time/duration words and command verbs: «Созвон с Петей», «Стоматолог». Omit if only a generic word was said («встречу», «событие», «meeting»)."),
+            start: str(
+              "All date and time words copied verbatim, including the day and the end of an interval: «завтра в 15:30», «в пятницу с часу до двух», «с 10 по 20 ноября». Omit if the message has no date or time.",
+            ),
+            duration: str(
+              "Only an explicitly said length, verbatim: «на полчаса», «на два часа». The end of an interval («до 14») belongs to start. Omit if not said.",
+            ),
+            all_day: {
+              type: "boolean",
+              description: "true only for birthdays, anniversaries, holidays, days off, vacations and trips. Do not set it just because no time was said.",
+            },
+            calendar: str(
+              "If the user explicitly named or clearly referred to a calendar, its exact name from the user's calendar list; resolve informal forms («в семейный» → «Семья» if listed). Never invent a calendar. Omit if none was referred to or none matches.",
+            ),
+            title: str(
+              "Event name only, without date/time/duration words and command verbs: «Созвон с Петей», «Стоматолог». Omit if only a generic word was said («встречу», «событие», «meeting»).",
+            ),
           },
         },
       },
@@ -124,7 +136,9 @@ const D_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
           type: "object",
           properties: {
             range: str("The period exactly as the user said it, without computing dates: «завтра», «на этой неделе», «в пятницу после обеда»."),
-            calendar: str("If the user explicitly named or clearly referred to a calendar, its exact name from the user's calendar list («в семейном» → «Семья» if listed). Never invent a calendar. Omit otherwise."),
+            calendar: str(
+              "If the user explicitly named or clearly referred to a calendar, its exact name from the user's calendar list («в семейном» → «Семья» if listed). Never invent a calendar. Omit otherwise.",
+            ),
           },
           required: ["range"],
         },
@@ -132,14 +146,25 @@ const D_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
     };
   }
   if (t.function.name === "delete_event") {
-    return { ...t, function: { ...t.function, description: "Delete or cancel an EXISTING event: «удали встречу с Петей», «отмени планёрку в пятницу», «убери обед», «встреча с Машей отменяется»." } };
+    return {
+      ...t,
+      function: {
+        ...t.function,
+        description: "Delete or cancel an EXISTING event: «удали встречу с Петей», «отмени планёрку в пятницу», «убери обед», «встреча с Машей отменяется».",
+      },
+    };
   }
   if (t.function.name === "unsupported") {
-    return { ...t, function: { ...t.function, description: "The message is not about the user's calendar (weather, small talk, general questions, other tasks), or no other tool fits." } };
+    return {
+      ...t,
+      function: {
+        ...t.function,
+        description: "The message is not about the user's calendar (weather, small talk, general questions, other tasks), or no other tool fits.",
+      },
+    };
   }
   return t;
 });
-
 
 // --- E: A + точечные контрастные примеры по ошибкам A (короткое название, календарь до названия, два запроса) ---
 const E_PROMPT = SYSTEM_PROMPT;

@@ -31,7 +31,10 @@ function pseudonyms(ctx: AppContext): Pseudo {
   const key = pseudonymKey(ctx.config.tokenEncryptionKey);
   return (id) => {
     let p = memo.get(id);
-    if (!p) memo.set(id, (p = key.then((k) => pseudonym(k, id))));
+    if (!p) {
+      p = key.then((k) => pseudonym(k, id));
+      memo.set(id, p);
+    }
     return p;
   };
 }
@@ -202,7 +205,9 @@ async function reveal(
   if (!row) return render("Нет записи", "/admin/journal", `<h1>Запись не найдена</h1>`, 404);
   const form = await request.formData().catch(() => null);
   const reason = String(form?.get("reason") ?? "").trim();
-  const note = String(form?.get("note") ?? "").trim().slice(0, 200);
+  const note = String(form?.get("note") ?? "")
+    .trim()
+    .slice(0, 200);
   let error: string | undefined;
   if (!(REVEAL_REASONS as readonly string[]).includes(reason)) error = "Укажите причину показа.";
   else if (reason === "Другое" && note.length < 3) error = "Для «Другое» опишите причину в комментарии.";

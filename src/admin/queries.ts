@@ -50,7 +50,16 @@ export async function inboxHealth(db: D1Database, now: number): Promise<InboxHea
        FROM inbox`,
     )
     .bind(now - HOUR_MS, now - DAY_MS)
-    .first<{ pending: number; processing: number; oldest: number | null; recv_hour: number; recv_day: number; failed_hour: number; failed_day: number; retried_day: number }>();
+    .first<{
+      pending: number;
+      processing: number;
+      oldest: number | null;
+      recv_hour: number;
+      recv_day: number;
+      failed_hour: number;
+      failed_day: number;
+      retried_day: number;
+    }>();
   return {
     pending: r?.pending ?? 0,
     processing: r?.processing ?? 0,

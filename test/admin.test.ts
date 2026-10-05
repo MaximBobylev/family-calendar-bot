@@ -83,7 +83,7 @@ describe("«В тест»", () => {
   it("dates snippet: one case per fragment, expectation = current parse", () => {
     const r = replay("Созвон с Петей завтра в 15:30 на полчаса", now.now, now.tz, "create_event");
     expect(datesSnippet(r, now.now, now.tz, "adm-1")).toContain(
-      ['- id: adm-1-1', '  text: "завтра в 15:30"', "  kind: point", `  now: "${NOW}"`, `  tz: ${TZ}`, '  expect: { datetime: "2026-10-08T15:30" }'].join("\n"),
+      ["- id: adm-1-1", '  text: "завтра в 15:30"', "  kind: point", `  now: "${NOW}"`, `  tz: ${TZ}`, '  expect: { datetime: "2026-10-08T15:30" }'].join("\n"),
     );
     expect(datesSnippet(replay("Позвонить Ане", NOW, TZ, null), NOW, TZ, "x")).toContain("заготовки нет");
   });

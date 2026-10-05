@@ -21,7 +21,8 @@ export interface JournalFilterView {
 }
 
 export function journalListBody(items: JournalListItem[], f: JournalFilterView, nextBefore: number | null): string {
-  const opt = (value: string, current: string | undefined, label = value) => `<option value="${esc(value)}"${value === (current ?? "") ? " selected" : ""}>${esc(label)}</option>`;
+  const opt = (value: string, current: string | undefined, label = value) =>
+    `<option value="${esc(value)}"${value === (current ?? "") ? " selected" : ""}>${esc(label)}</option>`;
   const filters = `<form class="inline" method="get" action="/admin/journal">
   <label>Пользователь<input name="u" value="${esc(f.u ?? "")}" placeholder="u-3f9a2c" size="10"></label>
   <label>Тип<select name="kind">${opt("", f.kind, "все")}${opt("llm", f.kind)}${opt("stt", f.kind)}</select></label>

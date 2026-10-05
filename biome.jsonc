@@ -3,24 +3,7 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": [
-      "src/**/*.ts",
-      "scripts/**/*.ts",
-      "test/**/*.ts",
-      "acceptance/**/*.ts",
-      "!worker-configuration.d.ts",
-      // TODO: отформатировать после того, как лягут параллельные работы (NLU-эксперименты и админка):
-      // файлы ниже сейчас правятся в других ветках работы, формат — отдельным коммитом потом
-      "!src/nlu",
-      "!scripts/eval-intents.ts",
-      "!scripts/nlu-variants.ts",
-      "!src/admin.ts",
-      "!src/admin",
-      "!src/db/ops-state.ts",
-      "!src/index.ts",
-      "!src/pages.ts",
-      "!acceptance/runner.ts"
-    ]
+    "includes": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "acceptance/**/*.ts", "!worker-configuration.d.ts"]
   },
   "formatter": {
     "enabled": true,

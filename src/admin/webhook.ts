@@ -13,9 +13,7 @@ export interface WebhookInfo {
   max_connections?: number;
 }
 
-export type WebhookStatus =
-  | { ok: true; info: WebhookInfo; fetchedAt: number; cached: boolean }
-  | { ok: false; error: string };
+export type WebhookStatus = { ok: true; info: WebhookInfo; fetchedAt: number; cached: boolean } | { ok: false; error: string };
 
 const CACHE_KEY = "webhook_info";
 const CACHE_MS = 60_000;

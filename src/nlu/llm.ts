@@ -34,29 +34,27 @@ export interface LlmResult {
   tokensOut: number;
 }
 
-export async function callTools(
-  cfg: LlmConfig,
-  system: string,
-  user: string,
-  tools: ToolDefinition[],
-  opts: CallOptions = {},
-): Promise<LlmResult> {
-  const res = await fetchWithTimeout(`${cfg.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify({
-      model: cfg.model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      tools,
-      tool_choice: "required",
-      max_tokens: opts.maxTokens ?? 300,
-      ...opts.extraBody,
-    }),
-  }, TIMEOUTS.llm);
+export async function callTools(cfg: LlmConfig, system: string, user: string, tools: ToolDefinition[], opts: CallOptions = {}): Promise<LlmResult> {
+  const res = await fetchWithTimeout(
+    `${cfg.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        tools,
+        tool_choice: "required",
+        max_tokens: opts.maxTokens ?? 300,
+        ...opts.extraBody,
+      }),
+    },
+    TIMEOUTS.llm,
+  );
   if (!res.ok) throw new Error(`llm ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as {
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];

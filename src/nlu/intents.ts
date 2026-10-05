@@ -54,12 +54,15 @@ export const TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "create_event",
-      description: "Create a new calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
+      description:
+        "Create a new calendar event: «поставь встречу в среду в 12», «созвон с Петей завтра в 15:30 на полчаса», «отпуск с 10 по 20 ноября», «завтра день рождения мамы».",
       parameters: {
         type: "object",
         // Порядок важен: маленькие модели обрывают JSON на полях после title — title последним
         properties: {
-          start: str("All date and time words copied verbatim, including the day and the end of a range: «завтра в 15:30», «в пятницу с часу до двух», «с 10 по 20 ноября»."),
+          start: str(
+            "All date and time words copied verbatim, including the day and the end of a range: «завтра в 15:30», «в пятницу с часу до двух», «с 10 по 20 ноября».",
+          ),
           duration: str("Duration words verbatim: «на полчаса», «на два часа». Omit if not said."),
           all_day: { type: "boolean", description: "true for birthdays, anniversaries, holidays, vacations, whole-day events." },
           calendar: str("Only if the user explicitly named a calendar in this message: its name exactly as in the user's calendar list."),
@@ -73,14 +76,23 @@ export const TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "modify_event",
-      description: "Move or change an EXISTING event: «перенеси встречу с Петей на пятницу», «сдвинь созвон на час позже», «переименуй планёрку в Стендап», «сделай встречу на полтора часа».",
+      description:
+        "Move or change an EXISTING event: «перенеси встречу с Петей на пятницу», «сдвинь созвон на час позже», «переименуй планёрку в Стендап», «сделай встречу на полтора часа».",
       parameters: {
         type: "object",
         properties: {
           event: str("Which event, without date/time words: «встречу с Петей», «планёрку», «созвон». Omit if referred to only as «её», «следующую», «вторую»."),
-          reference: { type: "string", enum: ["next", "last", "list"], description: "«следующую встречу» → next; «её», «эту», «последнюю» → last; «вторую», «третью» (from a shown list) → list." },
+          reference: {
+            type: "string",
+            enum: ["next", "last", "list"],
+            description: "«следующую встречу» → next; «её», «эту», «последнюю» → last; «вторую», «третью» (from a shown list) → list.",
+          },
           list_index: { type: "integer", description: "Position for reference=list: «вторую» → 2." },
-          scope: { type: "string", enum: ["this", "all"], description: "For recurring events: «все планёрки», «всю серию» → all; «только эту», «в этот понедельник» → this. Omit if not said." },
+          scope: {
+            type: "string",
+            enum: ["this", "all"],
+            description: "For recurring events: «все планёрки», «всю серию» → all; «только эту», «в этот понедельник» → this. Omit if not said.",
+          },
           new_location: str("New place if the user sets one."),
           new_title: str("New name if the user renames the event: «переименуй в Ревью дизайна» → «Ревью дизайна»."),
         },
@@ -180,7 +192,10 @@ export function intentFromCalls(toolCalls: ToolCall[]): Intent {
     return {
       name: "create_event",
       start: typeof a.start === "string" ? a.start : "",
-      ...opt("title"), ...opt("duration"), ...opt("calendar"), ...opt("location"),
+      ...opt("title"),
+      ...opt("duration"),
+      ...opt("calendar"),
+      ...opt("location"),
       ...(a.all_day === true ? { allDay: true } : {}),
     } as CreateEventIntent;
   }

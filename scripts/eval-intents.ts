@@ -21,7 +21,10 @@ import { VARIANTS } from "./nlu-variants";
 
 // --- Набор ----------------------------------------------------------------------------------------
 
-interface Calendar { title: string; aliases: string[] }
+interface Calendar {
+  title: string;
+  aliases: string[];
+}
 interface Case {
   id: string;
   cat: string;
@@ -81,7 +84,13 @@ const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
 };
-const list = (s: string | undefined) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : []);
+const list = (s: string | undefined) =>
+  s
+    ? s
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : [];
 
 // --- Оценка ---------------------------------------------------------------------------------------
 
@@ -106,9 +115,12 @@ function downstream(c: Case, intent: Intent): Outcome {
   if (eff.name === "create_event") {
     const rec = extractRecurrenceSpan(c.text, now, tz);
     const spans = extractDateSpans(rec ? rec.rest : c.text, now, tz, "point");
-    const startText = rec ? undefined : spans.point ?? (eff.start || undefined);
+    const startText = rec ? undefined : (spans.point ?? (eff.start || undefined));
     const durationText = spans.duration ?? eff.duration;
-    out.title = cleanTitle(eff.title, [rec?.span, rec ? eff.start : undefined, startText, durationText].filter((x): x is string => !!x));
+    out.title = cleanTitle(
+      eff.title,
+      [rec?.span, rec ? eff.start : undefined, startText, durationText].filter((x): x is string => !!x),
+    );
     // create-event.ts: диапазон дат без времени («с 5 по 8 декабря») — всегда на весь день, флаг не нужен
     const parsed = startText ? parseDateFragment({ text: startText, kind: "point", now, tz }) : undefined;
     const values = !parsed || "error" in parsed ? [] : "ambiguous" in parsed ? parsed.ambiguous : [parsed];
@@ -128,18 +140,28 @@ function downstream(c: Case, intent: Intent): Outcome {
 }
 
 const norm = (s: string | undefined | null) =>
-  (s ?? "").toLowerCase().replaceAll("ё", "е").replace(/[«»"'.,!?:;()\-—]/g, " ").replace(/\s+/g, " ").trim();
+  (s ?? "")
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replace(/[«»"'.,!?:;()\-—]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 const asList = <T>(v: T | T[]) => (Array.isArray(v) ? v : [v]);
 
-interface Check { intent: boolean; title?: boolean; calendar?: boolean; allDay?: boolean }
+interface Check {
+  intent: boolean;
+  title?: boolean;
+  calendar?: boolean;
+  allDay?: boolean;
+}
 function check(c: Case, o: Outcome): Check {
   const intentOk = asList(c.intent).includes(o.intent);
   const r: Check = { intent: intentOk };
   // Поля create/list проверяем, только если ожидается и получен нужный интент — иначе ошибка уже в intent
   const fieldsApply = intentOk && (o.intent === "create_event" || o.intent === "list_events");
-  if (fieldsApply && c.title !== undefined && o.intent === "create_event")
-    r.title = asList(c.title).some((t) => norm(t) === norm(o.title));
-  if (fieldsApply && c.calendar !== undefined) r.calendar = asList(c.calendar).some((k) => (k === "?" ? !!o.calendar?.startsWith("?") : (k ?? undefined) === o.calendar));
+  if (fieldsApply && c.title !== undefined && o.intent === "create_event") r.title = asList(c.title).some((t) => norm(t) === norm(o.title));
+  if (fieldsApply && c.calendar !== undefined)
+    r.calendar = asList(c.calendar).some((k) => (k === "?" ? !!o.calendar?.startsWith("?") : (k ?? undefined) === o.calendar));
   if (fieldsApply && c.all_day !== undefined && o.intent === "create_event") r.allDay = c.all_day === o.allDay;
   return r;
 }
@@ -196,7 +218,12 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
     const calls = (parsed.toolCalls ?? []).map((k) => ({ name: k.name, raw: k.rawArguments }));
     const brokenJson = calls.some((k) => {
       if (k.raw === undefined || typeof k.raw !== "string") return false;
-      try { JSON.parse(k.raw); return false; } catch { return true; }
+      try {
+        JSON.parse(k.raw);
+        return false;
+      } catch {
+        return true;
+      }
     });
     return grade({ ...base, ms, tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, calls, brokenJson });
   } catch (e) {
@@ -215,14 +242,17 @@ function grade(r: Run): Run {
 
 async function pool<T>(items: (() => Promise<T>)[], n: number, onDone: (done: number) => void): Promise<T[]> {
   const out: T[] = new Array(items.length);
-  let next = 0, done = 0;
-  await Promise.all(Array.from({ length: n }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await items[i]!();
-      onDone(++done);
-    }
-  }));
+  let next = 0,
+    done = 0;
+  await Promise.all(
+    Array.from({ length: n }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await items[i]!();
+        onDone(++done);
+      }
+    }),
+  );
   return out;
 }
 
@@ -241,7 +271,9 @@ function summarize(runs: Run[], showFailures: boolean): string {
   const cases = new Map(SET.cases.map((c) => [c.id, c]));
   const allExamples = new Set(Object.values(VARIANTS).flatMap((v) => v.examples.map(norm)));
   const lines: string[] = [];
-  lines.push("| Вариант | Модель | Прогонов | Все поля | Все поля (отлож.) | Интент | Интент до глаголов | Название | Календарь | Весь день | Пусто/ошибка/битый JSON | start полный | p50, мс | p95, мс | Ток. вх/вых | $ на 1k |");
+  lines.push(
+    "| Вариант | Модель | Прогонов | Все поля | Все поля (отлож.) | Интент | Интент до глаголов | Название | Календарь | Весь день | Пусто/ошибка/битый JSON | start полный | p50, мс | p95, мс | Ток. вх/вых | $ на 1k |",
+  );
   lines.push("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   const failures: string[] = [];
   for (const [key, rs] of byKey) {
@@ -285,14 +317,17 @@ function summarize(runs: Run[], showFailures: boolean): string {
       }
     }
   }
-  return lines.join("\n") + (failures.length ? "\n\n## Ошибки по фразам\n" + failures.join("\n") : "");
+  return `${lines.join("\n")}${failures.length ? `\n\n## Ошибки по фразам\n${failures.join("\n")}` : ""}`;
 }
 
 // --- main -----------------------------------------------------------------------------------------
 
 const reportFiles = list(arg("report"));
 if (reportFiles.length) {
-  const runs = reportFiles.flatMap((f) => JSON.parse(readFileSync(f, "utf8")) as Run[]).filter((r) => SET.cases.some((k) => k.id === r.caseId)).map(grade);
+  const runs = reportFiles
+    .flatMap((f) => JSON.parse(readFileSync(f, "utf8")) as Run[])
+    .filter((r) => SET.cases.some((k) => k.id === r.caseId))
+    .map(grade);
   console.log(summarize(runs, process.argv.includes("--failures")));
 } else {
   if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.LLM_API_KEY) throw new Error("нужны CLOUDFLARE_ACCOUNT_ID и LLM_API_KEY (сервис deploy)");

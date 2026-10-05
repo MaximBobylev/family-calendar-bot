@@ -59,9 +59,17 @@ function webhookSection(v: HealthView): string {
   if (!v.webhook.ok) return `<p class="err">Не удалось получить состояние: ${esc(v.webhook.error)}</p>`;
   const i = v.webhook.info;
   const rows: unknown[][] = [
-    ["URL", raw(`<code>${esc(i.url || "(не установлен)")}</code>${i.url === v.expectedWebhookUrl ? "" : ` <span class="err">≠ ожидаемого ${esc(v.expectedWebhookUrl)}</span>`}`)],
+    [
+      "URL",
+      raw(
+        `<code>${esc(i.url || "(не установлен)")}</code>${i.url === v.expectedWebhookUrl ? "" : ` <span class="err">≠ ожидаемого ${esc(v.expectedWebhookUrl)}</span>`}`,
+      ),
+    ],
     ["Ожидают доставки (pending_update_count)", i.pending_update_count],
-    ["Последняя ошибка", i.last_error_date ? `${fmtTime(i.last_error_date * 1000)} (${fmtAge(i.last_error_date * 1000, v.now)}): ${i.last_error_message ?? ""}` : "нет"],
+    [
+      "Последняя ошибка",
+      i.last_error_date ? `${fmtTime(i.last_error_date * 1000)} (${fmtAge(i.last_error_date * 1000, v.now)}): ${i.last_error_message ?? ""}` : "нет",
+    ],
   ];
   if (i.max_connections) rows.push(["max_connections", i.max_connections]);
   return `${table(["", ""], rows)}<p class="muted">getWebhookInfo: ${v.webhook.cached ? "из кеша" : "запрошено"} ${fmtAge(v.webhook.fetchedAt, v.now)} (кеш 1 мин)</p>`;
@@ -98,7 +106,11 @@ ${webhookSection(v)}
   <div class="card">С повтором за сутки<b>${i.retriedDay}</b></div>
 </div>
 <h2>Ошибки обработки (последние 10, тексты замаскированы)</h2>
-${table(["Время", "update_id", "Попыток", "Ошибка"], v.inboxFailures.map((f) => [fmtTime(f.received_at), f.update_id, f.attempts, raw(`<code class="err">${esc(f.maskedError)}</code>`)]), "ошибок нет")}
+${table(
+  ["Время", "update_id", "Попыток", "Ошибка"],
+  v.inboxFailures.map((f) => [fmtTime(f.received_at), f.update_id, f.attempts, raw(`<code class="err">${esc(f.maskedError)}</code>`)]),
+  "ошибок нет",
+)}
 
 <h2 id="jobs">Задачи планировщика ${badge(levels[2]![1])}</h2>
 <div class="cards">
@@ -127,7 +139,10 @@ ${table(
   ["", "Когда"],
   [
     ["Последний прогон (раз в минуту)", v.lastTick ? `${fmtTime(v.lastTick.updated_at)} · ${fmtAge(v.lastTick.updated_at, v.now)}` : "нет данных"],
-    ["Часовые работы (ретеншн, страховка дайджестов)", v.lastHourly ? `${fmtTime(v.lastHourly.updated_at)} · ${fmtAge(v.lastHourly.updated_at, v.now)}` : "нет данных"],
+    [
+      "Часовые работы (ретеншн, страховка дайджестов)",
+      v.lastHourly ? `${fmtTime(v.lastHourly.updated_at)} · ${fmtAge(v.lastHourly.updated_at, v.now)}` : "нет данных",
+    ],
   ],
 )}
 
