@@ -34,6 +34,8 @@ export interface Recurrence {
   /** "HH:MM" */
   time?: string;
   warning?: "skips_short_months";
+  /** by_month_day 29–31 в месяце без такого числа: пропустить (как RRULE по умолчанию) или последний день месяца. */
+  short_months?: "skip" | "last_day";
 }
 
 export type ParseError = "unparseable" | "in_past" | "invalid_date" | "invalid_time" | "empty";

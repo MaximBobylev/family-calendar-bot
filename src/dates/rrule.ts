@@ -38,7 +38,10 @@ function matchesPattern(r: Recurrence, day: Day, anchor?: Day): boolean {
     case "monthly":
       if (r.by_set_pos !== undefined && r.by_day?.length) return r.by_day.some((wd) => nthWeekdayOfMonth(day, wd, r.by_set_pos!) === day);
       if (r.by_month_day === -1) return p.date === daysInMonth(p.year, p.month);
-      if (r.by_month_day !== undefined) return p.date === r.by_month_day;
+      if (r.by_month_day !== undefined) {
+        const last = daysInMonth(p.year, p.month);
+        return p.date === (r.short_months === "last_day" ? Math.min(r.by_month_day, last) : r.by_month_day);
+      }
       return anchor === undefined || p.date === parts(anchor).date;
     case "yearly": {
       const a = anchor !== undefined ? parts(anchor) : undefined;
@@ -96,7 +99,11 @@ export function toRRule(r: Recurrence, start: Moment, tz: string, allDay: boolea
   }
   if (r.freq === "monthly") {
     if (r.by_set_pos !== undefined && r.by_day?.length) parts_.push(`BYDAY=${r.by_day.map((d) => `${r.by_set_pos}${RRULE_DAY[d]}`).join(",")}`);
-    else if (r.by_month_day !== undefined) parts_.push(`BYMONTHDAY=${r.by_month_day}`);
+    else if (r.by_month_day !== undefined && r.by_month_day > 28 && r.short_months === "last_day") {
+      // Последний из дней 28…N, который есть в месяце: 31 → 30 ноября, 28/29 февраля
+      const days = Array.from({ length: r.by_month_day - 27 }, (_, i) => 28 + i);
+      parts_.push(`BYMONTHDAY=${days.join(",")}`, "BYSETPOS=-1");
+    } else if (r.by_month_day !== undefined) parts_.push(`BYMONTHDAY=${r.by_month_day}`);
   }
   if (r.freq === "yearly") {
     if (r.by_month) parts_.push(`BYMONTH=${r.by_month}`);
@@ -150,6 +157,8 @@ export function describeRecurrence(r: Recurrence, start: Day, locale: string): s
         text = en ? `Every ${r.by_set_pos === -1 ? "last" : `#${r.by_set_pos}`} ${EN_DAY[wd]} of the month` : `В ${FEMININE.has(wd) ? pos[1] : pos[0]} ${RU_DAY_ACC[wd]} месяца`;
       } else if (r.by_month_day === -1) text = en ? "On the last day of every month" : "В последний день месяца";
       else text = en ? `Every month on day ${r.by_month_day ?? parts(start).date}` : `Каждый месяц ${r.by_month_day ?? parts(start).date}-го`;
+      if (r.short_months === "last_day") text += en ? " (or the last day of the month)" : " (или в последний день месяца)";
+      else if (r.short_months === "skip") text += en ? ", skipping shorter months" : ", короткие месяцы пропускаются";
       if (n > 1 && !en) text += `, раз в ${n} месяца`;
       break;
     case "yearly": {

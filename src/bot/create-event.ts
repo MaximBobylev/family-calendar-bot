@@ -3,7 +3,7 @@
 // US-32: повторяющиеся — правило словами и три ближайшие даты в карточке; серия начинается с первой даты.
 
 import type { CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
-import { addMinutes, formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
+import { addMinutes, formatMoment, localToUtc, parseLocal, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
 import { parseDateFragment, type ParseValue, type Recurrence } from "../dates";
 import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
@@ -59,8 +59,8 @@ export interface SeriesInfo {
   text: string;
   /** Ближайшие даты, начиная с первой (она же начало серии). */
   next: Day[];
-  /** Число месяца, которого нет в коротких месяцах (29–31). */
-  skipsDay?: number;
+  /** Вариант для 29–31 числа (выбирается кнопкой): пропускать короткие месяцы или ставить на последний день. */
+  shortMonths?: "skip" | "last_day";
 }
 
 export interface CreateCardPayload {
@@ -100,7 +100,6 @@ function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boo
   }
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
   if (showCalendar) lines.push(`🗓 ${escapeHtml(o.calendarTitle)}`);
-  if (o.series?.skipsDay) lines.push("", t("seriesSkipsShortMonths", locale, { day: String(o.series.skipsDay) }));
   return lines.join("\n");
 }
 
@@ -212,20 +211,27 @@ function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string
   const next = occurrences(r, from, SERIES_PREVIEW);
   if (next.length === 0) return { kind: "reply", text: t("seriesNoDates", locale) };
 
-  const first = next[0]!;
   const base = optionBase(draft, cal, tz, locale);
-  const start: Moment = { day: first, minutes };
-  const end = addMinutes(start, duration);
-  const series: SeriesInfo = {
-    rrule: toRRule(r, start, tz, allDay),
-    text: describeRecurrence(r, first, locale),
-    next,
-    ...(r.warning === "skips_short_months" && r.by_month_day ? { skipsDay: r.by_month_day } : {}),
+  const option = (rule: Recurrence, dates: Day[]): CreateOption => {
+    const first = dates[0]!;
+    const start: Moment = { day: first, minutes };
+    const end = addMinutes(start, duration);
+    const series: SeriesInfo = {
+      rrule: toRRule(rule, start, tz, allDay),
+      text: describeRecurrence(rule, first, locale),
+      next: dates,
+      ...(rule.short_months ? { shortMonths: rule.short_months } : {}),
+    };
+    return allDay
+      ? { ...base, allDay: true, startDay: first, endDay: first, series }
+      : { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day, series };
   };
-  const option: CreateOption = allDay
-    ? { ...base, allDay: true, startDay: first, endDay: first, series }
-    : { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day, series };
-  return { kind: "options", options: [option] };
+  // 29–31 число: в коротких месяцах такого дня нет — спрашиваем, пропускать или ставить на последний день
+  if (r.warning === "skips_short_months" && !r.count && !r.until) {
+    const variants = (["skip", "last_day"] as const).map((short_months) => ({ ...r, short_months }));
+    return { kind: "options", options: variants.map((v) => option(v, occurrences(v, from, SERIES_PREVIEW))) };
+  }
+  return { kind: "options", options: [option(r, next)] };
 }
 
 // --- Сценарий --------------------------------------------------------------
@@ -280,6 +286,25 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     const overlaps = await findOverlaps(provider, o, calendars);
     if (overlaps.length) text += `\n\n${t("overlap", locale, { list: overlaps.join(", ") })}`;
     buttons = [[{ text: t("createButton", locale), callback_data: callbackData(actionId, "c0") }, { text: t("cancelButton", locale), callback_data: callbackData(actionId, "x") }]];
+  } else if (res.options[0]!.series?.shortMonths) {
+    // Серия на 29–31 число: как быть с короткими месяцами (US-32)
+    const [skip, last] = res.options as [CreateOption, CreateOption];
+    const time = skip.allDay ? t("allDayLower", locale) : `${hhmm(skip.start!.minutes)}–${hhmm(skip.end!.minutes)}`;
+    const dates = (o: CreateOption) => o.series!.next.map((d) => dateLabel(d, now.day, locale)).join(" · ");
+    const day = String(parts(skip.series!.next[0]!).date);
+    text = [
+      t("createSeriesConfirm", locale), "",
+      `<b>${escapeHtml(skip.title)}</b>`,
+      `🔁 ${t("seriesMonthly", locale, { day })}, ${time}`,
+      ...(showCalendar ? [`🗓 ${escapeHtml(skip.calendarTitle)}`] : []), "",
+      t("seriesShortMonthsQuestion", locale, { day }),
+      `• ${t("seriesSkipOption", locale)}: ${dates(skip)}`,
+      `• ${t("seriesLastDayOption", locale)}: ${dates(last)}`,
+    ].join("\n");
+    buttons = [
+      [{ text: t("seriesSkipButton", locale), callback_data: callbackData(actionId, "c0") }, { text: t("seriesLastDayButton", locale), callback_data: callbackData(actionId, "c1") }],
+      [{ text: t("cancelButton", locale), callback_data: callbackData(actionId, "x") }],
+    ];
   } else {
     // Неоднозначная дата: вместо «Создать» — кнопка на каждый вариант (US-30)
     const first = res.options[0]!;

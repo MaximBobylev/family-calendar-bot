@@ -73,13 +73,39 @@
         calendar: ivan@gmail.com
         events: [{ summary: "Ретро", start: "2026-10-08T15:00:00+03:00", end: "2026-10-08T15:30:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH"] }]
 
-- id: recurring-31st-warns-about-short-months
+- id: recurring-31st-last-day-of-short-months
   story: US-32
   steps:
     - *setup
     - telegram: { from: 1001, text: "Оплата квартиры 31 числа каждого месяца в 12" }
     - expect_telegram:
-        - text_contains: ["🔁 Каждый месяц 31-го, 12:00–13:00", "Ближайшие: сб, 31 октября · чт, 31 декабря", "В месяцах, где нет 31-го числа, встречи не будет"]
+        - text_contains:
+            - "🔁 Каждый месяц 31-го, 12:00–13:00"
+            - "Не во всех месяцах есть 31-е число"
+            - "• пропускать: сб, 31 октября · чт, 31 декабря · вс, 31 января 2027 г."
+            - "• в последний день месяца: сб, 31 октября · пн, 30 ноября · чт, 31 декабря"
+          buttons: ["Пропускать", "В последний день", "Отмена"]
+    - press: "В последний день"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "Каждый месяц 31-го (или в последний день месяца)", "пн, 30 ноября"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Оплата квартиры", start: "2026-10-31T12:00:00+03:00", end: "2026-10-31T13:00:00+03:00", recurrence: ["RRULE:FREQ=MONTHLY;BYMONTHDAY=28,29,30,31;BYSETPOS=-1"] }]
+
+- id: recurring-31st-skip-short-months
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Оплата квартиры 31 числа каждого месяца в 12" }
+    - press: "Пропускать"
+    - expect_telegram:
+        - { text_contains: ["Не во всех месяцах есть 31-е число"] }
+        - { method: editMessageText, text_contains: ["✅ Создано", "Каждый месяц 31-го, короткие месяцы пропускаются"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Оплата квартиры", start: "2026-10-31T12:00:00+03:00", end: "2026-10-31T13:00:00+03:00", recurrence: ["RRULE:FREQ=MONTHLY;BYMONTHDAY=31"] }]
 
 - id: recurring-last-friday-of-month
   story: US-32
