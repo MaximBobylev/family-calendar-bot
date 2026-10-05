@@ -17,6 +17,7 @@
 | [intents.md](intents.md) | Каталог интентов: что бот умеет, какие параметры извлекает |
 | [date-rules.md](date-rules.md) | Правила разбора дат и времени, неоднозначные случаи |
 | [stretch-goals.md](stretch-goals.md) | Будущие фичи и их влияние на архитектуру |
+| [research/voice-recording-script.md](research/voice-recording-script.md) | Что и как наговорить для замера мультимодального разбора голоса (20 голосовых на человека) |
 | [tracks/multimodal-voice.md](tracks/multimodal-voice.md) | Трек: голосовая команда одним мультимодальным вызовом (Gemini и др.) — оценка, дизайн, план замера |
 | [tracks/telegram-login.md](tracks/telegram-login.md) | Трек: проверка Telegram-аккаунта при подключении Google (login_url, PKCE, привязка к браузеру) — до публичной беты |
 | [tracks/channels-calendar.md](tracks/channels-calendar.md) | Отдельный трек: календарь каналов для организаторов (отложен) |
