@@ -54,6 +54,8 @@ export interface NewEvent {
   start?: Moment;
   end?: Moment;
   location?: string;
+  /** Правила повторения RFC 5545: ["RRULE:FREQ=WEEKLY;BYDAY=MO"] (US-32). */
+  recurrence?: string[];
   /** Ключ идемпотентности: повтор с тем же ключом не создаёт второе событие. */
   idempotencyKey?: string;
 }

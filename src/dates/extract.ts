@@ -4,7 +4,7 @@
 // Незнакомое слово («с Петей», «банк») обрывает кусок — названия в даты не попадают.
 
 import { parseDateFragment } from "./index";
-import { FILLERS } from "./lexicon";
+import { FILLERS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
 import type { ParseResult, ValueKind } from "./types";
 
 export interface ExtractedSpans {
@@ -159,4 +159,39 @@ export function extractModifySpans(text: string, now: string, tz: string): Modif
     out.reference = references.length > 1 && ok(joined, "point") ? joined : references[0]!;
   }
   return out;
+}
+
+// --- Повторения (US-32) -------------------------------------------------------
+
+export interface RecurrenceSpan {
+  /** «каждый понедельник в 10», «по будням до конца года». */
+  span: string;
+  /** Текст без правила — из него берутся длительность и название. */
+  rest: string;
+}
+
+/**
+ * Правило повторения в сообщении: самый длинный кусок, который разбирается как повторение и при этом
+ * не разбирается как обычная дата — «в понедельник» остаётся разовой встречей, «каждый понедельник» и
+ * «по понедельникам» — серией.
+ */
+/** Слово, без которого правила нет: «по 20 ноября» в «с 10 по 20 ноября» — не «каждый год 20 ноября». */
+const RECURRENCE_MARKER = /^(кажд|ежедневн|еженедельн|ежемесячн|ежегодн|будн|выходным|every|each|daily|weekly|monthly|yearly|annually|weekdays|weekends|месяца$|month$|раз$)/i;
+const isRecurrenceMarker = (w: string) => RECURRENCE_MARKER.test(w) || WEEKDAYS_PLURAL_DATIVE.has(w.toLowerCase());
+
+export function extractRecurrenceSpan(text: string, now: string, tz: string): RecurrenceSpan | undefined {
+  const ws = words(text);
+  const isFiller = (w: string) => FILLERS.has(w.toLowerCase()) || w.toLowerCase() === "во";
+  const ok = (fragment: string) =>
+    fragment.split(" ").some(isRecurrenceMarker) &&
+    "recurrence" in parseDateFragment({ text: fragment, kind: "recurrence", now, tz }) &&
+    !isUsable(parseDateFragment({ text: fragment, kind: "point", now, tz }));
+  for (let i = 0; i < ws.length; i++) {
+    for (let j = ws.length; j > i; j--) {
+      if (isFiller(ws[j - 1]!)) continue;
+      const fragment = ws.slice(i, j).join(" ");
+      if (ok(fragment)) return { span: fragment, rest: [...ws.slice(0, i), ...ws.slice(j)].join(" ") };
+    }
+  }
+  return undefined;
 }

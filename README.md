@@ -37,5 +37,6 @@ docker compose up dev                             # wrangler dev (окружен
 | `acceptance/` | фейки внешних API, раннер и YAML-сценарии (ADR-0006) |
 | `src/dates/` | детерминированный парсер дат (ADR-0005 п.8) |
 | `testdata/dates/` | золотой корпус дат — переносимая спецификация (ADR-0006) |
+| `testdata/extract/`, `testdata/recurrence/` | извлечение дат из сообщения и развёртка повторений (ближайшие даты, RRULE, описание) |
 | `test/` | тесты |
 | `docs/` | спецификация, ADR, исследования |

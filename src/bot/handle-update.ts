@@ -3,7 +3,7 @@
 import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
-import { cleanTitle, extractDateSpans, extractModifySpans, looksAllDay } from "../dates/extract";
+import { cleanTitle, extractDateSpans, extractRecurrenceSpan, extractModifySpans, looksAllDay } from "../dates/extract";
 import { BARE_CANCEL, DELETE_VERBS, MASS_DELETE, MODIFY_VERBS, UNDO_PHRASE, modifyHints, modifyQuery } from "../nlu/modify-hints";
 import { hasGoogleAccount } from "../db/accounts";
 import {
@@ -111,17 +111,9 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
   if (state.awaiting) {
     await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
     if (state.awaiting.expiresAt > ctx.clock.now()) {
-      const draft = state.awaiting.draft as CreateDraft;
-      // «Весь день» в ответ на «Во сколько?» (US-31)
-      if (draft.startText && looksAllDay(text)) {
-        await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft: { ...draft, allDay: true } }));
-        return;
-      }
-      const combined = draft.startText ? `${draft.startText} ${text}` : text;
-      const now = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
-      const probe = parseDateFragment({ text: combined, kind: "point", now, tz: user.home_tz });
-      if (!("error" in probe) || probe.error === "in_past") {
-        await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft: { ...draft, startText: combined } }));
+      const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.home_tz)), user.home_tz);
+      if (draft) {
+        await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
         return;
       }
       // Не похоже на время — это новая команда
@@ -184,13 +176,16 @@ async function handleCommand(ctx: AppContext, user: User, message: TgMessage): P
       await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
       return;
     case "create_event": {
-      const spans = extractDateSpans(text, localNow, user.home_tz, "point");
-      const startText = spans.point ?? (intent.start || undefined);
+      // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
+      const rec = extractRecurrenceSpan(text, localNow, user.home_tz);
+      const spans = extractDateSpans(rec ? rec.rest : text, localNow, user.home_tz, "point");
+      const startText = rec ? undefined : spans.point ?? (intent.start || undefined);
       const durationText = spans.duration ?? intent.duration;
-      const title = cleanTitle(intent.title, [startText, durationText].filter((x): x is string => !!x));
+      const title = cleanTitle(intent.title, [rec?.span, rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x));
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
         startText,
+        recurrenceText: rec?.span,
         title,
         durationText,
         allDay: intent.allDay || looksAllDay(text) || undefined,
@@ -341,4 +336,19 @@ async function withCalendar(
     }
     return false;
   }
+}
+
+/** Ответ на «Во сколько?» / «Когда поставить?»: дополненный черновик или undefined, если это не время. */
+function completeDraft(draft: CreateDraft, text: string, now: string, tz: string): CreateDraft | undefined {
+  // «Весь день» в ответ на «Во сколько?» (US-31)
+  if ((draft.startText || draft.recurrenceText) && looksAllDay(text)) return { ...draft, allDay: true };
+  // Серия без времени: «в 10» дополняет правило (US-32)
+  if (draft.recurrenceText) {
+    const recurrenceText = `${draft.recurrenceText} ${/^\d/.test(text) ? `в ${text}` : text}`;
+    const probe = parseDateFragment({ text: recurrenceText, kind: "recurrence", now, tz });
+    return "recurrence" in probe && probe.recurrence.time ? { ...draft, recurrenceText } : undefined;
+  }
+  const combined = draft.startText ? `${draft.startText} ${text}` : text;
+  const probe = parseDateFragment({ text: combined, kind: "point", now, tz });
+  return !("error" in probe) || probe.error === "in_past" ? { ...draft, startText: combined } : undefined;
 }

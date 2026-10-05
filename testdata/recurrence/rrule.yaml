@@ -1,0 +1,64 @@
+# Повторения (src/dates/rrule.ts): ближайшие даты от «сегодня», RRULE, описание. Переносимые данные (ADR-0006).
+# «Сегодня» — среда 2026-10-07; время события — 10:00, пояс Europe/Moscow (UTC+3).
+defaults:
+  from: "2026-10-07"
+  time: "10:00"
+  tz: Europe/Moscow
+
+cases:
+  - rule: { freq: weekly, by_day: [MO] }
+    next: ["2026-10-12", "2026-10-19", "2026-10-26"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO"
+    text: "Каждый понедельник"
+  - rule: { freq: weekly, by_day: [MO, TU, WE, TH, FR], until: "2026-12-31" }
+    next: ["2026-10-07", "2026-10-08", "2026-10-09"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261231T205900Z"
+    text: "По будням до 31 декабря"
+  - rule: { freq: weekly, interval: 2, by_day: [TH] }
+    next: ["2026-10-08", "2026-10-22", "2026-11-05"]
+    rrule: "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH"
+    text: "Раз в 2 недели по четвергам"
+  - rule: { freq: weekly, by_day: [TU, TH] }
+    next: ["2026-10-08", "2026-10-13", "2026-10-15"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=TU,TH"
+    text: "По вторникам и четвергам"
+  - rule: { freq: weekly, by_day: [WE] }
+    next: ["2026-10-07", "2026-10-14", "2026-10-21"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=WE"
+    text: "Каждую среду"
+  - rule: { freq: monthly, by_day: [MO], by_set_pos: 1 }
+    next: ["2026-11-02", "2026-12-07", "2027-01-04"]
+    rrule: "RRULE:FREQ=MONTHLY;BYDAY=1MO"
+    text: "В первый понедельник месяца"
+  - rule: { freq: monthly, by_day: [FR], by_set_pos: -1 }
+    next: ["2026-10-30", "2026-11-27", "2026-12-25"]
+    rrule: "RRULE:FREQ=MONTHLY;BYDAY=-1FR"
+    text: "В последнюю пятницу месяца"
+  - rule: { freq: monthly, by_month_day: 15 }
+    next: ["2026-10-15", "2026-11-15", "2026-12-15"]
+    rrule: "RRULE:FREQ=MONTHLY;BYMONTHDAY=15"
+    text: "Каждый месяц 15-го"
+  - rule: { freq: monthly, by_month_day: 31, warning: skips_short_months }
+    next: ["2026-10-31", "2026-12-31", "2027-01-31"]
+    rrule: "RRULE:FREQ=MONTHLY;BYMONTHDAY=31"
+    text: "Каждый месяц 31-го"
+  - rule: { freq: monthly, by_month_day: -1 }
+    next: ["2026-10-31", "2026-11-30", "2026-12-31"]
+    rrule: "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1"
+    text: "В последний день месяца"
+  - rule: { freq: yearly, by_month: 3, by_month_day: 3 }
+    next: ["2027-03-03", "2028-03-03", "2029-03-03"]
+    rrule: "RRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=3"
+    text: "Каждый год 3 марта"
+  - rule: { freq: daily }
+    next: ["2026-10-07", "2026-10-08", "2026-10-09"]
+    rrule: "RRULE:FREQ=DAILY"
+    text: "Каждый день"
+  - rule: { freq: weekly, count: 2 }
+    next: ["2026-10-07", "2026-10-14"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=WE;COUNT=2"
+    text: "Каждую среду, 2 раз"
+  - rule: { freq: weekly, by_day: [MO], until: "2026-10-20" }
+    next: ["2026-10-12", "2026-10-19"]
+    rrule: "RRULE:FREQ=WEEKLY;BYDAY=MO;UNTIL=20261020T205900Z"
+    text: "Каждый понедельник до 20 октября"

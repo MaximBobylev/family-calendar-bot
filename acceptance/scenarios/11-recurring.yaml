@@ -1,0 +1,152 @@
+# US-32: создание повторяющихся событий. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+# Правило берётся из текста детерминированно (не от LLM); карточка — всегда с подтверждением,
+# правило словами и три ближайшие даты; серия начинается с первой даты не раньше «сейчас».
+
+- id: recurring-weekly
+  story: US-32
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - llm:
+          "Каждый понедельник в 10 планёрка": { tool: create_event, args: { start: "Каждый понедельник в 10", title: "Планёрка" } }
+          "Планёрка по будням в 11 до конца года": { tool: create_event, args: { start: "по будням в 11 до конца года", title: "Планёрка" } }
+          "Каждую среду в 9 зарядка": { tool: create_event, args: { start: "Каждую среду в 9", title: "Зарядка" } }
+          "Раз в две недели по четвергам в 15 ретро на полчаса": { tool: create_event, args: { start: "Раз в две недели по четвергам в 15", title: "Ретро", duration: "на полчаса" } }
+          "Оплата квартиры 31 числа каждого месяца в 12": { tool: create_event, args: { start: "31 числа каждого месяца в 12", title: "Оплата квартиры" } }
+          "Йога по вторникам": { tool: create_event, args: { start: "по вторникам", title: "Йога" } }
+          "Каждый год 3 марта день рождения мамы": { tool: create_event, args: { start: "Каждый год 3 марта", title: "День рождения мамы", all_day: true } }
+          "Отчёт в последнюю пятницу месяца в 17": { tool: create_event, args: { start: "в последнюю пятницу месяца в 17", title: "Отчёт" } }
+          "Поставь встречу в понедельник в 10": { tool: create_event, args: { start: "в понедельник в 10" } }
+    - telegram: { from: 1001, text: "Каждый понедельник в 10 планёрка" }
+    - expect_telegram:
+        - text_contains: ["Создать повторяющееся событие?", "<b>Планёрка</b>", "🔁 Каждый понедельник, 10:00–11:00", "Ближайшие: пн, 12 октября · пн, 19 октября · пн, 26 октября"]
+          buttons: ["Создать", "Отмена"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "🔁 Каждый понедельник"], buttons: ["Открыть в календаре", "↩ Отменить"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 1
+        events: [{ summary: "Планёрка", start: "2026-10-12T10:00:00+03:00", end: "2026-10-12T11:00:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO"] }]
+
+- id: recurring-weekdays-until-end-of-year-starts-today
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Планёрка по будням в 11 до конца года" }
+    - expect_telegram:
+        - text_contains: ["🔁 По будням до 31 декабря, 11:00–12:00", "Ближайшие: ср, 7 октября · чт, 8 октября · пт, 9 октября"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Планёрка", start: "2026-10-07T11:00:00+03:00", end: "2026-10-07T12:00:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;UNTIL=20261231T205900Z"] }]
+
+- id: recurring-today-already-passed-starts-next-week
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Каждую среду в 9 зарядка" }
+    - expect_telegram:
+        - text_contains: ["🔁 Каждую среду, 09:00–10:00", "Ближайшие: ср, 14 октября · ср, 21 октября · ср, 28 октября"]
+
+- id: recurring-every-other-week-with-duration
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Раз в две недели по четвергам в 15 ретро на полчаса" }
+    - expect_telegram:
+        - text_contains: ["<b>Ретро</b>", "🔁 Раз в 2 недели по четвергам, 15:00–15:30", "Ближайшие: чт, 8 октября · чт, 22 октября · чт, 5 ноября"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Ретро", start: "2026-10-08T15:00:00+03:00", end: "2026-10-08T15:30:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TH"] }]
+
+- id: recurring-31st-warns-about-short-months
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Оплата квартиры 31 числа каждого месяца в 12" }
+    - expect_telegram:
+        - text_contains: ["🔁 Каждый месяц 31-го, 12:00–13:00", "Ближайшие: сб, 31 октября · чт, 31 декабря", "В месяцах, где нет 31-го числа, встречи не будет"]
+
+- id: recurring-last-friday-of-month
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Отчёт в последнюю пятницу месяца в 17" }
+    - expect_telegram:
+        - text_contains: ["🔁 В последнюю пятницу месяца, 17:00–18:00", "Ближайшие: пт, 30 октября · пт, 27 ноября · пт, 25 декабря"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Отчёт", start: "2026-10-30T17:00:00+03:00", end: "2026-10-30T18:00:00+03:00", recurrence: ["RRULE:FREQ=MONTHLY;BYDAY=-1FR"] }]
+
+- id: recurring-without-time-asks-time
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Йога по вторникам" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    - telegram: { from: 1001, text: "в 19" }
+    - expect_telegram:
+        - text_contains: ["<b>Йога</b>", "🔁 Каждый вторник, 19:00–20:00", "Ближайшие: вт, 13 октября"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Йога", start: "2026-10-13T19:00:00+03:00", end: "2026-10-13T20:00:00+03:00", recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU"] }]
+
+- id: recurring-yearly-birthday-all-day
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Каждый год 3 марта день рождения мамы" }
+    - expect_telegram:
+        - text_contains: ["<b>День рождения мамы</b>", "🔁 Каждый год 3 марта, весь день", "3 марта 2027", "3 марта 2028"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "День рождения мамы", start: "2027-03-03", end: "2027-03-04", recurrence: ["RRULE:FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=3"] }]
+
+- id: recurring-undo-removes-whole-series
+  story: US-61
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Каждый понедельник в 10 планёрка" }
+    - press: "Создать"
+    - press: "↩ Отменить"
+    - expect_telegram:
+        - { text_contains: ["Создать повторяющееся событие?"] }
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { method: editMessageText, text_contains: ["↩ Отменено", "Планёрка"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 0 }
+
+- id: single-weekday-stays-one-off
+  story: US-32
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу в понедельник в 10" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "🕒 пн, 12 октября, 10:00–11:00"]
+          text_not_contains: ["🔁"]

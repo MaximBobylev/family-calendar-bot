@@ -116,6 +116,7 @@ Omit optional fields the user did not say. Never guess a calendar.
 If the message is not about the user's calendar, call "unsupported".
 Examples:
 "Созвон с Петей завтра в 15:30 на полчаса" → create_event {"start":"завтра в 15:30","duration":"на полчаса","title":"Созвон с Петей"}
+"Каждый понедельник в 10 планёрка" → create_event {"start":"Каждый понедельник в 10","title":"Планёрка"}
 "Отпуск с 10 по 20 ноября" → create_event {"start":"с 10 по 20 ноября","all_day":true,"title":"Отпуск"}
 "Поставь встречу на среду в 12" → create_event {"start":"на среду в 12"}
 "Tomorrow at 3pm dentist" → create_event {"start":"Tomorrow at 3pm","title":"Dentist"}

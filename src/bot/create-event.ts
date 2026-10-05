@@ -1,10 +1,12 @@
 // US-30 / US-31: создание события. Карточка-подтверждение (осторожный режим), варианты кнопками для
 // неоднозначных дат, вопрос «во сколько?», предупреждение о пересечениях, вопрос о названии.
+// US-32: повторяющиеся — правило словами и три ближайшие даты в карточке; серия начинается с первой даты.
 
 import type { CalendarInfo, CalendarProvider, EventRef } from "../calendar/model";
 import { addMinutes, formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
-import { parseDateFragment, type ParseValue } from "../dates";
+import { parseDateFragment, type ParseValue, type Recurrence } from "../dates";
+import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
 import {
   attachMessage, createPendingAction, mergeDialogState, type PendingAction,
 } from "../db/conversations";
@@ -25,6 +27,8 @@ const AWAIT_TTL_MS = 15 * 60 * 1000;
 /** Черновик создания: то, что сказал пользователь (фрагменты), — до разрешения дат. */
 export interface CreateDraft {
   startText?: string;
+  /** Правило повторения как сказано: «каждый понедельник в 10» (US-32). */
+  recurrenceText?: string;
   title?: string;
   durationText?: string;
   allDay?: boolean;
@@ -45,6 +49,18 @@ export interface CreateOption {
   start?: Moment;
   end?: Moment;
   location?: string;
+  series?: SeriesInfo;
+}
+
+/** Повторение: готовый RRULE и то, что показываем в карточке. */
+export interface SeriesInfo {
+  rrule: string;
+  /** «Каждый понедельник». */
+  text: string;
+  /** Ближайшие даты, начиная с первой (она же начало серии). */
+  next: Day[];
+  /** Число месяца, которого нет в коротких месяцах (29–31). */
+  skipsDay?: number;
 }
 
 export interface CreateCardPayload {
@@ -74,9 +90,17 @@ export function draftFromIntent(i: CreateEventIntent): CreateDraft {
 export const whenLabel = (o: CreateOption, today: Day, locale: string) => whenOf(o, today, locale);
 
 function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boolean): string {
-  const lines = [`<b>${escapeHtml(o.title)}</b>`, `🕒 ${whenLabel(o, today, locale)}`];
+  const lines = [`<b>${escapeHtml(o.title)}</b>`];
+  if (o.series) {
+    const time = o.allDay ? t("allDayLower", locale) : `${hhmm(o.start!.minutes)}–${hhmm(o.end!.minutes)}`;
+    lines.push(`🔁 ${escapeHtml(o.series.text)}, ${time}`);
+    lines.push(`📅 ${t("seriesNext", locale, { list: o.series.next.map((d) => dateLabel(d, today, locale)).join(" · ") })}`);
+  } else {
+    lines.push(`🕒 ${whenLabel(o, today, locale)}`);
+  }
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
   if (showCalendar) lines.push(`🗓 ${escapeHtml(o.calendarTitle)}`);
+  if (o.series?.skipsDay) lines.push("", t("seriesSkipsShortMonths", locale, { day: String(o.series.skipsDay) }));
   return lines.join("\n");
 }
 
@@ -98,30 +122,13 @@ function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): C
 }
 
 function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string): Resolution {
+  if (draft.recurrenceText) return resolveSeries(draft, draft.recurrenceText, now, tz, cal, locale);
   if (!draft.startText) return { kind: "ask", question: "askWhen", keepStart: false };
 
-  let duration = DEFAULT_DURATION_MIN;
-  let allDay = draft.allDay ?? false;
-  if (draft.durationText) {
-    const d = parseDateFragment({ text: draft.durationText, kind: "duration", now: formatMoment(now), tz });
-    if ("error" in d || !("duration" in d)) return { kind: "reply", text: t("durationUnparseable", locale) };
-    if (d.duration === "all_day") allDay = true;
-    else {
-      const minutes = durationToMinutes(d.duration);
-      // «на месяц» и т.п. — не длительность встречи
-      if (!minutes || minutes <= 0) return { kind: "reply", text: t("durationUnparseable", locale) };
-      duration = minutes;
-    }
-  }
-
-  const base = {
-    calendarId: cal.id,
-    calendarTitle: cal.title,
-    title: draft.title ?? t("defaultTitle", locale),
-    titleGiven: !!draft.title,
-    tz,
-    ...(draft.location ? { location: draft.location } : {}),
-  };
+  const length = resolveLength(draft, now, tz, locale);
+  if ("kind" in length) return length;
+  const { duration, allDay } = length;
+  const base = optionBase(draft, cal, tz, locale);
 
   const toOption = (v: ParseValue): CreateOption | "needTime" | null => {
     if ("datetime" in v) {
@@ -156,6 +163,69 @@ function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: Calendar
   const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
   if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
   return { kind: "options", options: ok };
+}
+
+/** Длительность и «весь день» из черновика. */
+function resolveLength(draft: CreateDraft, now: Moment, tz: string, locale: string): { duration: number; allDay: boolean } | Resolution {
+  let duration = DEFAULT_DURATION_MIN;
+  let allDay = draft.allDay ?? false;
+  if (draft.durationText) {
+    const d = parseDateFragment({ text: draft.durationText, kind: "duration", now: formatMoment(now), tz });
+    if ("error" in d || !("duration" in d)) return { kind: "reply", text: t("durationUnparseable", locale) };
+    if (d.duration === "all_day") allDay = true;
+    else {
+      const minutes = durationToMinutes(d.duration);
+      // «на месяц» и т.п. — не длительность встречи
+      if (!minutes || minutes <= 0) return { kind: "reply", text: t("durationUnparseable", locale) };
+      duration = minutes;
+    }
+  }
+  return { duration, allDay };
+}
+
+function optionBase(draft: CreateDraft, cal: CalendarInfo, tz: string, locale: string) {
+  return {
+    calendarId: cal.id,
+    calendarTitle: cal.title,
+    title: draft.title ?? t("defaultTitle", locale),
+    titleGiven: !!draft.title,
+    tz,
+    ...(draft.location ? { location: draft.location } : {}),
+  };
+}
+
+const SERIES_PREVIEW = 3;
+
+/** Серия (US-32): первая дата правила не раньше «сейчас» — начало серии; время — из правила. */
+function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string, cal: CalendarInfo, locale: string): Resolution {
+  const parsed = parseDateFragment({ text, kind: "recurrence", now: formatMoment(now), tz });
+  if (!("recurrence" in parsed)) return { kind: "ask", question: "askWhen", keepStart: false };
+  const r: Recurrence = parsed.recurrence;
+  const length = resolveLength(draft, now, tz, locale);
+  if ("kind" in length) return length;
+  const { duration, allDay } = length;
+  if (!r.time && !allDay) return { kind: "ask", question: "askTime", keepStart: true };
+
+  const minutes = r.time ? Number(r.time.slice(0, 2)) * 60 + Number(r.time.slice(3)) : 0;
+  // Сегодняшнее вхождение — только если его время ещё не прошло
+  const from = allDay || minutes > now.minutes ? now.day : now.day + 1;
+  const next = occurrences(r, from, SERIES_PREVIEW);
+  if (next.length === 0) return { kind: "reply", text: t("seriesNoDates", locale) };
+
+  const first = next[0]!;
+  const base = optionBase(draft, cal, tz, locale);
+  const start: Moment = { day: first, minutes };
+  const end = addMinutes(start, duration);
+  const series: SeriesInfo = {
+    rrule: toRRule(r, start, tz, allDay),
+    text: describeRecurrence(r, first, locale),
+    next,
+    ...(r.warning === "skips_short_months" && r.by_month_day ? { skipsDay: r.by_month_day } : {}),
+  };
+  const option: CreateOption = allDay
+    ? { ...base, allDay: true, startDay: first, endDay: first, series }
+    : { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day, series };
+  return { kind: "options", options: [option] };
 }
 
 // --- Сценарий --------------------------------------------------------------
@@ -206,7 +276,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   let buttons: InlineKeyboardButton[][];
   if (res.options.length === 1) {
     const o = res.options[0]!;
-    text = `${t("createConfirm", locale)}\n\n${cardBody(o, now.day, locale, showCalendar)}`;
+    text = `${t(o.series ? "createSeriesConfirm" : "createConfirm", locale)}\n\n${cardBody(o, now.day, locale, showCalendar)}`;
     const overlaps = await findOverlaps(provider, o, calendars);
     if (overlaps.length) text += `\n\n${t("overlap", locale, { list: overlaps.join(", ") })}`;
     buttons = [[{ text: t("createButton", locale), callback_data: callbackData(actionId, "c0") }, { text: t("cancelButton", locale), callback_data: callbackData(actionId, "x") }]];
@@ -256,6 +326,7 @@ export async function confirmCreate(
     idempotencyKey: `${action.id}${choice.slice(1)}`,
     calendarId: o.calendarId, title: o.title, tz: o.tz, allDay: o.allDay, startDay: o.startDay, endDay: o.endDay,
     ...(o.start ? { start: o.start } : {}), ...(o.end ? { end: o.end } : {}), ...(o.location ? { location: o.location } : {}),
+    ...(o.series ? { recurrence: [o.series.rrule] } : {}),
   });
 
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;

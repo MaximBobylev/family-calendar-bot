@@ -120,6 +120,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       ...(id ? { id } : {}),
       summary: e.title,
       ...(e.location ? { location: e.location } : {}),
+      ...(e.recurrence ? { recurrence: e.recurrence } : {}),
       ...time,
     });
     return {

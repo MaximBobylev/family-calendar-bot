@@ -80,6 +80,7 @@ export interface GoogleEventInput {
   description?: string;
   start?: { dateTime?: string; date?: string; timeZone?: string };
   end?: { dateTime?: string; date?: string; timeZone?: string };
+  recurrence?: string[];
   reminders?: { useDefault: boolean; overrides?: { method: "popup" | "email"; minutes: number }[] };
 }
 
