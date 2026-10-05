@@ -24,6 +24,7 @@
 | [admin-console.md](admin-console.md) | Админка: функции по этапам, приватность и доступ, алерты, «из ошибки — в тест» (предложение) |
 | [research/commercial-viability.md](research/commercial-viability.md) | Сводка независимых оценок коммерческого потенциала |
 | [research/pivot-options.md](research/pivot-options.md) | Как подкрутить идею: сводка 4 независимых оценок |
+| [research/llm-intents-eval.md](research/llm-intents-eval.md) | Замер разбора интентов: варианты промпта × модели Workers AI, решение и оставшиеся ошибки (2026-10-05) |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
 | [research/monetization-market.md](research/monetization-market.md) | Обзор рынка: модели монетизации и цены |
 | [research/monetization-evaluation.md](research/monetization-evaluation.md) | Независимая оценка вариантов монетизации |

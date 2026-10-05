@@ -1,7 +1,7 @@
 // Реестр интентов (docs/intents.md): схемы tools для LLM и разбор ответа.
 // LLM не вычисляет даты — только копирует фрагменты, как сказано (ADR-0005 п.3).
 
-import { callTools, type LlmConfig, type ToolDefinition } from "./llm";
+import { callTools, type CallOptions, type LlmConfig, type ToolCall, type ToolDefinition } from "./llm";
 
 export interface CreateEventIntent {
   name: "create_event";
@@ -110,17 +110,24 @@ export const TOOLS: ToolDefinition[] = [
   },
 ];
 
-export const SYSTEM_PROMPT = `You route a user's message (Russian or English) to exactly one calendar tool.
+// Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
+// календарь до названия, два запроса в одном сообщении. Прогон: scripts/eval-intents.ts на testdata/nlu/intents.yaml.
+export const SYSTEM_PROMPT = `You route a user's message (Russian or English, often a voice transcript) to a calendar tool.
 Copy date/time words VERBATIM from the message — never drop the day, never compute or translate dates.
-Omit optional fields the user did not say. Never guess a calendar.
-If the message is not about the user's calendar, call "unsupported".
+Omit optional fields the user did not say. title is whatever names the event, even one word («стоматолог»); a bare «встреча» is not a title.
+calendar: only if the message refers to one of the user's calendars — return that name from the list; never guess.
+Two separate requests in one message → one tool call per request. Not about the user's calendar → "unsupported".
 Examples:
 "Созвон с Петей завтра в 15:30 на полчаса" → create_event {"start":"завтра в 15:30","duration":"на полчаса","title":"Созвон с Петей"}
 "Каждый понедельник в 10 планёрка" → create_event {"start":"Каждый понедельник в 10","title":"Планёрка"}
 "Отпуск с 10 по 20 ноября" → create_event {"start":"с 10 по 20 ноября","all_day":true,"title":"Отпуск"}
 "Поставь встречу на среду в 12" → create_event {"start":"на среду в 12"}
+"Завтра в 15 стоматолог" → create_event {"start":"Завтра в 15","title":"Стоматолог"}
 "Tomorrow at 3pm dentist" → create_event {"start":"Tomorrow at 3pm","title":"Dentist"}
+"Ужин в детский календарь в субботу в 19" → create_event {"calendar":"Дети","start":"в субботу в 19","title":"Ужин"}   (when «Дети» is in the user's calendars)
+"Поставь в новый календарь завтра в 15" → create_event {"start":"завтра в 15"}   (no such calendar)
 "Что у меня в пятницу после обеда?" → list_events {"range":"в пятницу после обеда"}
+"Покажи пятницу и удали обед" → list_events {"range":"пятницу"} + delete_event {"event":"обед"}
 "Перенеси встречу с Петей на пятницу" → modify_event {"event":"встречу с Петей"}
 "Сдвинь следующую встречу на час позже" → modify_event {"reference":"next"}
 "Переименуй её в Ревью дизайна" → modify_event {"reference":"last","new_title":"Ревью дизайна"}
@@ -131,6 +138,14 @@ export interface ParsedIntent {
   intent: Intent;
   tokensIn: number;
   tokensOut: number;
+  /** Сырые вызовы от модели — для замеров. */
+  toolCalls?: ToolCall[];
+}
+
+/** Подмена промпта/схем/параметров — только для замеров (scripts/eval-intents.ts); в проде не задаётся. */
+export interface IntentOverrides extends CallOptions {
+  systemPrompt?: string;
+  tools?: ToolDefinition[];
 }
 
 export interface IntentContext {
@@ -138,38 +153,40 @@ export interface IntentContext {
   calendars: string[];
 }
 
-export async function parseIntent(cfg: LlmConfig, text: string, context: IntentContext): Promise<ParsedIntent> {
+export async function parseIntent(cfg: LlmConfig, text: string, context: IntentContext, overrides: IntentOverrides = {}): Promise<ParsedIntent> {
   // Qwen3 по умолчанию «думает»: медленно, дорого и ломает JSON аргументов — отключаем
   const noThink = /qwen3/i.test(cfg.model) ? "\n/no_think" : "";
   // Названия календарей задают третьи лица (подписки) — как данные, экранированно и коротко
   const calendars = context.calendars.map((c) => JSON.stringify(c.slice(0, 100))).join(", ");
-  const system = `${SYSTEM_PROMPT}\nUser's calendars: ${calendars}.${noThink}`;
-  const res = await callTools(cfg, system, text, TOOLS);
-  const usage = { tokensIn: res.tokensIn, tokensOut: res.tokensOut };
+  const system = `${overrides.systemPrompt ?? SYSTEM_PROMPT}\nUser's calendars: ${calendars}.${noThink}`;
+  const { systemPrompt: _p, tools, ...callOpts } = overrides;
+  const res = await callTools(cfg, system, text, tools ?? TOOLS, callOpts);
+  return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls };
+}
+
+/** Вызовы tools → интент (отдельно — чтобы замеры могли переоценить сохранённые ответы без новых вызовов). */
+export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   // В MVP — одна команда на сообщение (US-12)
-  if (res.toolCalls.length > 1) return { intent: { name: "multiple" }, ...usage };
-  const call = res.toolCalls[0];
+  if (toolCalls.length > 1) return { name: "multiple" };
+  const call = toolCalls[0];
   if (call?.name === "list_events" && typeof call.arguments.range === "string" && call.arguments.range.trim()) {
     const calendar = typeof call.arguments.calendar === "string" && call.arguments.calendar.trim() ? call.arguments.calendar : undefined;
-    return { intent: { name: "list_events", range: call.arguments.range, ...(calendar ? { calendar } : {}) }, ...usage };
+    return { name: "list_events", range: call.arguments.range, ...(calendar ? { calendar } : {}) };
   }
   if (call?.name === "create_event") {
     // start может отсутствовать — даты всё равно извлекаются из текста (src/dates/extract.ts)
     const a = call.arguments;
     const opt = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? { [k]: (a[k] as string).trim() } : {});
     return {
-      intent: {
-        name: "create_event",
-        start: typeof a.start === "string" ? a.start : "",
-        ...opt("title"), ...opt("duration"), ...opt("calendar"), ...opt("location"),
-        ...(a.all_day === true ? { allDay: true } : {}),
-      } as CreateEventIntent,
-      ...usage,
-    };
+      name: "create_event",
+      start: typeof a.start === "string" ? a.start : "",
+      ...opt("title"), ...opt("duration"), ...opt("calendar"), ...opt("location"),
+      ...(a.all_day === true ? { allDay: true } : {}),
+    } as CreateEventIntent;
   }
   if (call?.name === "delete_event") {
     const event = typeof call.arguments.event === "string" && call.arguments.event.trim() ? call.arguments.event.trim() : undefined;
-    return { intent: { name: "delete_event", ...(event ? { event } : {}) }, ...usage };
+    return { name: "delete_event", ...(event ? { event } : {}) };
   }
   if (call?.name === "modify_event") {
     const a = call.arguments;
@@ -186,7 +203,7 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
     const location = str("new_location");
     if (location) intent.newLocation = location;
     if (scope) intent.scope = scope;
-    return { intent, ...usage };
+    return intent;
   }
-  return { intent: { name: "unsupported" }, ...usage };
+  return { name: "unsupported" };
 }

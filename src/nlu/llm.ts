@@ -18,6 +18,14 @@ export interface ToolDefinition {
 export interface ToolCall {
   name: string;
   arguments: Record<string, unknown>;
+  /** Аргументы как пришли (строка JSON) — для замеров (scripts/eval-intents.ts). */
+  rawArguments?: string;
+}
+
+/** Параметры запроса сверх обычных — только для замеров других моделей (scripts/eval-intents.ts). */
+export interface CallOptions {
+  maxTokens?: number;
+  extraBody?: Record<string, unknown>;
 }
 
 export interface LlmResult {
@@ -31,6 +39,7 @@ export async function callTools(
   system: string,
   user: string,
   tools: ToolDefinition[],
+  opts: CallOptions = {},
 ): Promise<LlmResult> {
   const res = await fetchWithTimeout(`${cfg.baseUrl}/chat/completions`, {
     method: "POST",
@@ -44,7 +53,8 @@ export async function callTools(
       ],
       tools,
       tool_choice: "required",
-      max_tokens: 300,
+      max_tokens: opts.maxTokens ?? 300,
+      ...opts.extraBody,
     }),
   }, TIMEOUTS.llm);
   if (!res.ok) throw new Error(`llm ${res.status}: ${await res.text()}`);
@@ -54,7 +64,7 @@ export async function callTools(
   };
   const calls = json.choices?.[0]?.message?.tool_calls ?? [];
   return {
-    toolCalls: calls.map((c) => ({ name: c.function.name, arguments: safeParse(c.function.arguments) })),
+    toolCalls: calls.map((c) => ({ name: c.function.name, arguments: safeParse(c.function.arguments), rawArguments: c.function.arguments })),
     tokensIn: json.usage?.prompt_tokens ?? 0,
     tokensOut: json.usage?.completion_tokens ?? 0,
   };
