@@ -59,7 +59,8 @@ const openrouterKey = env.OPENROUTER_API_KEY?.trim();
 // несколько моделей через запятую, каждая — звено цепочки
 // Пока не в лайве — только бесплатные (решение 2026-10-05). Платная Gemma 4 26B — лучшая в замерах (97,3% полей,
 // ≈ $0.0002 за команду): вернуть первой перед бетой — OPENROUTER_MODEL=google/gemma-4-26b-a4b-it,…
-const OPENROUTER_DEFAULT = "google/gemma-4-26b-a4b-it:free,nvidia/nemotron-3-super-120b-a12b:free";
+// Nemotron free первым: 91,9% полей, p50 0,8 с / p95 1,6 с, 0 ошибок на 124 фразах; бесплатная Gemma почти всегда 429.
+const OPENROUTER_DEFAULT = "nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-26b-a4b-it:free";
 if (openrouterKey) {
   for (const model of (env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT)
     .split(",")
