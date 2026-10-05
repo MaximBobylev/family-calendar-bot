@@ -16,6 +16,8 @@
 //   GET  /__fake/llm/requests       — все запросы к LLM
 //   POST /__fake/telegram/files     — {file_id, content}: файл для getFile и скачивания
 //   POST /__fake/stt/fixtures       — {"<содержимое аудио>": {text} | {error: status}}
+//   GET  /__fake/google/patches     — журнал PATCH событий: {calendar, id, sendUpdates, body}
+//   POST /__fake/google/touch       — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
 //   POST /__fake/reset              — сброс состояния
 
@@ -93,6 +95,9 @@ function normalizeTimes(e: GoogleEvent, tz: string): GoogleEvent {
 }
 
 let nextEventId = 1;
+let etagSeq = 1;
+let patches: { calendar: string; id: string; sendUpdates: string | null; body: unknown }[] = [];
+const newEtag = () => `"etag-${etagSeq++}"`;
 
 function eventBounds(e: GoogleEvent, tz: string): [number, number] {
   const s = e.start.dateTime ? Date.parse(e.start.dateTime) : zonedMidnight(e.start.date!, tz);
@@ -151,11 +156,14 @@ const server = createServer(async (req, res) => {
       telegramFiles = new Map();
       sttFixtures = new Map();
       nextEventId = 1;
+      etagSeq = 1;
+      patches = [];
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
     if (url.pathname === "/__fake/google/accounts" && req.method === "POST") {
       const body = (await readJson(req)) as { email: string; calendars: GoogleCalendar[] };
+      for (const c of body.calendars) for (const e of c.events ?? []) e.etag ??= newEtag();
       googleAccounts.set(body.email, { calendars: body.calendars });
       return send(res, 200, { ok: true });
     }
@@ -198,6 +206,13 @@ const server = createServer(async (req, res) => {
       if (content === undefined) return send(res, 404, { ok: false });
       res.writeHead(200, { "content-type": "audio/ogg" });
       return res.end(content);
+    }
+    if (url.pathname === "/__fake/google/patches") return send(res, 200, patches);
+    if (url.pathname === "/__fake/google/touch" && req.method === "POST") {
+      const { email, calendar, id } = (await readJson(req)) as { email: string; calendar: string; id: string };
+      const ev = googleAccounts.get(email)?.calendars.find((c) => c.id === calendar)?.events?.find((e) => e.id === id);
+      if (ev) ev.etag = newEtag();
+      return send(res, 200, { ok: !!ev });
     }
     if (url.pathname === "/__fake/google/events") {
       const acc = googleAccounts.get(url.searchParams.get("email") ?? "");
@@ -250,14 +265,19 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, ...c }) => c) });
     }
     const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
-    if (evOne && req.method === "PATCH") {
+    if (evOne && (req.method === "PATCH" || req.method === "GET")) {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
       const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
-      if (!cal || !ev) return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      if (!cal || !ev || ev.status === "cancelled") return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      if (req.method === "GET") return send(res, 200, ev);
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
-      Object.assign(ev, normalizeTimes({ ...ev, ...(await readJson(req)) } as GoogleEvent, cal.timeZone ?? "UTC"));
+      const ifMatch = req.headers["if-match"];
+      if (ifMatch && ifMatch !== ev.etag) return send(res, 412, { error: { code: 412, message: "Precondition Failed" } });
+      const body = await readJson(req);
+      patches.push({ calendar: cal.id, id: ev.id, sendUpdates: url.searchParams.get("sendUpdates"), body });
+      Object.assign(ev, normalizeTimes({ ...ev, ...body } as GoogleEvent, cal.timeZone ?? "UTC"), { etag: newEtag() });
       return send(res, 200, ev);
     }
 
@@ -270,7 +290,7 @@ const server = createServer(async (req, res) => {
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
       const id = `new${nextEventId++}`;
       const input = (await readJson(req)) as unknown as GoogleEvent;
-      const ev = normalizeTimes({ ...input, id, status: "confirmed", htmlLink: `https://calendar.google.com/event?eid=${id}` }, cal.timeZone ?? "UTC");
+      const ev = normalizeTimes({ ...input, id, status: "confirmed", etag: newEtag(), htmlLink: `https://calendar.google.com/event?eid=${id}` }, cal.timeZone ?? "UTC");
       (cal.events ??= []).push(ev);
       return send(res, 200, ev);
     }

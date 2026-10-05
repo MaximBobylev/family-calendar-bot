@@ -25,6 +25,8 @@ type Step =
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
   | { google_revoke: string }
+  | { google_touch: { email: string; calendar: string; id: string } }
+  | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
   | { voice: { from: number; transcript?: string; duration?: number; stt_error?: number; download_fails?: boolean; reply_to_question?: boolean } }
   | { http_get: { path: string; expect_status?: number; text_contains?: string[]; location?: string } }
@@ -255,6 +257,15 @@ async function runScenario(s: Scenario): Promise<void> {
       if (h.location && !res.headers.get("location")?.endsWith(h.location)) throw new AssertionError(`${where}: location ${res.headers.get("location")}`);
       const body = await res.text();
       for (const part of h.text_contains ?? []) if (!body.includes(part)) throw new AssertionError(`${where}: GET ${h.path} does not contain «${part}»`);
+    } else if ("google_touch" in step) {
+      await post(`${FAKES}/__fake/google/touch`, step.google_touch);
+    } else if ("expect_google_patches" in step) {
+      const e = step.expect_google_patches;
+      const list = (await (await fetch(`${FAKES}/__fake/google/patches`)).json()) as { id: string; sendUpdates: string | null }[];
+      if (e.count !== undefined && list.length !== e.count) throw new AssertionError(`${where}: ${list.length} patches, expected ${e.count}`);
+      const last = list.at(-1);
+      if (e.id && last?.id !== e.id) throw new AssertionError(`${where}: last patch id ${last?.id}, expected ${e.id}`);
+      if (e.sendUpdates && last?.sendUpdates !== e.sendUpdates) throw new AssertionError(`${where}: sendUpdates=${last?.sendUpdates}, expected ${e.sendUpdates}`);
     } else if ("google_revoke" in step) {
       await post(`${FAKES}/__fake/google/revoke`, { email: step.google_revoke });
     } else if ("llm" in step) {

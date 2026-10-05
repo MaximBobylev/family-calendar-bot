@@ -79,23 +79,51 @@ export interface GoogleEventInput {
   reminders?: { useDefault: boolean; overrides?: { method: "popup" | "email"; minutes: number }[] };
 }
 
-async function writeEvent(url: URL, method: "POST" | "PATCH", accessToken: string, body: GoogleEventInput): Promise<GoogleEvent & { htmlLink?: string }> {
+/** Ошибка Calendar API с HTTP-статусом: 404/410 — удалено, 403 — нет прав, 412 — событие изменили (etag). */
+export class GoogleApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+async function writeEvent(
+  url: URL,
+  method: "POST" | "PATCH",
+  accessToken: string,
+  body: GoogleEventInput,
+  etag?: string,
+): Promise<GoogleEvent & { htmlLink?: string }> {
   const res = await fetch(url, {
     method,
-    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...(etag ? { "if-match": etag } : {}) },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`events.${method === "POST" ? "insert" : "patch"} failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw new GoogleApiError(`events.${method === "POST" ? "insert" : "patch"} failed: ${res.status} ${await res.text()}`, res.status);
   return (await res.json()) as GoogleEvent & { htmlLink?: string };
+}
+
+export async function getEvent(apiBase: string, accessToken: string, calendarId: string, eventId: string, timeZone: string): Promise<GoogleEvent | null> {
+  const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
+  url.searchParams.set("timeZone", timeZone);
+  const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new GoogleApiError(`events.get failed: ${res.status} ${await res.text()}`, res.status);
+  return (await res.json()) as GoogleEvent;
 }
 
 export function insertEvent(apiBase: string, accessToken: string, calendarId: string, body: GoogleEventInput) {
   return writeEvent(new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`), "POST", accessToken, body);
 }
 
-export function patchEvent(apiBase: string, accessToken: string, calendarId: string, eventId: string, body: GoogleEventInput) {
-  return writeEvent(
-    new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`),
-    "PATCH", accessToken, body,
-  );
+export function patchEvent(
+  apiBase: string,
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  body: GoogleEventInput,
+  opts: { sendUpdates?: "all" | "none"; etag?: string } = {},
+) {
+  const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
+  if (opts.sendUpdates) url.searchParams.set("sendUpdates", opts.sendUpdates);
+  return writeEvent(url, "PATCH", accessToken, body, opts.etag);
 }

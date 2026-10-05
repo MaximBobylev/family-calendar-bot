@@ -25,7 +25,11 @@ export interface CalendarEvent {
   /** «Свободен» (transparency=transparent). */
   free: boolean;
   organizerIsSelf: boolean;
+  /** Есть другие участники — изменения им уходят уведомлением (US-40). */
+  hasOtherAttendees: boolean;
   recurring: boolean;
+  /** id серии у провайдера — для изменения «всех» (US-43). */
+  seriesId?: string;
   etag?: string;
 }
 
@@ -57,6 +61,15 @@ export interface CreatedEvent {
   link?: string;
 }
 
+/** Изменения события. Время — локальное в поясе `tz`. */
+export interface EventPatch {
+  tz: string;
+  title?: string;
+  location?: string;
+  start?: Moment;
+  end?: Moment;
+}
+
 /** Интерфейс провайдера календаря (ADR-0003). Реализация — Google. */
 export interface CalendarProvider {
   calendars(): Promise<CalendarInfo[]>;
@@ -64,4 +77,7 @@ export interface CalendarProvider {
   listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<CalendarEvent[]>;
   createEvent(e: NewEvent): Promise<CreatedEvent>;
   renameEvent(ref: EventRef, title: string): Promise<void>;
+  getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null>;
+  /** etag — защита от параллельных правок: если событие изменили, провайдер вернёт ошибку 412. */
+  updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<void>;
 }

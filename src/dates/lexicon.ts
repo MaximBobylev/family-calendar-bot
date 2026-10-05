@@ -132,7 +132,7 @@ export const UNITS = index<Unit>(
 );
 
 /** Служебные слова, которые можно пропускать. */
-export const FILLERS = new Set(["в", "во", "на", "at", "on", "the", "к", "of", "for"]);
+export const FILLERS = new Set(["в", "во", "на", "at", "on", "the", "к", "of", "for", "to"]);
 
 /** Явно названные пояса: «в 12 по Москве», «по МСК». */
 export const TIMEZONE_WORDS = new Map<string, string>([

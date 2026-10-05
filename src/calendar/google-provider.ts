@@ -2,10 +2,10 @@
 
 import type { Config } from "../config";
 import { decryptSecret } from "../crypto";
-import { formatDate, formatMoment, makeDay, utcToLocal } from "../dates/calendar";
+import { formatDate, formatMoment, makeDay, utcToLocal, type Moment } from "../dates/calendar";
 import { refreshAccessToken } from "../google/auth";
-import { insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
-import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventRef, NewEvent } from "./model";
+import { getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
+import type { CalendarEvent, CalendarInfo, CalendarProvider, CreatedEvent, EventPatch, EventRef, NewEvent } from "./model";
 
 /** Типы событий, которые не показываем (US-20). */
 const HIDDEN_EVENT_TYPES = new Set(["workingLocation", "focusTime"]);
@@ -28,7 +28,9 @@ export function toDomainEvent(e: GoogleEvent, cal: CalendarInfo, tz: string): Ca
     ...(e.hangoutLink ? { conferenceUrl: e.hangoutLink } : {}),
     free: e.transparency === "transparent",
     organizerIsSelf: e.organizer?.self ?? true,
+    hasOtherAttendees: (e.attendees ?? []).some((a) => !a.self),
     recurring: !!e.recurringEventId,
+    ...(e.recurringEventId ? { seriesId: e.recurringEventId } : {}),
     ...(e.etag ? { etag: e.etag } : {}),
   };
 
@@ -120,5 +122,26 @@ export class GoogleCalendarProvider implements CalendarProvider {
   async renameEvent(ref: EventRef, title: string): Promise<void> {
     const cal = await this.calendar(ref.calendarId);
     await patchEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, { summary: title });
+  }
+
+  async getEvent(ref: EventRef, tz: string): Promise<CalendarEvent | null> {
+    const cal = await this.calendar(ref.calendarId);
+    const raw = await getEvent(this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId, tz);
+    return raw ? toDomainEvent(raw, cal, tz) : null;
+  }
+
+  async updateEvent(ref: EventRef, patch: EventPatch, opts: { notify: boolean; etag?: string }): Promise<void> {
+    const cal = await this.calendar(ref.calendarId);
+    const time = (m: Moment) => ({ dateTime: `${formatMoment(m)}:00`, timeZone: patch.tz });
+    await patchEvent(
+      this.config.googleApiBase, await this.token(), cal.providerCalendarId, ref.providerEventId,
+      {
+        ...(patch.title !== undefined ? { summary: patch.title } : {}),
+        ...(patch.location !== undefined ? { location: patch.location } : {}),
+        ...(patch.start ? { start: time(patch.start) } : {}),
+        ...(patch.end ? { end: time(patch.end) } : {}),
+      },
+      { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
+    );
   }
 }

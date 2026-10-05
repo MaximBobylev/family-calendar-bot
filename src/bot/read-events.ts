@@ -4,6 +4,7 @@ import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { DAY_PART_BOUNDS } from "../dates/lexicon";
 import { formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { parseDateFragment, type ParseValue } from "../dates";
+import { mergeDialogState } from "../db/conversations";
 import type { AppContext } from "./context";
 import { dayTitle, formatEvents } from "./format-events";
 import { t } from "./messages";
@@ -58,7 +59,7 @@ async function findCalendar(ctx: AppContext, userId: string, calendars: Calendar
 export async function readEvents(
   ctx: AppContext,
   provider: CalendarProvider,
-  args: { userId: string; chatId: number; locale: string; tz: string; range: string; calendar?: string },
+  args: { userId: string; chatId: number; conversationId: string; locale: string; tz: string; range: string; calendar?: string },
 ): Promise<void> {
   const { chatId, locale, tz } = args;
   const now = utcToLocal(ctx.clock.now(), tz);
@@ -95,6 +96,12 @@ export async function readEvents(
   const events = (await provider.listEvents(localToUtc(period.from, tz), localToUtc(period.to, tz), tz)).filter(
     (e) => !only || e.ref.calendarId === only.id,
   );
+  // Порядок как в выводе — для «перенеси вторую» (US-60)
+  const ordered = [...events].sort((a, b) =>
+    Math.max(a.startDay, period.fromDay) - Math.max(b.startDay, period.fromDay) ||
+    (a.allDay === b.allDay ? 0 : a.allDay ? -1 : 1) ||
+    (a.start?.minutes ?? 0) - (b.start?.minutes ?? 0) || a.title.localeCompare(b.title));
+  await mergeDialogState(ctx.db, args.conversationId, args.userId, { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() } }, ctx.clock.now());
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId);
   for (const text of messages) await ctx.telegram.sendMessage(chatId, text, undefined, { html: true });

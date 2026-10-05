@@ -5,7 +5,7 @@ import type { CalendarInfo, CalendarProvider, EventRef } from "../calendar/model
 import { formatMoment, localToUtc, parseLocal, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { parseDateFragment, type ParseValue } from "../dates";
 import {
-  attachMessage, cancelOpenCards, createPendingAction, setDialogState, type PendingAction,
+  attachMessage, createPendingAction, mergeDialogState, type PendingAction,
 } from "../db/conversations";
 import type { User } from "../db/users";
 import type { CreateEventIntent } from "../nlu/intents";
@@ -214,7 +214,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   if (res.kind === "ask") {
     // Ответ пользователя дополнит этот же черновик (US-12)
     const draft = res.keepStart ? a.draft : { ...a.draft, startText: undefined };
-    await setDialogState(ctx.db, a.conversationId, user.id, { awaiting: { kind: "create_time", draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } }, ctx.clock.now());
+    await mergeDialogState(ctx.db, a.conversationId, user.id, { awaiting: { kind: "create_time", draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } }, ctx.clock.now());
     await ctx.telegram.sendMessage(chatId, t(res.question, locale));
     return;
   }
@@ -284,6 +284,7 @@ export async function confirmCreate(
   const text = `${t("created", locale)}\n\n${cardBody(o, today, locale, calendarsCount > 1)}`;
   const markup = created.link ? { inline_keyboard: [[{ text: t("openInCalendar", locale), url: created.link }]] } : undefined;
   if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, text, markup, { html: true });
+  await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
 
   // Название не задано — спросить; ответом считается только reply на этот вопрос (US-30)
   if (!o.titleGiven) {
@@ -293,15 +294,5 @@ export async function confirmCreate(
     });
     const q = await ctx.telegram.sendMessage(chatId, t("askTitle", locale), { force_reply: true });
     await attachMessage(ctx.db, qId, q.message_id);
-  }
-}
-
-/** Новая команда аннулирует открытые карточки создания и вопрос о названии (US-05, US-30). */
-export async function cancelOpenCreateCards(ctx: AppContext, conversationId: string, user: User): Promise<void> {
-  const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [CREATE_CARD, TITLE_QUESTION]);
-  for (const c of cancelled) {
-    if (c.kind !== CREATE_CARD || !c.messageId) continue;
-    const { chatId } = c.payload as CreateCardPayload;
-    await ctx.telegram.editMessageText(chatId, c.messageId, t("cancelled", user.locale));
   }
 }

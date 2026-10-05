@@ -289,6 +289,13 @@ function parseAst(tokens: Token[]): Ast {
     timeContext = false;
 
     if (w === "в" || w === "во" || w === "at") { timeContext = true; i++; continue; }
+    // «перенеси на 11», «поставь на 15» — «на» перед числом тоже вводит время
+    // («на две недели», «на 10 минут» — это длительность/период, не время)
+    if (w === "на" && tokens[i + 1]?.t === "num" && !UNITS.has(word(tokens[i + 2]) ?? "") && tokens[i + 2]?.t !== "mer") {
+      timeContext = true;
+      i++;
+      continue;
+    }
 
     // Приблизительное время = точное: «где-то в 3», «примерно в 11», «часов в 5», «около трёх»
     if (w && APPROX_WORDS.has(w)) { timeContext = true; i++; continue; }
@@ -669,4 +676,17 @@ function parseLocalMoment(s: string): Moment {
   const [y, m, day] = d!.split("-").map(Number);
   const [h, min] = t!.split(":").map(Number);
   return { day: makeDay(y!, m!, day!), minutes: h! * 60 + min! };
+}
+
+/** Что есть во фрагменте: дата и/или время. null — фрагмент не разбирается. */
+export function fragmentParts(tokens: Token[]): { hasDate: boolean; hasTime: boolean } | null {
+  try {
+    const ast = parseAst(tokens);
+    return {
+      hasDate: !!(ast.date || ast.dateRange || ast.period || ast.week),
+      hasTime: !!(ast.time || ast.interval || ast.relMinutes !== undefined),
+    };
+  } catch {
+    return null;
+  }
 }

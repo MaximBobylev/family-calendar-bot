@@ -13,10 +13,23 @@ export async function ensureConversation(db: D1Database, chatId: number | string
 
 // --- Состояние диалога -------------------------------------------------------
 
+export interface StoredRef {
+  accountId: string;
+  calendarId: string;
+  providerEventId: string;
+}
+
 export interface DialogState {
   /** Черновик, ожидающий недостающий слот (US-12): ответ пользователя дополняет его. */
   awaiting?: { kind: "create_time"; draft: unknown; expiresAt: number };
+  /** Последний показанный список — для «перенеси вторую» (US-60). */
+  lastList?: { refs: StoredRef[]; at: number };
+  /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */
+  lastEvent?: { ref: StoredRef; at: number };
 }
+
+/** Окно контекста = окно отмены (US-60). */
+export const CONTEXT_TTL_MS = 15 * 60 * 1000;
 
 export async function getDialogState(db: D1Database, conversationId: string, userId: string): Promise<DialogState> {
   const row = await db
@@ -34,6 +47,14 @@ export async function setDialogState(db: D1Database, conversationId: string, use
     )
     .bind(conversationId, userId, JSON.stringify(state), now)
     .run();
+}
+
+/** Обновить часть состояния, не затирая остальное. */
+export async function mergeDialogState(db: D1Database, conversationId: string, userId: string, patch: Partial<DialogState>, now: number): Promise<void> {
+  const state = await getDialogState(db, conversationId, userId);
+  const next: DialogState = { ...state, ...patch };
+  for (const k of Object.keys(next) as (keyof DialogState)[]) if (next[k] === undefined) delete next[k];
+  await setDialogState(db, conversationId, userId, next, now);
 }
 
 // --- Карточки (pending actions) ------------------------------------------------

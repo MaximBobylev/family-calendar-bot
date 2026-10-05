@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { cleanTitle, extractDateSpans, looksAllDay } from "../src/dates/extract";
+import { cleanTitle, extractDateSpans, extractModifySpans, looksAllDay } from "../src/dates/extract";
 
 interface Doc {
   defaults: { now: string; tz: string };
@@ -31,5 +31,17 @@ describe("cleanTitle", () => {
 describe("looksAllDay", () => {
   it.each([["Завтра день рождения мамы", true], ["Отпуск с 10 по 20 ноября", true], ["Созвон завтра", false]] as const)("%s", (t, v) => {
     expect(looksAllDay(t)).toBe(v);
+  });
+});
+
+interface ModifyDoc {
+  defaults: { now: string; tz: string };
+  cases: { text: string; expect: Record<string, string> }[];
+}
+const modifyDoc = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "extract", "modify.yaml"), "utf8")) as ModifyDoc;
+
+describe("extractModifySpans", () => {
+  it.each(modifyDoc.cases.map((c) => [c.text, c] as const))("%s", (_t, c) => {
+    expect(extractModifySpans(c.text, modifyDoc.defaults.now, modifyDoc.defaults.tz)).toEqual(c.expect);
   });
 });

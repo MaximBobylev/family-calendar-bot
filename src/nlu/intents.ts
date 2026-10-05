@@ -14,9 +14,20 @@ export interface CreateEventIntent {
   location?: string;
 }
 
+export interface ModifyEventIntent {
+  name: "modify_event";
+  event?: string;
+  reference?: "next" | "last" | "list";
+  listIndex?: number;
+  newTitle?: string;
+  newLocation?: string;
+  scope?: "this" | "all";
+}
+
 export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
   | CreateEventIntent
+  | ModifyEventIntent
   | { name: "unsupported" }
   | { name: "multiple" };
 
@@ -60,6 +71,24 @@ export const TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "modify_event",
+      description: "Move or change an EXISTING event: «перенеси встречу с Петей на пятницу», «сдвинь созвон на час позже», «переименуй планёрку в Стендап», «сделай встречу на полтора часа».",
+      parameters: {
+        type: "object",
+        properties: {
+          event: str("Which event, without date/time words: «встречу с Петей», «планёрку», «созвон». Omit if referred to only as «её», «следующую», «вторую»."),
+          reference: { type: "string", enum: ["next", "last", "list"], description: "«следующую встречу» → next; «её», «эту», «последнюю» → last; «вторую», «третью» (from a shown list) → list." },
+          list_index: { type: "integer", description: "Position for reference=list: «вторую» → 2." },
+          scope: { type: "string", enum: ["this", "all"], description: "For recurring events: «все планёрки», «всю серию» → all; «только эту», «в этот понедельник» → this. Omit if not said." },
+          new_location: str("New place if the user sets one."),
+          new_title: str("New name if the user renames the event: «переименуй в Ревью дизайна» → «Ревью дизайна»."),
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "unsupported",
       description: "The request is not about the user's calendar, or no other tool fits.",
       parameters: { type: "object", properties: {} },
@@ -76,7 +105,11 @@ Examples:
 "Отпуск с 10 по 20 ноября" → create_event {"start":"с 10 по 20 ноября","all_day":true,"title":"Отпуск"}
 "Поставь встречу на среду в 12" → create_event {"start":"на среду в 12"}
 "Tomorrow at 3pm dentist" → create_event {"start":"Tomorrow at 3pm","title":"Dentist"}
-"Что у меня в пятницу после обеда?" → list_events {"range":"в пятницу после обеда"}`;
+"Что у меня в пятницу после обеда?" → list_events {"range":"в пятницу после обеда"}
+"Перенеси встречу с Петей на пятницу" → modify_event {"event":"встречу с Петей"}
+"Сдвинь следующую встречу на час позже" → modify_event {"reference":"next"}
+"Переименуй её в Ревью дизайна" → modify_event {"reference":"last","new_title":"Ревью дизайна"}
+"Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)`;
 
 export interface ParsedIntent {
   intent: Intent;
@@ -115,6 +148,23 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
       } as CreateEventIntent,
       ...usage,
     };
+  }
+  if (call?.name === "modify_event") {
+    const a = call.arguments;
+    const str = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? (a[k] as string).trim() : undefined);
+    const reference = ["next", "last", "list"].includes(String(a.reference)) ? (a.reference as "next" | "last" | "list") : undefined;
+    const scope = ["this", "all"].includes(String(a.scope)) ? (a.scope as "this" | "all") : undefined;
+    const intent: ModifyEventIntent = { name: "modify_event" };
+    const event = str("event");
+    if (event) intent.event = event;
+    if (reference) intent.reference = reference;
+    if (typeof a.list_index === "number") intent.listIndex = a.list_index;
+    const title = str("new_title");
+    if (title) intent.newTitle = title;
+    const location = str("new_location");
+    if (location) intent.newLocation = location;
+    if (scope) intent.scope = scope;
+    return { intent, ...usage };
   }
   return { intent: { name: "unsupported" }, ...usage };
 }
