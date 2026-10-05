@@ -21,6 +21,7 @@ function fromUnit(unit: Unit, amount: number): Duration | null {
     case "hour": return { ...ZERO, minutes: amount * 60 };
     case "day": return Number.isInteger(amount) ? { ...ZERO, days: amount } : null;
     case "week": return Number.isInteger(amount) ? { ...ZERO, days: amount * 7 } : null;
+    case "fortnight": return Number.isInteger(amount) ? { ...ZERO, days: amount * 14 } : null;
     case "month": return Number.isInteger(amount) ? { ...ZERO, months: amount } : null;
     case "year": return Number.isInteger(amount) ? { ...ZERO, months: amount * 12 } : null;
   }
@@ -39,7 +40,23 @@ const numOf = (tok: Token | undefined) => (tok?.t === "num" && tok.form !== "ord
 export function readDuration(tokens: Token[], i: number): { d: Duration; n: number } | null {
   const w = word(tokens[i]);
 
-  if (w === "полчаса") return { d: { ...ZERO, minutes: 30 }, n: 1 };
+  if (w === "полчаса" || w === "полчасика") return { d: { ...ZERO, minutes: 30 }, n: 1 };
+  // «half an hour»
+  if (w === "half" && /^(an?)$/.test(word(tokens[i + 1]) ?? "") && unitOf(tokens[i + 2]) === "hour") {
+    return { d: { ...ZERO, minutes: 30 }, n: 3 };
+  }
+  // «пару часов», «через пару дней», «a couple of days» = 2
+  {
+    let k = i;
+    if (w === "a") k++;
+    const pair = word(tokens[k]);
+    if (pair === "пару" || pair === "пара" || pair === "couple") {
+      if (pair === "couple" && word(tokens[k + 1]) === "of") k++;
+      const u = unitOf(tokens[k + 1]);
+      const d = u && fromUnit(u, 2);
+      return d ? { d, n: k + 2 - i } : null;
+    }
+  }
   if (w === "полтора" || w === "полторы") {
     const u = unitOf(tokens[i + 1]);
     const d = u && fromUnit(u, 1.5);
@@ -53,13 +70,14 @@ export function readDuration(tokens: Token[], i: number): { d: Duration; n: numb
     return d ? { d, n: 3 } : null;
   }
 
-  // «45 минут», «два часа», «a week», «one hour»
+  // «45 минут», «два часа», «a week», «one hour»; «два с половиной часа»
   const amount = numOf(tokens[i]) ?? (w === "a" || w === "an" ? 1 : undefined);
   if (amount !== undefined) {
-    const u = unitOf(tokens[i + 1]);
+    const half = numOf(tokens[i]) !== undefined && word(tokens[i + 1]) === "с" && word(tokens[i + 2]) === "половиной" ? 2 : 0;
+    const u = unitOf(tokens[i + 1 + half]);
     if (!u) return null;
-    const d = fromUnit(u, amount);
-    return d ? { d, n: 2 } : null;
+    const d = fromUnit(u, amount + (half ? 0.5 : 0));
+    return d ? { d, n: 2 + half } : null;
   }
 
   // «час», «день», «неделю» — одна единица
@@ -102,7 +120,7 @@ export function parseShift(tokens: Token[]): ParseResult {
 /** kind=duration: «на полчаса», «часа на три», «на весь день», «for 30 minutes». */
 export function parseDuration(tokens: Token[]): ParseResult {
   const words = tokens.map((t) => word(t) ?? "?").join(" ");
-  if (/^(на )?весь день$|^all day$/.test(words)) return { duration: "all_day" };
+  if (/^(на )?(весь|целый) день$|^all day$/.test(words)) return { duration: "all_day" };
   let i = 0;
   if (word(tokens[i]) === "на" || word(tokens[i]) === "for") i++;
   const dur = readDuration(tokens, i);

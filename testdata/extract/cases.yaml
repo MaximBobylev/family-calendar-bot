@@ -30,3 +30,22 @@ cases:
   - { kind: range, text: "Что в семейном календаре на выходных?", expect: { range: "на выходных" } }
   - { kind: range, text: "Что у меня сегодня вечером?", expect: { range: "сегодня вечером" } }
   - { kind: range, text: "What's on Friday?", expect: { range: "on Friday" } }
+  # Разговорные формы, опечатки, смешанная речь
+  - { kind: point, text: "Созвон с Петей завтро в 15:30", expect: { point: "завтро в 15:30" } }
+  - { kind: point, text: "Поставь стрижку в пятнцу в 3 часа дня.", expect: { point: "в пятнцу в 3 часа дня" } }
+  - { kind: point, text: "Напомни через пару часов позвонить маме", expect: { point: "через пару часов" } }
+  - { kind: point, text: "Ужин у родителей в субботу в полвосьмого вечера", expect: { point: "в субботу в полвосьмого вечера" } }
+  - { kind: point, text: "Стоматолог в 15-30 послезавтра", expect: { point: "в 15-30 послезавтра" } }
+  - { kind: point, text: "Тренировка после завтра в 9 утра на часик", expect: { point: "после завтра в 9 утра", duration: "на часик" } }
+  - { kind: point, text: "Dentist tomorrow at 9.30pm", expect: { point: "tomorrow at 9.30pm" } }
+  - { kind: point, text: "Call with Anna next Tue at 10 for half an hour", expect: { point: "next Tue at 10", duration: "for half an hour" } }
+  - { kind: point, text: "Встреча с Олегом в ближайшую пятницу в час дня", expect: { point: "в ближайшую пятницу в час дня" } }
+  - { kind: point, text: "Поставь вечер встречи выпускников в субботу в 19", expect: { point: "в субботу в 19" } }
+  - { kind: point, text: "Пятно на рубашке отнести в химчистку завтра", expect: { point: "завтра" } }
+  - { kind: point, text: "Созвон в пятницу at 10", expect: { point: "в пятницу at 10" } }
+  - { kind: range, text: "Что у меня в эти выходные?", expect: { range: "в эти выходные" } }
+  - { kind: range, text: "Что у меня на будущей неделе?", expect: { range: "на будущей неделе" } }
+  - { kind: range, text: "Что у меня на завтрашнее утро?", expect: { range: "на завтрашнее утро" } }
+  - { kind: range, text: "Покажи субботние встречи", expect: { range: "субботние" } }
+  - { kind: range, text: "What do I have for the rest of the week?", expect: { range: "for the rest of the week" } }
+  - { kind: range, text: "Что запланировано до конца месяца?", expect: { range: "до конца месяца" } }

@@ -3,6 +3,7 @@
 import { parts, formatDate, type Day } from "./calendar";
 import { MONTHS, NUMBER_WORDS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
 import { resolveAbsDate, readClockTime, resolveHour } from "./point";
+import type { Meridiem } from "./lexicon";
 import type { ParseResult, Recurrence, Weekday } from "./types";
 import type { Token } from "./tokenize";
 
@@ -11,6 +12,10 @@ const WEEKEND: Weekday[] = ["SA", "SU"];
 
 const EVERY = new Set(["каждый", "каждую", "каждое", "каждые", "каждого", "every", "each"]);
 const LIST_JOINERS = new Set(["и", "and", "по"]);
+/** «каждое утро в 8», «каждый вечер в 9» — ежедневно, часть суток уточняет час. */
+const DAILY_PARTS = new Map<string, Meridiem>([
+  ["утро", "am"], ["вечер", "pm"], ["ночь", "night"], ["morning", "am"], ["evening", "pm"], ["night", "night"],
+]);
 
 const word = (tok: Token | undefined) => (tok?.t === "word" ? tok.w : undefined);
 
@@ -18,6 +23,7 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
   const r: Partial<Recurrence> = {};
   const days: Weekday[] = [];
   let i = 0;
+  let partMer: Meridiem | undefined;
 
   const addDays = (list: Weekday[]) => {
     for (const d of list) if (!days.includes(d)) days.push(d);
@@ -55,6 +61,7 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     if (w && EVERY.has(w)) {
       // «каждый день / каждую неделю / каждый месяц / каждый год»
       if (next && /^(день|day)$/.test(next)) { r.freq = "daily"; i += 2; continue; }
+      if (next && DAILY_PARTS.has(next)) { r.freq = "daily"; partMer = DAILY_PARTS.get(next); i += 2; continue; }
       if (next && /^(неделю|week)$/.test(next)) { r.freq = "weekly"; i += 2; continue; }
       if (next && /^(месяц|month)$/.test(next)) { r.freq = "monthly"; i += 2; continue; }
       if (next && /^(год|year)$/.test(next)) { r.freq = "yearly"; i += 2; continue; }
@@ -71,6 +78,11 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
 
     // «по будням», «по выходным», «по четвергам», «weekdays», «weekends»
     if (w === "будням" || w === "будни" || w === "weekday" || w === "weekdays") { addDays(WEEKDAYS_WORK); i++; continue; }
+    // «каждый будний день», «по будним дням»
+    if ((w === "будний" || w === "будним" || w === "будние") && next && /^(день|дням|дни)$/.test(next)) { addDays(WEEKDAYS_WORK); i += 2; continue; }
+    // «every other week», «каждую вторую неделю» — единица после «other»/«вторую»
+    if (r.interval && !r.freq && w && /^(неделю|week)$/.test(w)) { r.freq = "weekly"; i++; continue; }
+    if (r.interval && !r.freq && w && /^(день|day)$/.test(w)) { r.freq = "daily"; i++; continue; }
     if (w === "выходным" || w === "выходные" || w === "weekend" || w === "weekends") { addDays(WEEKEND); i++; continue; }
     if (w && (WEEKDAYS_PLURAL_DATIVE.has(w) || WEEKDAYS.has(w))) {
       addDays([(WEEKDAYS_PLURAL_DATIVE.get(w) ?? WEEKDAYS.get(w))!]);
@@ -145,7 +157,7 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     const time = readClockTime(tokens, i, true);
     if (time) {
       if ("error" in time) return time;
-      const h = resolveHour(time.time);
+      const h = resolveHour(partMer && !time.time.mer ? { ...time.time, mer: partMer } : time.time);
       r.time = `${String(h.hour).padStart(2, "0")}:${String(time.time.m).padStart(2, "0")}`;
       i += time.n;
       continue;
@@ -161,6 +173,8 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     r.freq ??= "weekly";
   }
   if (!r.freq) return { error: "unparseable" };
+  // «каждое утро» без часа — когда именно, не ясно: переспрашиваем
+  if (partMer && !r.time) return { error: "unparseable" };
   if (r.freq === "monthly" && r.by_month_day !== undefined && r.by_month_day > 28) r.warning = "skips_short_months";
   return { recurrence: r as Recurrence };
 }

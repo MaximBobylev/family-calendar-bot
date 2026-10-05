@@ -1,6 +1,6 @@
 // Нормализация фрагмента и разбиение на токены. Числительные словами здесь же превращаются в числа.
 
-import { MERIDIEM_WORDS, NUMBER_WORDS, TENS, type Meridiem, type NumberForm } from "./lexicon";
+import { MERIDIEM_WORDS, NUMBER_WORDS, TENS, TYPOS, type Meridiem, type NumberForm } from "./lexicon";
 
 export type Token =
   | { t: "word"; w: string }
@@ -16,27 +16,41 @@ export type Token =
   | { t: "dayord"; v: number }
   | { t: "mer"; v: Meridiem };
 
+/** Латинские буквы, похожие на кириллические: «cреду» с латинской «c». */
+const LOOKALIKES: Record<string, string> = { a: "а", c: "с", e: "е", o: "о", p: "р", x: "х", y: "у", k: "к", m: "м", t: "т", h: "н", b: "в" };
+
+/** В слове, где есть кириллица, латинские двойники заменяются кириллицей. Чисто латинские слова не трогаем. */
+function fixLookalikes(w: string): string {
+  return /[а-я]/.test(w) && /[a-z]/.test(w) ? w.replace(/[acepoxykmthb]/g, (ch) => LOOKALIKES[ch]!) : w;
+}
+
 export function normalize(text: string): string {
   return text
     .toLowerCase()
     .replaceAll("ё", "е")
     .replace(/ноль-ноль/g, " 00 ")
     .replace(/[–—]/g, "-")
-    .replace(/[,;!?«»"()]/g, " ")
-    .replace(/\.(\s|$)/g, " ")
+    .replace(/[,;!?«»"()…]/g, " ")
+    .replace(/\.+(\s|$)/g, " ")
+    // «пол-третьего» = «полтретьего»
+    .replace(/(^|\s)пол-(?=[а-я])/g, "$1пол")
+    .replace(/\S+/g, fixLookalikes)
     .trim();
 }
 
 /** Порядок важен: «послезавтрашн» раньше «завтрашн». */
 const DAY_ADJECTIVES: [string, string][] = [
   ["послезавтрашн", "послезавтра"], ["позавчерашн", "позавчера"], ["сегодняшн", "сегодня"], ["завтрашн", "завтра"], ["вчерашн", "вчера"],
-  ["today's", "today"], ["tomorrow's", "tomorrow"], ["yesterday's", "yesterday"],
+  ["today's", "today"], ["tomorrow's", "tomorrow"], ["yesterday's", "yesterday"], ["tonight's", "tonight"],
+  // «на субботний вечер», «пятничная встреча»; «средний» — не среда, поэтому среды нет
+  ["понедельничн", "понедельник"], ["вторничн", "вторник"], ["пятничн", "пятница"], ["субботн", "суббота"], ["воскресн", "воскресенье"],
 ];
 
 /** Слова, начинающиеся на «пол», которые сами по себе что-то значат и не делятся. */
 const POL_WORDS = new Set(["полдень", "полночь", "полчаса", "полтора", "полторы", "половине", "пол"]);
 
-function classify(raw: string): Token[] {
+function classify(word: string): Token[] {
+  const raw = TYPOS.get(word) ?? word;
   let m: RegExpExecArray | null;
   if ((m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw))) return [{ t: "iso", y: +m[1]!, m: +m[2]!, d: +m[3]! }];
   if ((m = /^(\d{1,2})[./](\d{1,2})(?:[./](\d{2}|\d{4}))?$/.exec(raw))) {
@@ -48,8 +62,20 @@ function classify(raw: string): Token[] {
     if (m[3]) out.push({ t: "mer", v: m[3] as Meridiem });
     return out;
   }
+  // «9.30pm»
+  if ((m = /^(\d{1,2})\.(\d{2})(am|pm)$/.exec(raw))) return [{ t: "clock", h: +m[1]!, m: +m[2]! }, { t: "mer", v: m[3] as Meridiem }];
   if ((m = /^(\d{1,2})(am|pm)$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }, { t: "mer", v: m[2] as Meridiem }];
   if ((m = /^(\d{1,2})-?(го|е|ое|ого|st|nd|rd|th)$/.exec(raw))) return [{ t: "dayord", v: +m[1]! }];
+  // «15-30», «10-00» — время (так пишет Whisper); «10-12» — «с 10 до 12». «9-15» — тоже интервал: не гадаем
+  if ((m = /^(\d{1,2})-(\d{2})$/.exec(raw))) {
+    const a = +m[1]!;
+    const b = +m[2]!;
+    if (m[2]!.startsWith("0") || b > 24) return [{ t: "clock", h: a, m: b }];
+    return [{ t: "num", v: a, form: "digit" }, { t: "word", w: "-" }, { t: "num", v: b, form: "digit" }];
+  }
+  // «в 15ч», «at 3ish» (приблизительное время = точное)
+  if ((m = /^(\d{1,2})ч$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }, { t: "word", w: "ч" }];
+  if ((m = /^(\d{1,2})ish$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }];
   if (/^\d+$/.test(raw)) return [{ t: "num", v: +raw, form: "digit" }];
 
   // «сегодняшний день», «на завтрашнюю», «послезавтрашние встречи» — прилагательное = само наречие
@@ -69,14 +95,15 @@ function classify(raw: string): Token[] {
   return [{ t: "word", w: raw }];
 }
 
-/** «двадцать третьего» → 23 (ordGen), «двадцать пять» → 25 (card). */
+/** «двадцать третьего» → 23 (ordGen), «двадцать пять» → 25 (card), «двадцати пяти» → 25 (gen), «двадцать пятое» → 25 (ordNom). */
 function combineNumbers(tokens: Token[]): Token[] {
   const out: Token[] = [];
   for (const tok of tokens) {
     const prev = out[out.length - 1];
     if (
-      tok.t === "num" && prev?.t === "num" && prev.form === "card" && TENS.has(prev.v) &&
-      tok.v >= 1 && tok.v <= 9 && (tok.form === "card" || tok.form === "ordGen" || tok.form === "gen")
+      tok.t === "num" && prev?.t === "num" && TENS.has(prev.v) && tok.v >= 1 && tok.v <= 9 &&
+      ((prev.form === "card" && (tok.form === "card" || tok.form === "ordGen" || tok.form === "gen" || tok.form === "ordNom")) ||
+        (prev.form === "gen" && tok.form === "gen"))
     ) {
       out[out.length - 1] = { t: "num", v: prev.v + tok.v, form: tok.form };
       continue;

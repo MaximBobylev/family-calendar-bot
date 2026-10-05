@@ -1,0 +1,265 @@
+# Разговорный английский и смешанная речь.
+# «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+
+  # Дни и даты
+
+  - id: colen-001
+    text: "next Tue"
+    expect:
+      ambiguous:
+        - { date: "2026-10-13" }
+        - { date: "2026-10-20" }
+
+  - id: colen-002
+    text: "next Tue at 10"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-13T10:00" }
+        - { datetime: "2026-10-20T10:00" }
+
+  - id: colen-003
+    text: "Fri at 5"
+    expect: { datetime: "2026-10-09T17:00" }
+
+  - id: colen-004
+    text: "Mon 9am"
+    expect: { datetime: "2026-10-12T09:00" }
+
+  - id: colen-005
+    text: "weds at 11"
+    note: "среда = сегодня, время впереди → варианты"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T11:00" }
+        - { datetime: "2026-10-14T11:00" }
+
+  - id: colen-006
+    text: "friday next week"
+    expect: { date: "2026-10-16" }
+
+  - id: colen-007
+    text: "on the 14th"
+    expect: { date: "2026-10-14" }
+
+  - id: colen-008
+    text: "14th of October"
+    expect: { date: "2026-10-14" }
+
+  - id: colen-009
+    text: "October 14th at 2pm"
+    expect: { datetime: "2026-10-14T14:00" }
+
+  - id: colen-010
+    text: "the day after tomorrow at noon"
+    expect: { datetime: "2026-10-09T12:00" }
+
+  # Относительные сроки
+
+  - id: colen-011
+    text: "in 2 hrs"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: colen-012
+    text: "in an hour"
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: colen-013
+    text: "in half an hour"
+    expect: { datetime: "2026-10-07T10:30" }
+
+  - id: colen-014
+    text: "in a fortnight"
+    expect: { date: "2026-10-21" }
+
+  - id: colen-015
+    text: "in a couple of days"
+    status: proposed
+    note: "couple = 2"
+    expect: { date: "2026-10-09" }
+
+  - id: colen-016
+    text: "in a couple of hours"
+    status: proposed
+    note: "couple = 2"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  # Части суток и время
+
+  - id: colen-017
+    text: "tomorrow morning"
+    expect: { date: { date: "2026-10-08", part: morning } }
+
+  - id: colen-018
+    text: "tomorrow afternoon"
+    expect: { date: { date: "2026-10-08", part: afternoon } }
+
+  - id: colen-019
+    text: "tomorrow evening"
+    expect: { date: { date: "2026-10-08", part: evening } }
+
+  - id: colen-020
+    text: "this evening"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
+  - id: colen-021
+    text: "this afternoon"
+    expect: { date: { date: "2026-10-07", part: afternoon } }
+
+  - id: colen-022
+    text: "at noon tomorrow"
+    expect: { datetime: "2026-10-08T12:00" }
+
+  - id: colen-023
+    text: "midnight"
+    expect: { datetime: "2026-10-08T00:00" }
+
+  - id: colen-024
+    text: "at 9.30pm"
+    expect: { datetime: "2026-10-07T21:30" }
+
+  - id: colen-025
+    text: "9.30pm"
+    expect: { datetime: "2026-10-07T21:30" }
+
+  - id: colen-026
+    text: "7:15 pm"
+    expect: { datetime: "2026-10-07T19:15" }
+
+  - id: colen-027
+    text: "at 9 p.m."
+    expect: { datetime: "2026-10-07T21:00" }
+
+  - id: colen-028
+    text: "at 3ish"
+    note: "приблизительное время = точное"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colen-029
+    text: "around 3"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colen-030
+    text: "at 3 in the afternoon"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colen-031
+    text: "at 9 in the morning"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: colen-032
+    text: "half past four"
+    expect: { datetime: "2026-10-07T16:30" }
+
+  - id: colen-033
+    text: "quarter to five"
+    expect: { datetime: "2026-10-07T16:45" }
+
+  - id: colen-034
+    text: "quarter past 2"
+    expect: { datetime: "2026-10-07T14:15" }
+
+  # Смешанная речь
+
+  - id: colen-035
+    text: "завтра в 3pm"
+    expect: { datetime: "2026-10-08T15:00" }
+
+  - id: colen-036
+    text: "в пятницу at 10"
+    expect: { datetime: "2026-10-09T10:00" }
+
+  - id: colen-037
+    text: "tomorrow в 10 утра"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  # Периоды
+
+  - id: colen-038
+    text: "rest of the week"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: colen-039
+    text: "until the end of the month"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
+
+  - id: colen-040
+    text: "on the weekend"
+    kind: range
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: colen-041
+    text: "next 3 days"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-09" } }
+
+  - id: colen-042
+    text: "next month"
+    kind: range
+    expect: { range: { from: "2026-11-01", to: "2026-11-30" } }
+
+  - id: colen-043
+    text: "tomorrow afternoon"
+    kind: range
+    expect: { range: { from: "2026-10-08T13:00", to: "2026-10-08T18:00" } }
+
+  - id: colen-044
+    text: "tonight"
+    kind: range
+    expect: { range: { from: "2026-10-07T18:00", to: "2026-10-08T00:00" } }
+
+  # Сдвиги, длительности, повторения
+
+  - id: colen-045
+    text: "2 hours later"
+    kind: shift
+    expect: { shift: "+PT2H" }
+
+  - id: colen-046
+    text: "half an hour earlier"
+    kind: shift
+    expect: { shift: "-PT30M" }
+
+  - id: colen-047
+    text: "a day later"
+    kind: shift
+    expect: { shift: "+P1D" }
+
+  - id: colen-048
+    text: "for half an hour"
+    kind: duration
+    expect: { duration: "PT30M" }
+
+  - id: colen-049
+    text: "for 2 hrs"
+    kind: duration
+    expect: { duration: "PT2H" }
+
+  - id: colen-050
+    text: "for a couple of hours"
+    kind: duration
+    status: proposed
+    note: "couple = 2"
+    expect: { duration: "PT2H" }
+
+  - id: colen-051
+    text: "every morning at 7:30"
+    kind: recurrence
+    expect: { recurrence: { freq: daily, time: "07:30" } }
+
+  - id: colen-052
+    text: "every other week"
+    kind: recurrence
+    expect: { recurrence: { freq: weekly, interval: 2 } }
+
+  - id: colen-053
+    text: "every other day"
+    kind: recurrence
+    expect: { recurrence: { freq: daily, interval: 2 } }

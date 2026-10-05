@@ -1,0 +1,128 @@
+# Опечатки, шум распознавания, регистр и пунктуация.
+# «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+
+  # Опечатки — только из явной таблицы TYPOS (lexicon.ts), без нечёткого поиска
+
+  - id: typo-001
+    text: "завтро в 10"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: typo-002
+    text: "послезавтро"
+    expect: { date: "2026-10-09" }
+
+  - id: typo-003
+    text: "сегоня вечером"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
+  - id: typo-004
+    text: "седня в 15"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: typo-005
+    text: "в пятнцу в 3 часа дня."
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: typo-006
+    text: "в чтверг"
+    expect: { date: "2026-10-08" }
+
+  - id: typo-007
+    text: "во вторнек"
+    expect: { date: "2026-10-13" }
+
+  - id: typo-008
+    text: "в понедельнек в 10"
+    expect: { datetime: "2026-10-12T10:00" }
+
+  - id: typo-009
+    text: "в суботу"
+    expect: { date: "2026-10-10" }
+
+  - id: typo-010
+    text: "в воскресение"
+    expect: { date: "2026-10-11" }
+
+  - id: typo-011
+    text: "в четвёрг"
+    expect: { date: "2026-10-08" }
+
+  # Регистр, пробелы, пунктуация
+
+  - id: typo-012
+    text: "В Пятницу В 15"
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: typo-013
+    text: "  в  пятницу   в  15 "
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: typo-014
+    text: "в субботу..."
+    expect: { date: "2026-10-10" }
+
+  - id: typo-015
+    text: "в субботу…"
+    expect: { date: "2026-10-10" }
+
+  - id: typo-016
+    text: "Завтра, в 10!"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  # Латинские буквы-двойники внутри русского слова
+
+  - id: typo-017
+    text: "в пятницy"
+    note: "латинская y"
+    expect: { date: "2026-10-09" }
+
+  - id: typo-018
+    text: "зaвтра в 10"
+    note: "латинская a"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: typo-019
+    text: "в cреду в 12"
+    note: "латинская c; среда = сегодня, время впереди → варианты"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T12:00" }
+        - { datetime: "2026-10-14T12:00" }
+
+  # Английские опечатки
+
+  - id: typo-020
+    text: "tommorow at 5pm"
+    expect: { datetime: "2026-10-08T17:00" }
+
+  - id: typo-021
+    text: "tmrw 9am"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: typo-022
+    text: "tonite at 8"
+    expect: { datetime: "2026-10-07T20:00" }
+
+  - id: typo-023
+    text: "febuary 14"
+    expect: { date: "2027-02-14" }
+
+  # Похожие настоящие слова не исправляются
+
+  - id: typo-024
+    text: "пятно"
+    expect: { error: unparseable }
+
+  - id: typo-025
+    text: "в пятно"
+    expect: { error: unparseable }
+
+  - id: typo-026
+    text: "завтрак"
+    expect: { error: unparseable }

@@ -1,0 +1,461 @@
+# Разговорный русский: синонимы, уменьшительные, время в записи Whisper, сокращения месяцев.
+# «Сейчас» — среда 2026-10-07 10:00.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+
+  # Синонимы относительных дней и сроков
+
+  - id: colru-001
+    text: "после завтра"
+    note: "раздельное написание — частая ошибка распознавания"
+    expect: { date: "2026-10-09" }
+
+  - id: colru-002
+    text: "после завтра в 10"
+    expect: { datetime: "2026-10-09T10:00" }
+
+  - id: colru-003
+    text: "через недельку"
+    expect: { date: "2026-10-14" }
+
+  - id: colru-004
+    text: "через денёк"
+    expect: { date: "2026-10-08" }
+
+  - id: colru-005
+    text: "через часик"
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: colru-006
+    text: "через полчасика"
+    expect: { datetime: "2026-10-07T10:30" }
+
+  - id: colru-007
+    text: "через 5 минуток"
+    expect: { datetime: "2026-10-07T10:05" }
+
+  - id: colru-008
+    text: "через пару дней"
+    status: proposed
+    note: "«пара» = 2"
+    expect: { date: "2026-10-09" }
+
+  - id: colru-009
+    text: "через пару часов"
+    status: proposed
+    note: "«пара» = 2"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  # Дни недели: «ближайшая» = «эта», «будущая» = «следующая»
+
+  - id: colru-010
+    text: "в эту субботу"
+    expect: { date: "2026-10-10" }
+
+  - id: colru-011
+    text: "в ближайшую пятницу"
+    expect: { date: "2026-10-09" }
+
+  - id: colru-012
+    text: "в ближайший понедельник в 10"
+    expect: { datetime: "2026-10-12T10:00" }
+
+  - id: colru-013
+    text: "в будущую пятницу"
+    note: "как «в следующую пятницу» — всегда варианты"
+    expect:
+      ambiguous:
+        - { date: "2026-10-09" }
+        - { date: "2026-10-16" }
+
+  - id: colru-014
+    text: "в пятницу на будущей неделе"
+    expect: { date: "2026-10-16" }
+
+  # Части суток: уменьшительные, «с утра», прилагательные дня
+
+  - id: colru-015
+    text: "завтра вечерком"
+    expect: { date: { date: "2026-10-08", part: evening } }
+
+  - id: colru-016
+    text: "завтра утречком"
+    expect: { date: { date: "2026-10-08", part: morning } }
+
+  - id: colru-017
+    text: "завтра с утра"
+    status: proposed
+    note: "«с утра» = утром (06–12)"
+    expect: { date: { date: "2026-10-08", part: morning } }
+
+  - id: colru-018
+    text: "на завтрашний вечер"
+    expect: { date: { date: "2026-10-08", part: evening } }
+
+  - id: colru-019
+    text: "завтрашнее утро"
+    expect: { date: { date: "2026-10-08", part: morning } }
+
+  - id: colru-020
+    text: "на субботний вечер"
+    expect: { date: { date: "2026-10-10", part: evening } }
+
+  - id: colru-021
+    text: "на вечер"
+    note: "«на вечер» — сегодня вечером; «вечер» без «на» и без дня — не дата («вечер встречи»)"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
+  - id: colru-022
+    text: "в пятницу в 3 часа дня"
+    expect: { datetime: "2026-10-09T15:00" }
+
+  - id: colru-023
+    text: "в 9 вечера"
+    expect: { datetime: "2026-10-07T21:00" }
+
+  - id: colru-024
+    text: "в 5 утра"
+    note: "часть суток названа и прошла → ближайшее такое время"
+    expect: { datetime: "2026-10-08T05:00" }
+
+  - id: colru-025
+    text: "9 утра"
+    expect: { datetime: "2026-10-08T09:00" }
+
+  - id: colru-026
+    text: "в час дня"
+    expect: { datetime: "2026-10-07T13:00" }
+
+  - id: colru-027
+    text: "в час ночи"
+    expect: { datetime: "2026-10-08T01:00" }
+
+  - id: colru-028
+    text: "в час"
+    note: "«час» = 1 → 1…6 после полудня"
+    expect: { datetime: "2026-10-07T13:00" }
+
+  # Время так, как его пишет Whisper
+
+  - id: colru-029
+    text: "в 15-30"
+    expect: { datetime: "2026-10-07T15:30" }
+
+  - id: colru-030
+    text: "в 15-00"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colru-031
+    text: "в 15 30"
+    expect: { datetime: "2026-10-07T15:30" }
+
+  - id: colru-032
+    text: "в 19 45"
+    expect: { datetime: "2026-10-07T19:45" }
+
+  - id: colru-033
+    text: "в 11.00"
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: colru-034
+    text: "в 15ч"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colru-035
+    text: "в 15 ч."
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: colru-036
+    text: "в девять тридцать"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T21:30" }
+        - { datetime: "2026-10-08T09:30" }
+
+  - id: colru-037
+    text: "в семь сорок пять вечера"
+    expect: { datetime: "2026-10-07T19:45" }
+
+  - id: colru-038
+    text: "пол третьего"
+    expect: { datetime: "2026-10-07T14:30" }
+
+  - id: colru-039
+    text: "пол-третьего"
+    expect: { datetime: "2026-10-07T14:30" }
+
+  - id: colru-040
+    text: "в полвосьмого вечера"
+    expect: { datetime: "2026-10-07T19:30" }
+
+  - id: colru-041
+    text: "в полдвенадцатого"
+    expect: { datetime: "2026-10-07T11:30" }
+
+  - id: colru-042
+    text: "в половину третьего"
+    expect: { datetime: "2026-10-07T14:30" }
+
+  - id: colru-043
+    text: "в четверть третьего"
+    expect: { datetime: "2026-10-07T14:15" }
+
+  - id: colru-044
+    text: "без четверти пять"
+    expect: { datetime: "2026-10-07T16:45" }
+
+  - id: colru-045
+    text: "без пятнадцати 3"
+    expect: { datetime: "2026-10-07T14:45" }
+
+  - id: colru-046
+    text: "без двадцати пяти три"
+    expect: { datetime: "2026-10-07T14:35" }
+
+  - id: colru-047
+    text: "без 10 шесть"
+    expect: { datetime: "2026-10-07T17:50" }
+
+  # Даты: сокращения месяцев, порядковые, год со словом «года»
+
+  - id: colru-048
+    text: "пятого ноября"
+    expect: { date: "2026-11-05" }
+
+  - id: colru-049
+    text: "5-го ноября"
+    expect: { date: "2026-11-05" }
+
+  - id: colru-050
+    text: "5 ноя"
+    expect: { date: "2026-11-05" }
+
+  - id: colru-051
+    text: "5 нояб."
+    expect: { date: "2026-11-05" }
+
+  - id: colru-052
+    text: "14 окт в 10"
+    expect: { datetime: "2026-10-14T10:00" }
+
+  - id: colru-053
+    text: "1 янв"
+    expect: { date: "2027-01-01" }
+
+  - id: colru-054
+    text: "05.11.2026"
+    expect: { date: "2026-11-05" }
+
+  - id: colru-055
+    text: "5 ноября 2026 года"
+    expect: { date: "2026-11-05" }
+
+  - id: colru-056
+    text: "5 ноября 2026 г."
+    expect: { date: "2026-11-05" }
+
+  - id: colru-057
+    text: "первое ноября"
+    expect: { date: "2026-11-01" }
+
+  - id: colru-058
+    text: "двадцать пятое октября"
+    expect: { date: "2026-10-25" }
+
+  - id: colru-059
+    text: "тридцатое октября в 10"
+    expect: { datetime: "2026-10-30T10:00" }
+
+  # Периоды для чтения
+
+  - id: colru-060
+    text: "в эти выходные"
+    kind: range
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: colru-061
+    text: "на выходных"
+    kind: range
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: colru-062
+    text: "на ближайших выходных"
+    kind: range
+    expect: { range: { from: "2026-10-10", to: "2026-10-11" } }
+
+  - id: colru-063
+    text: "до конца месяца"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
+
+  - id: colru-064
+    text: "на текущей неделе"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-11" } }
+
+  - id: colru-065
+    text: "на будущей неделе"
+    kind: range
+    expect: { range: { from: "2026-10-12", to: "2026-10-18" } }
+
+  - id: colru-066
+    text: "на след. неделе"
+    kind: range
+    expect: { range: { from: "2026-10-12", to: "2026-10-18" } }
+
+  - id: colru-067
+    text: "в текущем месяце"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-31" } }
+
+  - id: colru-068
+    text: "в будущем месяце"
+    kind: range
+    expect: { range: { from: "2026-11-01", to: "2026-11-30" } }
+
+  - id: colru-069
+    text: "следующие 3 дня"
+    kind: range
+    expect: { range: { from: "2026-10-07", to: "2026-10-09" } }
+
+  - id: colru-070
+    text: "на неделю вперёд"
+    kind: range
+    note: "как «на две недели вперёд»: N дней, включая сегодня"
+    expect: { range: { from: "2026-10-07", to: "2026-10-13" } }
+
+  - id: colru-071
+    text: "завтрашнее утро"
+    kind: range
+    expect: { range: { from: "2026-10-08T06:00", to: "2026-10-08T12:00" } }
+
+  - id: colru-072
+    text: "на завтрашний вечер"
+    kind: range
+    expect: { range: { from: "2026-10-08T18:00", to: "2026-10-09T00:00" } }
+
+  - id: colru-073
+    text: "сегодняшний вечер"
+    kind: range
+    expect: { range: { from: "2026-10-07T18:00", to: "2026-10-08T00:00" } }
+
+  # Сдвиги и длительности
+
+  - id: colru-074
+    text: "на часик позже"
+    kind: shift
+    expect: { shift: "+PT1H" }
+
+  - id: colru-075
+    text: "на полчасика раньше"
+    kind: shift
+    expect: { shift: "-PT30M" }
+
+  - id: colru-076
+    text: "на денёк позже"
+    kind: shift
+    expect: { shift: "+P1D" }
+
+  - id: colru-077
+    text: "на недельку вперёд"
+    kind: shift
+    expect: { shift: "+P7D" }
+
+  - id: colru-078
+    text: "на пару часов позже"
+    kind: shift
+    status: proposed
+    note: "«пара» = 2"
+    expect: { shift: "+PT2H" }
+
+  - id: colru-079
+    text: "на часик"
+    kind: duration
+    expect: { duration: "PT1H" }
+
+  - id: colru-080
+    text: "на полчасика"
+    kind: duration
+    expect: { duration: "PT30M" }
+
+  - id: colru-081
+    text: "на два с половиной часа"
+    kind: duration
+    expect: { duration: "PT2H30M" }
+
+  - id: colru-082
+    text: "часика на два"
+    kind: duration
+    expect: { duration: "PT2H" }
+
+  - id: colru-083
+    text: "на целый день"
+    kind: duration
+    expect: { duration: all_day }
+
+  - id: colru-084
+    text: "на пару часов"
+    kind: duration
+    status: proposed
+    note: "«пара» = 2"
+    expect: { duration: "PT2H" }
+
+  # Повторения
+
+  - id: colru-085
+    text: "каждое утро в 8"
+    kind: recurrence
+    expect: { recurrence: { freq: daily, time: "08:00" } }
+
+  - id: colru-086
+    text: "каждый вечер в 9"
+    kind: recurrence
+    note: "«вечер» уточняет час, как «в 9 вечера»"
+    expect: { recurrence: { freq: daily, time: "21:00" } }
+
+  - id: colru-087
+    text: "каждый будний день"
+    kind: recurrence
+    expect: { recurrence: { freq: weekly, by_day: [MO, TU, WE, TH, FR] } }
+
+  - id: colru-088
+    text: "по будним дням в 9"
+    kind: recurrence
+    expect: { recurrence: { freq: weekly, by_day: [MO, TU, WE, TH, FR], time: "09:00" } }
+
+  - id: colru-089
+    text: "каждую вторую неделю"
+    kind: recurrence
+    expect: { recurrence: { freq: weekly, interval: 2 } }
+
+  - id: colru-090
+    text: "каждую пятницу в 3 часа дня"
+    kind: recurrence
+    expect: { recurrence: { freq: weekly, by_day: [FR], time: "15:00" } }
+
+  # Должны остаться неразобранными
+
+  - id: colru-091
+    text: "к обеду"
+    note: "срок («к …») — не момент события (R1)"
+    expect: { error: unparseable }
+
+  - id: colru-092
+    text: "к концу недели"
+    note: "срок («к …») — не момент события (R1)"
+    expect: { error: unparseable }
+
+  - id: colru-093
+    text: "каждое утро"
+    kind: recurrence
+    note: "час не назван — переспросить"
+    expect: { error: unparseable }
+
+  - id: colru-094
+    text: "в 9-15"
+    note: "9:15 или «с 9 до 15» — не гадаем"
+    expect: { error: unparseable }
