@@ -122,7 +122,8 @@ type Step =
   | { press: string | { button: string; from?: number; again?: boolean } }
   /** Ответить (reply) на последний вопрос бота с ForceReply. */
   | { reply: { from: number; text: string } }
-  | { expect_callback_answer: { text_contains?: string[]; empty?: boolean } }
+  /** url_contains — ответ открывает ссылку (t.me/<бот>?start=…, US-95); capture — запомнить кусок url как {{имя}}. */
+  | { expect_callback_answer: { text_contains?: string[]; empty?: boolean; url_contains?: string[]; capture?: Record<string, string> } }
   | { expect_google_events: { email: string; calendar: string; events: ExpectedEvent[]; count?: number } }
   /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
   | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } }
@@ -130,7 +131,23 @@ type Step =
    * Запомнить кусок последнего сообщения бота, где регэксп нашёлся (одна группа): {invite: "start=home_(\\S+)"}.
    * Подставляется как {{имя}} в text шага telegram (US-90: код приглашения).
    */
-  | { capture_telegram: Record<string, string> };
+  | { capture_telegram: Record<string, string> }
+  // --- Inline-режим (US-95) ---
+  /** Inline-запрос «@бот <query>» от пользователя from (в любом чате). */
+  | { inline_query: { from: number; query: string; language?: string } }
+  /** Последний answerInlineQuery: empty — без результатов; results — по порядку (заголовок, текст карточки, кнопки). */
+  | { expect_inline_answer: { empty?: boolean; results?: InlineResultExpectation[] } }
+  /**
+   * Нажать кнопку под inline-сообщением — результатом index (0) последнего непустого answerInlineQuery, «отправленным» в чат:
+   * callback без message, с inline_message_id (один на результат — нажатия разных людей попадают в одно сообщение).
+   */
+  | { inline_press: { from: number; index?: number; language?: string } };
+
+interface InlineResultExpectation {
+  title?: string;
+  text_contains?: string[];
+  buttons?: string[];
+}
 
 /**
  * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
@@ -241,7 +258,16 @@ interface TelegramCall {
     message_id?: number;
     text?: string;
     reply_markup?: { inline_keyboard?: { text: string; url?: string; callback_data?: string }[][]; force_reply?: boolean };
+    /** answerInlineQuery (US-95). */
+    results?: InlineResult[];
   };
+}
+
+interface InlineResult {
+  id: string;
+  title: string;
+  input_message_content?: { message_text?: string };
+  reply_markup?: { inline_keyboard?: { text: string; url?: string; callback_data?: string }[][] };
 }
 
 async function allTelegramCalls(): Promise<TelegramCall[]> {
@@ -360,7 +386,7 @@ async function openConnectLink(
 // --- Выполнение --------------------------------------------------------------
 
 /** Служебные вызовы Telegram — не сообщения пользователю; в expect_telegram не учитываются. */
-const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction", "getWebhookInfo"]);
+const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction", "getWebhookInfo", "answerInlineQuery"]);
 
 class AssertionError extends Error {}
 
@@ -488,7 +514,9 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("capture_telegram" in step) {
       const calls = (await allTelegramCalls()).filter((c) => !SERVICE_METHODS.has(c.method)).reverse();
       for (const [name, re] of Object.entries(step.capture_telegram)) {
-        const m = calls.map((c) => new RegExp(re).exec(c.body.text ?? "")).find((x) => x?.[1]);
+        // Текст и ссылки кнопок (ссылка .ics, US-95)
+        const haystack = (c: TelegramCall) => [c.body.text ?? "", ...(c.body.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.url ?? "")].join("\n");
+        const m = calls.map((c) => new RegExp(re).exec(haystack(c))).find((x) => x?.[1]);
         if (!m) throw new AssertionError(`${where}: capture_telegram ${name} /${re}/ not found in bot messages`);
         vars.set(name, m[1]!);
       }
@@ -707,9 +735,18 @@ async function runScenario(s: Scenario): Promise<void> {
       await sendUpdate({ from: step.reply.from, text: step.reply.text, reply_to: q.messageId! }, where);
     } else if ("expect_callback_answer" in step) {
       const answers = (await allTelegramCalls()).filter((c) => c.method === "answerCallbackQuery");
-      const last = answers.at(-1) as { body: { text?: string } } | undefined;
+      const last = answers.at(-1) as { body: { text?: string; url?: string } } | undefined;
       if (!last) throw new AssertionError(`${where}: no answerCallbackQuery`);
       const text = last.body.text ?? "";
+      const cbUrl = last.body.url ?? "";
+      for (const part of step.expect_callback_answer.url_contains ?? []) {
+        if (!cbUrl.includes(part)) throw new AssertionError(`${where}: callback answer url «${cbUrl}» does not contain «${part}»`);
+      }
+      for (const [name, re] of Object.entries(step.expect_callback_answer.capture ?? {})) {
+        const m = new RegExp(re).exec(cbUrl);
+        if (!m?.[1]) throw new AssertionError(`${where}: callback answer url «${cbUrl}»: capture ${name} /${re}/ not found`);
+        vars.set(name, m[1]);
+      }
       if (step.expect_callback_answer.empty && text) throw new AssertionError(`${where}: callback answer «${text}», expected empty`);
       for (const part of step.expect_callback_answer.text_contains ?? []) {
         if (!text.includes(part)) throw new AssertionError(`${where}: callback answer «${text}» does not contain «${part}»`);
@@ -783,6 +820,65 @@ async function runScenario(s: Scenario): Promise<void> {
       await post(`${FAKES}/__fake/telegram/fail`, step.telegram_fails);
     } else if ("queue_retry" in step) {
       await drainInbox("retry", where, step.queue_retry !== true && !!step.queue_retry.expect_failure);
+    } else if ("inline_query" in step) {
+      const q = step.inline_query;
+      updateId++;
+      const update = {
+        update_id: updateId,
+        inline_query: {
+          id: `iq${updateId}`,
+          from: { id: q.from, is_bot: false, first_name: "Test", language_code: q.language ?? "ru" },
+          query: q.query,
+          offset: "",
+          chat_type: "sender",
+        },
+      };
+      const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
+      if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
+      await drainInbox("drain", where);
+    } else if ("expect_inline_answer" in step) {
+      const e = step.expect_inline_answer;
+      const last = (await allTelegramCalls()).filter((c) => c.method === "answerInlineQuery").at(-1);
+      if (!last) throw new AssertionError(`${where}: no answerInlineQuery`);
+      const results = last.body.results ?? [];
+      if (e.empty && results.length) throw new AssertionError(`${where}: expected no inline results, got ${JSON.stringify(results.map((r) => r.title))}`);
+      if (e.results) {
+        if (results.length !== e.results.length)
+          throw new AssertionError(
+            `${where}: ${results.length} inline result(s), expected ${e.results.length}: ${JSON.stringify(results.map((r) => r.title))}`,
+          );
+        for (const [k, want] of e.results.entries()) {
+          const got = results[k]!;
+          if (want.title !== undefined && got.title !== want.title)
+            throw new AssertionError(`${where}.${k + 1}: title «${got.title}», expected «${want.title}»`);
+          const text = got.input_message_content?.message_text ?? "";
+          for (const part of want.text_contains ?? [])
+            if (!text.includes(part)) throw new AssertionError(`${where}.${k + 1}: card text does not contain «${part}»:\n${text}`);
+          const buttons = (got.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.text);
+          if (want.buttons && JSON.stringify(buttons) !== JSON.stringify(want.buttons))
+            throw new AssertionError(`${where}.${k + 1}: buttons ${JSON.stringify(buttons)}, expected ${JSON.stringify(want.buttons)}`);
+        }
+      }
+    } else if ("inline_press" in step) {
+      const p = step.inline_press;
+      const answer = (await allTelegramCalls()).filter((c) => c.method === "answerInlineQuery" && c.body.results?.length).at(-1);
+      const result = answer?.body.results?.[p.index ?? 0];
+      const data = (result?.reply_markup?.inline_keyboard ?? []).flat().find((b) => b.callback_data)?.callback_data;
+      if (!result || !data) throw new AssertionError(`${where}: no inline result with a callback button`);
+      updateId++;
+      const update = {
+        update_id: updateId,
+        callback_query: {
+          id: `cq${++callbackSeq}`,
+          from: { id: p.from, is_bot: false, first_name: "Test", language_code: p.language ?? "ru" },
+          inline_message_id: `im-${result.id}`,
+          chat_instance: "ci-1",
+          data,
+        },
+      };
+      const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
+      if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
+      await drainInbox("drain", where);
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

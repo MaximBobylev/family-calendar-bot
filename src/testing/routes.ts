@@ -17,6 +17,8 @@ import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "../db/ops-state";
 import { runAlerts } from "../ops/alerts";
 
 const TABLES = [
+  "inline_adds",
+  "inline_events",
   "alert_state",
   "admin_audit",
   "ops_state",

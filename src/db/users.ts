@@ -83,6 +83,9 @@ export async function deleteUserData(db: D1Database, userId: string, telegramId:
     db.prepare("DELETE FROM assignments WHERE created_by = ?1").bind(userId),
     db.prepare("UPDATE assignments SET assignee_user_id = NULL WHERE assignee_user_id = ?1").bind(userId),
     db.prepare("DELETE FROM household_members WHERE user_id = ?1").bind(userId),
+    // Inline-карточки (US-95): свои события и отметки «добавил»
+    db.prepare("DELETE FROM inline_events WHERE created_by_tg = ?1").bind(String(telegramId)),
+    db.prepare("DELETE FROM inline_adds WHERE telegram_id = ?1").bind(String(telegramId)),
     // Дом владельца: отвязать чаты, убрать участников, детей, общие календари, приглашения (US-90)
     ...dissolveStatements(db, "SELECT id FROM households WHERE owner_user_id = ?1", userId),
     db.prepare("DELETE FROM household_invites WHERE created_by = ?1").bind(userId),

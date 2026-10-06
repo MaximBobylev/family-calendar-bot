@@ -8,6 +8,7 @@ import { deleteMessages } from "./messages/delete";
 import { findMessages } from "./messages/find";
 import { householdMessages } from "./messages/household";
 import { ingestMessages } from "./messages/ingest";
+import { inlineMessages } from "./messages/inline";
 import { inputMessages } from "./messages/input";
 import { modifyMessages } from "./messages/modify";
 import { readMessages } from "./messages/read";
@@ -27,6 +28,7 @@ export const messages = {
   ...inputMessages,
   ...householdMessages,
   ...ingestMessages,
+  ...inlineMessages,
 };
 
 export type MessageKey = keyof typeof messages;

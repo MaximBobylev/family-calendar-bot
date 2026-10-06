@@ -163,7 +163,8 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
     url: `${url}/telegram/webhook`,
     secret_token: secrets.TELEGRAM_WEBHOOK_SECRET,
     // edited_message не подписываем: игнорируется, но тратил бы квоты
-    allowed_updates: ["message", "callback_query"],
+    // inline_query — inline-карточки (US-95); inline-режим включает владелец в @BotFather: /setinline
+    allowed_updates: ["message", "callback_query", "inline_query"],
     // Не сбрасываем: после неудачного деплоя там как раз ждут сообщения пользователей
     drop_pending_updates: false,
   }),

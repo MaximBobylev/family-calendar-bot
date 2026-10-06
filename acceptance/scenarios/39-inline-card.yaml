@@ -1,0 +1,177 @@
+# US-95: inline-карточка «📅 Добавить себе». «Сейчас» — ср 7 октября 2026, 10:00 МСК. Имя бота на стенде — @cab_test_bot.
+# 1001 — автор карточки (Google, Москва); 1002 — в allowlist (с Google или без — по сценарию); 999 — посторонний.
+# Нажатие под inline-сообщением приходит без message (только inline_message_id) — шаг inline_press.
+
+- id: inline-query-registered-user
+  story: US-95
+  steps:
+    - &sender
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    - expect_inline_answer:
+        results:
+          - title: "⚽ Футбол — завтра, 19:00"
+            text_contains: ["⚽ <b>Футбол</b>", "чт, 8 октября, 19:00–20:00 (UTC+3)"]
+            buttons: ["📅 Добавить себе"]
+    # Только дата — на весь день
+    - inline_query: { from: 1001, query: "день рождения Маши 10 октября" }
+    - expect_inline_answer:
+        results:
+          - title: "🎂 День рождения Маши — сб, 10 октября, весь день"
+            text_contains: ["сб, 10 октября, весь день"]
+    # Без даты — нечего предложить; LLM не вызывается, в чат ничего не пишем
+    - inline_query: { from: 1001, query: "футбол" }
+    - expect_inline_answer: { empty: true }
+    - expect_llm_requests: 0
+    - expect_no_telegram: true
+
+- id: inline-query-outsider-gets-nothing
+  story: US-95
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - inline_query: { from: 999, query: "завтра 19:00 футбол" }
+    - expect_inline_answer: { empty: true }
+    # В allowlist, но бота ещё не запускал — карточка есть (пояс пока UTC)
+    - inline_query: { from: 1002, query: "завтра 19:00 футбол" }
+    - expect_inline_answer:
+        results:
+          - title: "⚽ Футбол — завтра, 19:00"
+            text_contains: ["19:00–20:00 (UTC)"]
+    - expect_no_telegram: true
+
+- id: inline-press-google-user-creates-event
+  story: US-95
+  steps:
+    - *sender
+    - connected_user:
+        from: 1002
+        email: petr@gmail.com
+        calendars:
+          - { id: petr@gmail.com, summary: "Пётр", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    - inline_press: { from: 1002 }
+    - expect_callback_answer: { text_contains: ["личном чате"] }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["⚽ <b>Футбол</b>", "✅ Добавили себе: 1"] }
+        - { chat_id: 1002, text_contains: ["Создать событие?", "Футбол", "чт, 8 октября, 19:00–20:00"], buttons: ["Создать", "Отмена"] }
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Создано", "Футбол"] }
+    - expect_google_events:
+        email: petr@gmail.com
+        calendar: petr@gmail.com
+        count: 1
+        events:
+          - { summary: "Футбол", start: "2026-10-08T19:00:00+03:00", end: "2026-10-08T20:00:00+03:00" }
+    # Тот же человек ещё раз — счётчик не растёт; автор тоже может добавить себе — 2
+    - inline_press: { from: 1002 }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Создать событие?"] }
+    - inline_press: { from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Добавили себе: 2"] }
+        - { chat_id: 1001, text_contains: ["Создать событие?", "Футбол"] }
+
+- id: inline-press-before-private-chat-opens-deep-link
+  story: US-95
+  steps:
+    - *sender
+    - connected_user:
+        from: 1002
+        email: petr@gmail.com
+        calendars:
+          - { id: petr@gmail.com, summary: "Пётр", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    # Личный чат с ботом недоступен (не начат или бот заблокирован) — Telegram отвечает 403
+    - telegram_fails: { text_contains: "Создать событие?", status: 403 }
+    - inline_press: { from: 1002 }
+    - expect_callback_answer: { url_contains: ["https://t.me/cab_test_bot?start=add_"], capture: { token: "start=add_([0-9a-f]+)" } }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Добавили себе: 1"] }
+    # Открыл чат по ссылке — карточка создания
+    - telegram: { from: 1002, text: "/start add_{{token}}" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Создать событие?", "Футбол"], buttons: ["Создать", "Отмена"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: petr@gmail.com
+        calendar: petr@gmail.com
+        count: 1
+        events:
+          - { summary: "Футбол", start: "2026-10-08T19:00:00+03:00", end: "2026-10-08T20:00:00+03:00" }
+
+- id: inline-press-user-without-google-gets-links
+  story: US-95
+  steps:
+    - *sender
+    - telegram: { from: 1002, text: "/start" }
+    - expect_telegram_count: 1
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    - inline_press: { from: 1002 }
+    - expect_callback_answer: { text_contains: ["личном чате"] }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Добавили себе: 1"] }
+        - chat_id: 1002
+          text_contains: ["Футбол", "Добавить в свой календарь", "Подключите свой Google"]
+          buttons: ["Google Календарь", "Скачать .ics"]
+
+- id: inline-press-outsider-template-link-and-ics
+  story: US-95
+  steps:
+    - *sender
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    # Постороннему — только ссылка в личный чат с ботом (callback может открыть лишь t.me/<бот>?start=…)
+    - inline_press: { from: 999 }
+    - expect_callback_answer: { url_contains: ["https://t.me/cab_test_bot?start=add_"], capture: { token: "start=add_([0-9a-f]+)" } }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Добавили себе: 1"] }
+    - telegram: { from: 999, text: "/start add_{{token}}" }
+    - expect_telegram:
+        - chat_id: 999
+          text_contains: ["⚽ <b>Футбол</b>", "чт, 8 октября, 19:00–20:00 (UTC+3)", "Добавить в свой календарь", "по приглашениям"]
+          buttons: ["Google Календарь", "Скачать .ics"]
+    - capture_telegram: { ics: "/ics/([0-9a-f]{20})", dates: "dates=([0-9TZ%F]+)" }
+    - http_get:
+        path: "/ics/{{ics}}"
+        text_contains:
+          - "BEGIN:VCALENDAR"
+          - "METHOD:PUBLISH"
+          - "BEGIN:VEVENT"
+          - "UID:{{ics}}@"
+          - "DTSTART:20261008T160000Z"
+          - "DTEND:20261008T170000Z"
+          - "SUMMARY:Футбол"
+          - "END:VCALENDAR"
+    - capture_telegram: { gcal: "(https://calendar.google.com/calendar/render\\?action=TEMPLATE&text=%D0%A4%D1%83%D1%82%D0%B1%D0%BE%D0%BB&dates=20261008T160000Z%2F20261008T170000Z)" }
+    # Остальное посторонний по-прежнему не может
+    - telegram: { from: 999, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 999, text_contains: ["закрыт"] }
+
+- id: inline-expired-or-unknown-token
+  story: US-95
+  steps:
+    - *sender
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    - inline_press: { from: 999 }
+    - expect_callback_answer: { capture: { token: "start=add_([0-9a-f]+)" } }
+    - expect_telegram_count: 1
+    - http_get: { path: "/ics/{{token}}", text_contains: ["SUMMARY:Футбол"] }
+    # Неделя после события — токен истёк
+    - clock: "2026-10-15T18:00:00Z"
+    - inline_press: { from: 999 }
+    - expect_callback_answer: { text_contains: ["устарела"] }
+    - http_get: { path: "/ics/{{token}}", expect_status: 404 }
+    - telegram: { from: 999, text: "/start add_{{token}}" }
+    - expect_telegram:
+        - { chat_id: 999, text_contains: ["устарела"] }
+    - inline_press: { from: 1001 }
+    - expect_callback_answer: { text_contains: ["устарела"] }
+    # Неизвестный и кривой токен
+    - http_get: { path: "/ics/00000000000000000000", expect_status: 404 }
+    - expect_no_telegram: true

@@ -6,7 +6,9 @@
 
 ```
 Telegram → POST /telegram/webhook (src/index.ts)
-  → bot/gate.ts (посторонние — ответ сразу; доступ: allowlist или дом; в группе — только обращённое к боту)
+  → inline_query → bot/inline/query.ts — ответ сразу, без inbox (US-95)
+  → bot/gate.ts (посторонние — ответ сразу; доступ: allowlist или дом; в группе — только обращённое к боту;
+                 посторонним — ссылки inline-карточки, bot/inline/guest.ts)
   → inbox.ts: запись в D1 (дедуп по update_id) → 200
   → waitUntil: process.ts → bot/handle-update.ts        (очередь INBOX — страховка через 60 с и ретраи с backoff)
        повтор после сбоя: ctx.progress из inbox (текст голосового, «🎙» отправлено, интент) — STT/LLM не повторяются
@@ -25,6 +27,7 @@ Telegram → POST /telegram/webhook (src/index.ts)
 cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в 5 мин — ops/alerts.ts (алерты владельцу);
                        раз в час — cleanup, ensureDigests
 GET /health → ops/health.ts (D1 + возраст последнего cron; 503 — для внешнего монитора)
+GET /ics/<токен> → bot/inline/guest.ts (файл события inline-карточки, US-95)
 ```
 
 В TEST_MODE обработку запускает раннер через `/__test/drain` (упавшие апдейты — 500 со списком), ретрай очереди — `/__test/retry`, часы — `/__test/clock` (src/testing/routes.ts).
@@ -49,6 +52,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
 | Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
+| Inline-карточка «📅 Добавить себе» (US-95) | `src/bot/inline/*`: разбор запроса, текст карточки, шаблон Google Calendar, `.ics` — `logic.ts` (чистый, `test/inline-logic.test.ts`); inline-запрос — `query.ts` (из webhook, без inbox); нажатие и `/start add_<токен>` — `press.ts` (зарегистрированные) и `guest.ts` (посторонние — из `gate.ts`, `/ics/<токен>`); SQL — `src/db/inline.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
 ## src/
@@ -85,6 +89,10 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/household/commands.ts` | Команды дома в личном чате: создать, пригласить, вступить по ссылке (`joinByInvite`), имя, дети, `/leave` |
 | `bot/household/menu.ts` | Экран `/home` и кнопки `hm:*` (пригласить, календари дома, убрать участника/ребёнка, выйти, распустить); `dissolveWithNotice` |
 | `bot/household/group.ts` | Групповой чат: `/home link`/`unlink`, команды участников по календарям дома, нажатия карточек любым участником (от имени автора) |
+| `bot/inline/logic.ts` | US-95, чистый: inline-запрос → событие(я), текст карточки, заголовок результата, ссылка-шаблон Google Calendar, `.ics`, `ia:<токен>` и `/start add_<токен>` |
+| `bot/inline/query.ts` | Inline-запрос: доступ, разбор, токены в D1, `answerInlineQuery` (прямо из webhook, без inbox) |
+| `bot/inline/press.ts` | «📅 Добавить себе» от пользователя бота: с Google — карточка создания в личном чате, без — ссылки; чат не начат — deep link |
+| `bot/inline/guest.ts` | Токен (HMAC), кнопка, счётчик «Добавили себе», ссылки без OAuth; посторонние — нажатие и `/start add_<токен>` из `gate.ts`; `GET /ics/<токен>` |
 | `bot/household/scope.ts` | Чьи календари в разговоре (`CalendarScope`), «👤 Добавляет: …», запись автора в `event_meta` |
 | `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
@@ -99,7 +107,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык) |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
@@ -141,7 +149,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
 | **vision/** | `understand.ts` — US-66: картинка → видимый текст + `create_event`/`no_event` (Gemini из VOICE_CHAIN, `config.vision`) |
 | **ics/** | `parse.ts` — разбор `.ics` (RFC 5545: свёртка, TZID, DATE, DURATION, RRULE; чистый); `convert.ts` — событие файла → время в поясе пользователя |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week` |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |

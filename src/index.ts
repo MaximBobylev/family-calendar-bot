@@ -20,6 +20,8 @@ import { log, logged } from "./log";
 import { timingSafeEqual } from "./crypto";
 import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
+import { handleInlineQuery } from "./bot/inline/query";
+import { serveIcs } from "./bot/inline/guest";
 
 async function context(env: Env): Promise<AppContext> {
   const config = loadConfig(env);
@@ -36,6 +38,14 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
   }
   const update = (await request.json().catch(() => null)) as TgUpdate | null;
   if (!update || typeof update.update_id !== "number") return new Response("Bad request", { status: 400 });
+
+  // Inline-запрос (US-95): ответ сразу, без inbox — приходит на каждое нажатие клавиши, повтор безвреден
+  if (update.inline_query) {
+    const answer = handleInlineQuery(ctx, update.inline_query).catch((e) => console.error("inline query failed", e));
+    if (ctx.config.testMode) await answer;
+    else exec.waitUntil(answer);
+    return new Response("ok");
+  }
 
   // Посторонние и чужая переписка в группах — ответ сразу, без записи в D1 и очереди: спам не тратит квоты (ревью 2026-10-05)
   const gate = await gateUpdate(ctx, update);
@@ -78,6 +88,8 @@ export default {
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request, exec);
     if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
+    // Файл события inline-карточки (US-95)
+    if (request.method === "GET" && url.pathname.startsWith("/ics/")) return serveIcs(ctx, url.pathname);
     if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return handleAdmin(ctx, request, url);
     // Fail-closed: тестовые маршруты никогда не работают на публичном https-адресе
     if (ctx.config.testMode && !ctx.config.publicBaseUrl.startsWith("https://") && url.pathname.startsWith("/__test/")) {

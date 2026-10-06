@@ -62,6 +62,9 @@ export const COST_ESTIMATES: CostEstimates = {
   sttPerMin: 0.0005, // Whisper large-v3-turbo, $ за минуту аудио
 };
 
+/** Ссылка-шаблон «добавить в Google Календарь» без OAuth (US-95): бот её не вызывает, только отдаёт пользователю. */
+export const GOOGLE_CALENDAR_TEMPLATE_URL = "https://calendar.google.com/calendar/render";
+
 export function loadConfig(env: Env): Config {
   const allowed = (env.ALLOWED_TELEGRAM_IDS ?? "")
     .split(",")
