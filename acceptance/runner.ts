@@ -16,6 +16,8 @@ import { parse as parseYaml } from "yaml";
 const SUT = process.env.SUT_URL ?? "http://localhost:8787";
 const FAKES = process.env.FAKES_URL ?? "http://localhost:9100";
 const SECRET = process.env.WEBHOOK_SECRET ?? "test-secret";
+/** Имя бота (TELEGRAM_BOT_USERNAME стенда) — для ответов боту в группе (US-94). */
+const BOT_USERNAME = process.env.BOT_USERNAME ?? "cab_test_bot";
 const cliArgs = process.argv.slice(2);
 const listOnly = cliArgs.includes("--list") || !!process.env.SCENARIO_LIST;
 const filters = [...cliArgs.filter((a) => a !== "--list"), process.env.SCENARIO ?? ""].flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
@@ -103,7 +105,12 @@ type Step =
   | { expect_callback_answer: { text_contains?: string[]; empty?: boolean } }
   | { expect_google_events: { email: string; calendar: string; events: ExpectedEvent[]; count?: number } }
   /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
-  | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } };
+  | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } }
+  /**
+   * Запомнить кусок последнего сообщения бота, где регэксп нашёлся (одна группа): {invite: "start=home_(\\S+)"}.
+   * Подставляется как {{имя}} в text шага telegram (US-90: код приглашения).
+   */
+  | { capture_telegram: Record<string, string> };
 
 /**
  * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
@@ -149,6 +156,8 @@ interface TelegramInput {
   forwarded?: boolean;
   /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
   expect_failure?: boolean;
+  /** Ответ (reply) на последнее сообщение бота в этом чате — обращение к боту в группе (US-94). */
+  reply_to_bot?: boolean;
 }
 
 interface ExpectedEvent {
@@ -210,6 +219,13 @@ interface TelegramCall {
 
 async function allTelegramCalls(): Promise<TelegramCall[]> {
   return (await (await fetch(`${FAKES}/__fake/telegram/calls`)).json()) as TelegramCall[];
+}
+
+/** Последнее сообщение бота в чате — как reply_to_message «ответа боту» (с автором-ботом). */
+async function lastBotMessageIn(chatId: number): Promise<{ message_id: number; from: unknown }> {
+  const last = (await allTelegramCalls()).filter((c) => c.method === "sendMessage" && String(c.body.chat_id) === String(chatId) && c.messageId).at(-1);
+  if (!last) throw new AssertionError(`no bot message in chat ${chatId} to reply to`);
+  return { message_id: last.messageId!, from: { id: 1, is_bot: true, first_name: "Bot", username: BOT_USERNAME } };
 }
 
 /** URL последней кнопки привязки Google из сообщений бота (from — только в этот чат). */
@@ -361,6 +377,7 @@ async function runScenario(s: Scenario): Promise<void> {
       },
       ...(t.text !== undefined ? { text: t.text } : {}),
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
+      ...(t.reply_to_bot ? { reply_to_message: await lastBotMessageIn(t.chat_id ?? t.from) } : {}),
       ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
       ...(t.forwarded ? { forward_origin: { type: "user", date: 0, sender_user: { id: 777, is_bot: false, first_name: "Friend" } } } : {}),
     };
@@ -398,7 +415,8 @@ async function runScenario(s: Scenario): Promise<void> {
       callback_query: {
         id: `cq${++callbackSeq}`,
         from: { id: p.from, is_bot: false, first_name: "Test", language_code: "ru" },
-        message: { message_id: p.messageId, date: 0, chat: { id: p.chatId, type: "private" } },
+        // Отрицательный id — групповой чат (как в Telegram)
+        message: { message_id: p.messageId, date: 0, chat: { id: p.chatId, type: p.chatId < 0 ? "group" : "private" } },
         data: p.data,
       },
     };
@@ -428,7 +446,14 @@ async function runScenario(s: Scenario): Promise<void> {
       const res = await post(`${SUT}/__test/clock`, { now: step.clock });
       if (!res.ok) throw new AssertionError(`${where}: clock → ${res.status}`);
     } else if ("telegram" in step) {
-      await sendUpdate(step.telegram, where);
+      await sendUpdate(step.telegram.text ? { ...step.telegram, text: fill(step.telegram.text) } : step.telegram, where);
+    } else if ("capture_telegram" in step) {
+      const calls = (await allTelegramCalls()).filter((c) => !SERVICE_METHODS.has(c.method)).reverse();
+      for (const [name, re] of Object.entries(step.capture_telegram)) {
+        const m = calls.map((c) => new RegExp(re).exec(c.body.text ?? "")).find((x) => x?.[1]);
+        if (!m) throw new AssertionError(`${where}: capture_telegram ${name} /${re}/ not found in bot messages`);
+        vars.set(name, m[1]!);
+      }
     } else if ("webhook_raw" in step) {
       const w = step.webhook_raw;
       const headers: Record<string, string> = w.secret === null ? {} : { "x-telegram-bot-api-secret-token": w.secret ?? SECRET };

@@ -21,6 +21,7 @@ import {
 } from "./create-logic";
 import { cardBody, createCard } from "./create-view";
 import { dateLabel, escapeHtml, hhmm } from "./format";
+import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
 
@@ -82,7 +83,8 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   // Пересечения — только для единственного варианта (US-30)
   const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
   const { text, buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps);
-  const sent = await ctx.telegram.sendMessage(chatId, text, { inline_keyboard: buttons }, { html: true });
+  const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
+  const sent = await ctx.telegram.sendMessage(chatId, `${text}${by}`, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -150,6 +152,8 @@ export async function confirmCreate(
     ...remindersFor(user, o.allDay),
   });
 
+  // Автор — тот, кто попросил (в группе нажать «Создать» может любой взрослый дома, US-94)
+  await noteCreator(ctx, created.ref, action.userId);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
   const body = cardBody(o, today, locale, calendarsCount > 1);
   const undo = await recordUndo(ctx, {
@@ -161,7 +165,8 @@ export async function confirmCreate(
   });
   const row = [...(created.link ? [{ text: t("openInCalendar", locale), url: created.link }] : []), undo.button];
   if (action.messageId) {
-    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}`, { inline_keyboard: [row] }, { html: true });
+    const by = await creatorNote(ctx, action.userId, "homeCreatedByDone", locale);
+    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}${by}`, { inline_keyboard: [row] }, { html: true });
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());

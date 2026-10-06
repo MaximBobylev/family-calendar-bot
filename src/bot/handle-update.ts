@@ -1,13 +1,21 @@
-// Вход обработки одного апдейта: правки и чужие боты — мимо, группы и доступ (US-01), регистрация, /disconnect
-// (US-03), без календаря — только «Подключить», дальше — сообщение (input/message.ts) или нажатие (callbacks.ts).
+// Вход обработки одного апдейта: правки и чужие боты — мимо, доступ (US-01; приглашённые в дом — US-90), группы (US-94),
+// регистрация, /disconnect (US-03), команды дома, без календаря и дома — только «Подключить»; дальше — сообщение
+// (input/message.ts) или нажатие (callbacks.ts). Участник дома без Google работает с общими календарями дома.
 
 import { hasGoogleAccount } from "../db/accounts";
+import { membershipOf } from "../db/households";
 import { ensureTelegramUser, type User } from "../db/users";
 import type { TgUpdate } from "../telegram/types";
 import { handleCallback } from "./callbacks";
 import type { AppContext } from "./context";
 import { isDisconnectCommand, proposeDisconnect } from "./disconnect";
 import { telegramName } from "./format";
+import { hasAccess } from "./gate";
+import { handleHouseholdText, joinByInvite } from "./household/commands";
+import { handleGroupCallback, handleGroupMessage } from "./household/group";
+import { isAddressedToBot, parseHomeStart } from "./household/logic";
+import { handleHouseholdCallback, isHouseholdCallback } from "./household/menu";
+import { householdScope } from "./household/scope";
 import { handleCommand } from "./input/message";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
@@ -20,21 +28,40 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
   const from = message?.from ?? update.callback_query?.from;
   if (!from || from.is_bot) return;
   const lang = from.language_code ?? "ru";
+  const chat = message?.chat ?? update.callback_query?.message?.chat;
+  const isGroup = !!chat && chat.type !== "private";
+  if (chat?.type === "channel") return;
+  // В группе — только обращённое к боту (privacy mode, US-94); webhook уже отсеял, здесь — для повторов из очереди
+  if (message && isGroup && !isAddressedToBot(message, ctx.config.telegramBotUsername)) return;
 
-  if (message && message.chat.type !== "private") {
-    await ctx.telegram.sendMessage(message.chat.id, t("privateOnly", lang));
-    return;
-  }
-
-  // Доступ проверяется до любой обработки (US-01, ADR-0001)
-  if (!ctx.config.allowedTelegramIds.has(String(from.id))) {
+  // Доступ проверяется до любой обработки (US-01, ADR-0001; приглашённые в дом — US-90)
+  if (!(await hasAccess(ctx, from.id, message))) {
     if (message) await ctx.telegram.sendMessage(message.chat.id, t("notAllowed", lang));
     return;
   }
 
+  // Вступление в дом по ссылке: код проверяется до регистрации (US-90)
+  const inviteCode = message && !isGroup ? parseHomeStart(message.text) : null;
+  if (message && inviteCode) {
+    await joinByInvite(ctx, from, message.chat.id, inviteCode);
+    return;
+  }
+
   const user: User = { ...(await ensureTelegramUser(ctx.db, from.id, ctx.clock.now())).user, tgName: telegramName(from) };
+  if (isGroup) {
+    if (update.callback_query) await handleGroupCallback(ctx, user, update.callback_query);
+    else if (message) await handleGroupMessage(ctx, user, message);
+    return;
+  }
+
+  // Участник дома без своего Google — общие календари дома через аккаунт владельца (US-90)
+  const hasGoogle = await hasGoogleAccount(ctx.db, user.id);
+  const membership = hasGoogle ? null : await membershipOf(ctx.db, user.id);
+  const scoped: AppContext = membership ? { ...ctx, calendarScope: await householdScope(ctx.db, membership.household) } : ctx;
+
   if (update.callback_query) {
-    await handleCallback(ctx, user, update.callback_query);
+    if (isHouseholdCallback(update.callback_query.data)) await handleHouseholdCallback(ctx, user, update.callback_query);
+    else await handleCallback(scoped, user, update.callback_query);
     return;
   }
   if (!message) return;
@@ -45,17 +72,22 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     await proposeDisconnect(ctx, user, message.chat.id);
     return;
   }
+  // /home, /leave, «создай дом …», ответ на «как вас называть» — и без Google (US-90)
+  if (await handleHouseholdText(ctx, user, message, from)) return;
 
-  // Без привязанного календаря интент не распознаём — только предлагаем подключить (US-01)
-  if (!(await hasGoogleAccount(ctx.db, user.id))) {
+  // Без привязанного календаря и дома интент не распознаём — только предлагаем подключить (US-01)
+  if (!hasGoogle && !membership) {
     const text = isStart ? `${t("welcome", user.locale)}\n\n${t("connectPrompt", user.locale)}` : t("connectPrompt", user.locale);
     await ctx.telegram.sendMessage(message.chat.id, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
     return;
   }
 
   if (isStart) {
-    await ctx.telegram.sendMessage(message.chat.id, t("welcome", user.locale));
+    await ctx.telegram.sendMessage(
+      message.chat.id,
+      membership ? t("homeWelcomeMember", user.locale, { name: membership.household.name }) : t("welcome", user.locale),
+    );
     return;
   }
-  await handleCommand(ctx, user, message);
+  await handleCommand(scoped, user, message);
 }

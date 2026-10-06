@@ -31,6 +31,8 @@ const TABLES = [
   "conversations",
   "assignments",
   "event_meta",
+  "household_calendars",
+  "household_invites",
   "dependents",
   "household_members",
   "households",

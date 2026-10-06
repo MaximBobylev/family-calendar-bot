@@ -1,0 +1,249 @@
+# US-90: дом и участники без Google. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+# Владелец — 1001 (allowlist, Google ivan@gmail.com). Аня — 2001: НЕ в allowlist, входит по приглашению, без Google.
+# Общий календарь дома — «Семья»; личный «Иван» владелец из общих убирает.
+
+- id: household-create-invite-join
+  story: US-90
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+          - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+    - telegram: { from: 1001, text: "Создай дом \"Бобылевы\"" }
+    # По умолчанию общие — календарь по умолчанию и «семейный» по названию
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Дом «Бобылевы» создан"], buttons: ["✅ Иван", "▫️ Праздники", "✅ Семья", "➕ Пригласить", "Готово"] }
+    - press: "✅ Иван"
+    - expect_telegram:
+        - { method: editMessageText, buttons: ["▫️ Иван", "▫️ Праздники", "✅ Семья", "➕ Пригласить", "Готово"] }
+    - press: "➕ Пригласить"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["одноразовая, действует 48 часов", "https://t.me/cab_test_bot?start=home_"] }
+    - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
+    # Аня не в allowlist — приглашение даёт доступ
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Вы в доме «Бобылевы»", "Что у нас завтра?"] }
+        - { chat_id: 2001, text_contains: ["Как вас называть в доме?"] }
+        - { chat_id: 1001, text_contains: ["Аня присоединился(-ась) к дому «Бобылевы»"] }
+    - reply: { from: 2001, text: "Аня, жена, мама" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Запомнил: Аня (а также: жена, мама)"] }
+    - telegram: { from: 2001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Вы в доме «Бобылевы»", "/connect"], text_not_contains: ["подключите Google"] }
+    - telegram: { from: 1001, text: "/home" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["Дом «Бобылевы»", "Test (владелец)", "Аня (без Google) — жена, мама", "Общие календари: Семья"]
+          buttons: ["➕ Пригласить", "📅 Календари дома", "✖ Аня", "Распустить дом"]
+    - telegram: { from: 2001, text: "/home" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Дом «Бобылевы»"], buttons: ["Выйти из дома"] }
+
+- id: household-invite-single-use-and-outsiders
+  story: US-90
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              events:
+                - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+      - llm:
+          "Что у нас завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Плавание Маши в субботу в 10": { tool: create_event, args: { start: "в субботу в 10", title: "Плавание Маши" } }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - press: "✅ Иван"
+      - press: "➕ Пригласить"
+      - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
+      - reply: { from: 2001, text: "Аня, жена" }
+      - expect_telegram_count: 7
+    # Ссылка одноразовая
+    - telegram: { from: 2002, text: "/start home_{{invite}}" }
+    - expect_telegram:
+        - { chat_id: 2002, text_contains: ["недействительна"] }
+    - telegram: { from: 2002, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2002, text_contains: ["закрытом режиме"] }
+    - telegram: { from: 999, text: "/start home_bogus12345" }
+    - expect_telegram:
+        - { chat_id: 999, text_contains: ["недействительна"] }
+    # Приглашение истекает через 48 часов
+    - press: { button: "➕ Пригласить", from: 1001 }
+    - capture_telegram: { late: "start=home_([A-Za-z0-9_-]+)" }
+    - clock: "2026-10-09T07:01:00Z"
+    - telegram: { from: 2003, text: "/start home_{{late}}" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Ссылка-приглашение"] }
+        - { chat_id: 2003, text_contains: ["недействительна"] }
+
+- id: household-member-reads-and-creates-via-owner-google
+  story: US-90
+  steps:
+    - *home
+    # Только общие календари дома: «Планёрка» из личного календаря владельца не видна
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Ужин у бабушки"], text_not_contains: ["Планёрка"] }
+    - telegram: { from: 2001, text: "Плавание Маши в субботу в 10" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Создать событие?", "Плавание Маши", "сб, 10 октября, 10:00–11:00", "👤 Добавляет: Аня"] }
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "Плавание Маши", "👤 Добавил(а): Аня"] }
+    # Запись — через Google владельца, в общий календарь
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Плавание Маши", start: "2026-10-10T10:00:00+03:00", end: "2026-10-10T11:00:00+03:00" }]
+    # «Отмени последнее» — и у участника (через тот же Google владельца)
+    - telegram: { from: 2001, text: "Отмени последнее" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["↩ Отменено", "Плавание Маши"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: family@group.calendar.google.com, events: [], count: 1 }
+
+- id: household-member-aliases-and-children
+  story: US-90
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "/home name Дима, муж, папа" }
+    - telegram: { from: 2001, text: "/home kid Маша, Машенька" }
+    - telegram: { from: 2001, text: "/home kid Ваня" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Запомнил: Дима (а также: муж, папа)"] }
+        - { chat_id: 2001, text_contains: ["Добавил ребёнка: Маша (а также: Машенька)"] }
+        - { chat_id: 2001, text_contains: ["Добавил ребёнка: Ваня"] }
+    - telegram: { from: 1001, text: "/home" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["Дима (владелец) — муж, папа", "Аня (без Google) — жена", "Дети: Ваня, Маша (Машенька)"]
+          buttons: ["➕ Пригласить", "📅 Календари дома", "✖ Аня", "✖ Ваня", "✖ Маша", "Распустить дом"]
+    - press: "✖ Ваня"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Убрал: Ваня"] }
+        - { method: editMessageText, text_contains: ["Дети: Маша (Машенька)"] }
+    # Приглашение с именем: не переспрашиваем, как называть
+    - telegram: { from: 1001, text: "/home invite Бабушка, баба Валя" }
+    - capture_telegram: { gran: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2002, first_name: "Valentina", text: "/start home_{{gran}}" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Ссылка-приглашение", "Для: Бабушка, баба Валя"] }
+        - { chat_id: 2002, text_contains: ["Вы в доме «Бобылевы»"] }
+        - { chat_id: 1001, text_contains: ["Бабушка присоединился(-ась)"] }
+    # Участник может создать свой дом только выйдя из этого; без Google — нельзя
+    - telegram: { from: 2001, text: "/home create Другой" }
+    - telegram: { from: 1002, text: "/home create Соседи" }
+    - telegram: { from: 1002, text: "/home" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Вы уже в доме «Бобылевы»"] }
+        - { chat_id: 1002, text_contains: ["подключённым Google"] }
+        - { chat_id: 1002, text_contains: ["Вы пока не в доме"] }
+    # Только владелец приглашает
+    - telegram: { from: 2001, text: "/home invite" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["только владелец"] }
+
+- id: household-leave-and-remove
+  story: US-90
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "/leave" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Владелец не может выйти"] }
+    - telegram: { from: 2001, text: "/leave" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Вы вышли из дома «Бобылевы»"] }
+        - { chat_id: 1001, text_contains: ["Аня вышел(-ла) из дома"] }
+    # Не в allowlist и больше не в доме — доступа нет
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["закрытом режиме"] }
+    # Владелец убирает участника кнопкой
+    - press: { button: "➕ Пригласить", from: 1001 }
+    - capture_telegram: { again: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2002, first_name: "Дима", text: "/start home_{{again}}" }
+    - telegram: { from: 1001, text: "/home" }
+    - expect_telegram_count: 5
+    - telegram: { from: 2002, text: "/home" }
+    - press: { button: "✖ Дима", from: 1001 }
+    - expect_telegram:
+        - { chat_id: 2002, text_contains: ["Дом «Бобылевы»"] }
+        - { chat_id: 1001, text_contains: ["Убрал из дома: Дима"] }
+        - { chat_id: 2002, text_contains: ["Вас убрали из дома «Бобылевы»"] }
+        - { method: editMessageText, chat_id: 1001, text_not_contains: ["Дима"] }
+    # Бывший участник не в allowlist: кнопки старого экрана не работают
+    - press: { button: "Выйти из дома", from: 2002 }
+    - expect_callback_answer: { empty: true }
+    - expect_no_telegram: true
+
+- id: household-dissolve-by-owner
+  story: US-90
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "/home" }
+    - press: "Распустить дом"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Дом «Бобылевы»"] }
+        - { method: editMessageText, text_contains: ["Распустить дом «Бобылевы»?"], buttons: ["Да, распустить", "Отмена"] }
+    - press: "Да, распустить"
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["распущен владельцем"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Дом «Бобылевы» распущен"] }
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["закрытом режиме"] }
+    - telegram: { from: 1001, text: "/home" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["У вас пока нет дома"] }
+
+- id: household-owner-disconnect-dissolves
+  story: US-90
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["удалить все ваши данные"] }
+        - { chat_id: 2001, text_contains: ["распущен владельцем"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Готово"] }
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["закрытом режиме"] }
+
+- id: household-owner-google-revoked
+  story: US-90
+  steps:
+    - *home
+    - google_revoke: ivan@gmail.com
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["владельцу дома нужно переподключить Google"] }
+    # Ни одного общего календаря — участнику понятно, почему пусто
+    - telegram: { from: 1001, text: "/home" }
+    - press: "📅 Календари дома"
+    - press: "✅ Семья"
+    - telegram: { from: 2001, text: "Что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Дом «Бобылевы»"] }
+        - { method: editMessageText }
+        - { method: editMessageText }
+        - { chat_id: 2001, text_contains: ["нет общих календарей"] }

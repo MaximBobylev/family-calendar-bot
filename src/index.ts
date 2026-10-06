@@ -37,8 +37,8 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
   const update = (await request.json().catch(() => null)) as TgUpdate | null;
   if (!update || typeof update.update_id !== "number") return new Response("Bad request", { status: 400 });
 
-  // Посторонние и группы — ответ сразу, без записи в D1 и очереди: спам не тратит квоты (ревью 2026-10-05)
-  const gate = gateUpdate(ctx, update);
+  // Посторонние и чужая переписка в группах — ответ сразу, без записи в D1 и очереди: спам не тратит квоты (ревью 2026-10-05)
+  const gate = await gateUpdate(ctx, update);
   if (gate !== "process") {
     const reply = replyToOutsider(ctx, update, gate);
     if (ctx.config.testMode) await reply;

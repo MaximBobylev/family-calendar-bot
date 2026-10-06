@@ -12,6 +12,18 @@ export interface AppContext {
   telegram: TelegramApi;
   /** Только при обработке апдейта из inbox: что сделано прошлыми попытками (tech-debt #5). */
   progress?: UpdateProgress;
+  /**
+   * Календари дома вместо своих (US-90, US-94): участник без Google или групповой чат дома — чтение и запись идут
+   * через аккаунт владельца, только по общим календарям дома. Нет — свои календари пользователя.
+   */
+  calendarScope?: CalendarScope;
+}
+
+export interface CalendarScope {
+  householdId: string;
+  householdName: string;
+  ownerUserId: string;
+  calendarIds: string[];
 }
 
 export function createContext(env: Env, config: Config, clock: Clock): AppContext {

@@ -115,7 +115,12 @@ console.log(`\nLLM: ${llmChain.map((c) => `${c.name} (${c.model})`).join(" → "
 console.log(`STT: ${sttChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
 console.log(`Переслушивание голоса: ${voiceChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY)"}`);
 
+// Имя бота — для ссылок-приглашений в дом и обращений в группе (US-90, US-94): из getMe, не из .env
+const me = (await (await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/getMe`)).json()) as { ok: boolean; result?: { username?: string } };
+if (!me.ok || !me.result?.username) throw new Error("getMe failed: cannot read the bot username");
+
 const secrets: Record<string, string> = {
+  TELEGRAM_BOT_USERNAME: me.result.username,
   TELEGRAM_BOT_TOKEN: need("TELEGRAM_BOT_TOKEN"),
   TELEGRAM_WEBHOOK_SECRET: need("TELEGRAM_WEBHOOK_SECRET"),
   ALLOWED_TELEGRAM_IDS: need("ALLOWED_TELEGRAM_IDS"),
@@ -170,11 +175,13 @@ if (!tg.ok) throw new Error(`setWebhook failed: ${tg.description}`);
 const commands = {
   ru: [
     { command: "settings", description: "Настройки" },
+    { command: "home", description: "Дом: семья, общие календари, приглашения" },
     { command: "connect", description: "Подключить или переподключить Google" },
     { command: "disconnect", description: "Отключить календарь и удалить данные" },
   ],
   en: [
     { command: "settings", description: "Settings" },
+    { command: "home", description: "Household: family, shared calendars, invites" },
     { command: "connect", description: "Connect or reconnect Google" },
     { command: "disconnect", description: "Disconnect calendar and delete data" },
   ],
