@@ -20,7 +20,9 @@ Telegram → POST /telegram/webhook (src/index.ts)
        → calendar/google-provider.ts → google/calendar-api.ts → Google   (access token — кеш в D1, 401 → обновить и повторить;
                                                                           GET — один повтор на 5xx/429, net/retry.ts)
        → telegram/api.ts → Telegram
-cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в час — cleanup, ensureDigests
+cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в 5 мин — ops/alerts.ts (алерты владельцу);
+                       раз в час — cleanup, ensureDigests
+GET /health → ops/health.ts (D1 + возраст последнего cron; 503 — для внешнего монитора)
 ```
 
 В TEST_MODE обработку запускает раннер через `/__test/drain` (упавшие апдейты — 500 со списком), ретрай очереди — `/__test/retry`, часы — `/__test/clock` (src/testing/routes.ts).
@@ -41,6 +43,7 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | Внешние URL, лимиты, цены | `src/config.ts` |
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
 | Админка | `src/admin/*`, `docs/admin-console.md` |
+| Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
 ## src/
@@ -56,6 +59,7 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | `crypto.ts` | AES-GCM для секретов в D1: формат `v1:` с AAD, legacy без префикса, связка ключей для ротации (tech-debt #8); сравнение за постоянное время |
 | `limits.ts` | Лимиты расходов на пользователя (час/сутки), оценка стоимости |
 | `env.d.ts` | Секреты в типе `Env` (`wrangler types` их не знает) |
+| `log.ts` | Структурные логи: `log(event, fields)` — одна строка JSON, `logged()` — с длительностью и исходом, `errorClass()` — ошибка без хвоста сообщения |
 | `oauth-routes.ts` | `/oauth/google/*`: промежуточная страница, PKCE, привязка к браузеру, callback |
 | `pages.ts` | Публичные страницы (homepage, privacy, terms) — заглушки до R3 |
 | **bot/** | Сценарии и рендер ответов |
@@ -123,12 +127,13 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts` |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 утренний дайджест |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
+| **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
 | **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
-| **testing/** | `routes.ts` — `/__test/{clock,tick,hourly,drain,reset}` (только TEST_MODE и не https) |
+| **testing/** | `routes.ts` — `/__test/{clock,tick,hourly,alerts,drain,retry,reset}` (только TEST_MODE и не https) |
 
 ## Вне src/
 

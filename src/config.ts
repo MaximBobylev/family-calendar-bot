@@ -24,6 +24,8 @@ export interface Config {
   /** Текущий + прежние ключи для расшифровки (ротация, tech-debt #8). */
   tokenKeys: KeyRing;
   allowedTelegramIds: Set<string>;
+  /** Куда слать алерты (src/ops/alerts.ts): OPS_CHAT_ID, иначе первый из ALLOWED_TELEGRAM_IDS; null — некуда. */
+  opsChatId: string | null;
   testMode: boolean;
   admin: { user: string; password: string };
   /** Цепочка LLM: основной → запасные (LLM_CHAIN; без него — один Workers AI из LLM_BASE/LLM_MODEL). */
@@ -57,6 +59,10 @@ export const COST_ESTIMATES: CostEstimates = {
 };
 
 export function loadConfig(env: Env): Config {
+  const allowed = (env.ALLOWED_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   return {
     telegramApiBase: env.TELEGRAM_API_BASE,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN,
@@ -69,12 +75,8 @@ export function loadConfig(env: Env): Config {
     googleClientSecret: env.GOOGLE_CLIENT_SECRET,
     tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,
     tokenKeys: keyRing(env.TOKEN_ENCRYPTION_KEY, env.TOKEN_ENCRYPTION_KEYS_OLD),
-    allowedTelegramIds: new Set(
-      (env.ALLOWED_TELEGRAM_IDS ?? "")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-    ),
+    allowedTelegramIds: new Set(allowed),
+    opsChatId: env.OPS_CHAT_ID?.trim() || allowed[0] || null,
     testMode: env.TEST_MODE === "true",
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
     llm: parseChain<LlmConfig>(env.LLM_CHAIN, "LLM_CHAIN") ?? [{ name: "workers-ai", baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL }],

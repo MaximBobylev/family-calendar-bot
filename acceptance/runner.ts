@@ -28,6 +28,8 @@ type Step =
   | { tick: true }
   /** Часовые работы cron: ретеншн, страховка дайджестов. */
   | { hourly: true }
+  /** Оценка правил алертов владельцу (в cron — раз в 5 минут); expect_sent — какие переходы отправлены: ["jobs:fire"]. */
+  | { alerts: true | { expect_sent: string[] } }
   | { telegram: TelegramInput }
   | { webhook_raw: { body: unknown; secret?: string | null; expect_status: number } }
   | { expect_telegram: TelegramExpectation[] }
@@ -415,6 +417,13 @@ async function runScenario(s: Scenario): Promise<void> {
     if ("tick" in step || "hourly" in step) {
       const res = await post(`${SUT}/__test/${"tick" in step ? "tick" : "hourly"}`, {});
       if (!res.ok) throw new AssertionError(`${where}: ${"tick" in step ? "tick" : "hourly"} → ${res.status}`);
+    } else if ("alerts" in step) {
+      const res = await post(`${SUT}/__test/alerts`, {});
+      if (!res.ok) throw new AssertionError(`${where}: alerts → ${res.status}`);
+      const want = step.alerts === true ? undefined : step.alerts.expect_sent;
+      const got = ((await res.json()) as { sent: string[] }).sent;
+      if (want && JSON.stringify(got) !== JSON.stringify(want))
+        throw new AssertionError(`${where}: alerts sent ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
     } else if ("clock" in step) {
       const res = await post(`${SUT}/__test/clock`, { now: step.clock });
       if (!res.ok) throw new AssertionError(`${where}: clock → ${res.status}`);

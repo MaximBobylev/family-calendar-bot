@@ -1,8 +1,9 @@
 // Панель «здоровье» — главная страница админки: всё ли живо за 10 секунд (docs/admin-console.md #1).
-// Пороги — как в правилах алертов (там же): одна логика для светофора сейчас и алертов потом.
+// Пороги — общие с алертами владельцу (src/ops/alert-rules.ts): светофор и алерт краснеют одинаково.
 
 import type { DigestDelivery, InboxFailure, InboxHealth, JobsGroup, JobsLag, OpsValue, ProblemJob, Totals, UpdatesDay } from "../queries";
 import type { WebhookStatus } from "../webhook";
+import { INBOX_FAILED_HOUR, INBOX_STUCK_MS, JOBS_OVERDUE_MS, WEBHOOK_ERROR_WINDOW_MS, WEBHOOK_PENDING_MAX } from "../../ops/alert-rules";
 import { badge, esc, fmtAge, fmtTime, type Level, raw, table } from "./layout";
 
 const MIN_MS = 60_000;
@@ -27,21 +28,21 @@ export function webhookLevel(v: HealthView): Level {
   if (!v.webhook.ok) return "unknown";
   const i = v.webhook.info;
   if (i.url !== v.expectedWebhookUrl) return "crit";
-  if (i.last_error_date && v.now - i.last_error_date * 1000 < 10 * MIN_MS) return "crit";
-  if (i.pending_update_count > 20) return "crit";
+  if (i.last_error_date && v.now - i.last_error_date * 1000 < WEBHOOK_ERROR_WINDOW_MS) return "crit";
+  if (i.pending_update_count > WEBHOOK_PENDING_MAX) return "crit";
   if (i.pending_update_count > 0 || i.last_error_date) return "warn";
   return "ok";
 }
 
 export function inboxLevel(i: InboxHealth, now: number): Level {
-  if (i.oldestOpenAt && now - i.oldestOpenAt > 2 * MIN_MS) return "crit";
-  if (i.failedHour >= 3) return "crit";
+  if (i.oldestOpenAt && now - i.oldestOpenAt > INBOX_STUCK_MS) return "crit";
+  if (i.failedHour >= INBOX_FAILED_HOUR) return "crit";
   if (i.failedDay > 0) return "warn";
   return "ok";
 }
 
 export function jobsLevel(l: JobsLag, now: number): Level {
-  if (l.oldestOverdueAt && now - l.oldestOverdueAt > 5 * MIN_MS) return "crit";
+  if (l.oldestOverdueAt && now - l.oldestOverdueAt > JOBS_OVERDUE_MS) return "crit";
   if (l.overdue > 0 || l.stuck > 0 || l.failedDay > 0) return "warn";
   return "ok";
 }

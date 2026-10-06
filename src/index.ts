@@ -13,6 +13,10 @@ import type { TgUpdate } from "./telegram/types";
 import { handleOAuthRoute } from "./oauth-routes";
 import { handleAdmin } from "./admin";
 import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "./db/ops-state";
+import { healthCheck } from "./ops/health";
+import { runAlerts } from "./ops/alerts";
+import { isAlertMinute } from "./ops/alert-rules";
+import { log, logged } from "./log";
 import { timingSafeEqual } from "./crypto";
 import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
@@ -53,7 +57,11 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
       // Очередь недоступна или квота исчерпана — всё равно обрабатываем сейчас
       console.error("inbox send failed", update.update_id, e);
     }
-    exec.waitUntil(processInboxUpdate(ctx, update.update_id).catch((e) => console.error("update failed", update.update_id, e)));
+    exec.waitUntil(
+      logged("update", { update_id: update.update_id, stage: "webhook" }, () => processInboxUpdate(ctx, update.update_id)).catch((e) =>
+        console.error("update failed", update.update_id, e),
+      ),
+    );
   }
   return new Response("ok");
 }
@@ -61,7 +69,7 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
 export default {
   async fetch(request, env, exec): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/health") return Response.json({ ok: true });
+    if (url.pathname === "/health") return healthCheck(env);
     if (request.method === "GET") {
       const page = handlePage(url);
       if (page) return page;
@@ -87,13 +95,14 @@ export default {
         msg.ack();
         continue;
       }
+      const { updateId } = msg.body;
       try {
-        const outcome = await processInboxUpdate(ctx, msg.body.updateId);
+        const outcome = await logged("update", { update_id: updateId, stage: "queue", attempt: msg.attempts }, () => processInboxUpdate(ctx, updateId));
         // Ещё обрабатывается (waitUntil жив) — проверим позже, а не теряем молча (ревью 2026-10-05)
         if (outcome === "busy") msg.retry({ delaySeconds: SAFETY_NET_DELAY_S });
         else msg.ack();
       } catch (e) {
-        console.error("update failed", msg.body.updateId, e);
+        console.error("update failed", updateId, e);
         msg.retry({ delaySeconds: Math.min(600, 30 * 2 ** msg.attempts) });
       }
     }
@@ -103,9 +112,12 @@ export default {
     const ctx = await context(env);
     // Heartbeat cron для панели «здоровье» (docs/admin-console.md)
     await setOpsState(ctx.db, OPS_LAST_TICK, "", ctx.clock.now());
-    await tick(ctx.db, ctx.clock.now(), async (jobs, delays) => {
+    const jobs = await tick(ctx.db, ctx.clock.now(), async (jobs, delays) => {
       await env.INBOX.sendBatch(jobs.map((j, i) => ({ body: { jobId: j.id } satisfies JobMessage, delaySeconds: delays[i]! })));
     });
+    if (jobs) log("tick", { jobs });
+    // Раз в 5 минут: алерты владельцу (src/ops/alerts.ts; ошибки ловит сам runAlerts)
+    if (isAlertMinute(ctx.clock.now())) await runAlerts(ctx);
     // Раз в час: ретеншн (privacy-политика, ADR-0005) и страховка дайджестов (US-70)
     if (new Date(ctx.clock.now()).getUTCMinutes() === 7) {
       await cleanup(ctx.db, ctx.clock.now());
