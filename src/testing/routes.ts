@@ -3,6 +3,7 @@
 //   POST /__test/tick   — выполнить планировщик до текущего «сейчас» (задачи — сразу, без очереди)
 //   POST /__test/hourly — часовые работы cron: ретеншн и страховка дайджестов
 //   POST /__test/drain  — синхронно обработать все апдейты из inbox
+//   POST /__test/alerts — оценить правила алертов сейчас (в cron — раз в 5 минут) → {sent: ["jobs:fire", …]}
 //   POST /__test/reset  — очистить состояние
 
 import type { AppContext } from "../bot/context";
@@ -12,8 +13,10 @@ import { processInboxUpdate } from "../process";
 import { ensureDigests } from "../jobs/digest";
 import { cleanup, runQueuedJob, tick } from "../scheduler";
 import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "../db/ops-state";
+import { runAlerts } from "../ops/alerts";
 
 const TABLES = [
+  "alert_state",
   "admin_audit",
   "ops_state",
   "test_state",
@@ -62,6 +65,8 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
       await ensureDigests(ctx.db, ctx.clock.now());
       await setOpsState(ctx.db, OPS_LAST_HOURLY, "", ctx.clock.now());
       return Response.json({ ok: true });
+    case "/__test/alerts":
+      return Response.json({ ok: true, sent: await runAlerts(ctx) });
     case "/__test/cleanup":
       await cleanup(ctx.db, ctx.clock.now());
       return Response.json({ ok: true });

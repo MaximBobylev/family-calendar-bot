@@ -133,6 +133,9 @@ const secrets: Record<string, string> = {
 // Ротация ключа (tech-debt #8): прежние ключи — только если заданы; пусто — секрет не трогаем
 const oldKeys = env.TOKEN_ENCRYPTION_KEYS_OLD?.trim();
 if (oldKeys) secrets.TOKEN_ENCRYPTION_KEYS_OLD = oldKeys;
+// Алерты (tech-debt #7): свой чат — только если задан; иначе бот шлёт первому из ALLOWED_TELEGRAM_IDS
+const opsChat = env.OPS_CHAT_ID?.trim();
+if (opsChat) secrets.OPS_CHAT_ID = opsChat;
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
   const v = env[name]?.trim();
   if (v) secrets[name] = v;

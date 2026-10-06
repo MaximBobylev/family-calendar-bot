@@ -6,6 +6,7 @@
 
 import type { AppContext } from "./bot/context";
 import { runDigestJob, DIGEST_JOB } from "./jobs/digest";
+import { errorClass, log } from "./log";
 
 export interface DueJob {
   id: string;
@@ -81,14 +82,18 @@ export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void
     .bind(now, jobId)
     .first<DueJob>();
   if (!job) return;
+  const started = Date.now(); // только длительность для лога
+  const fields = { job_id: job.id, kind: job.kind, attempt: job.attempts };
   try {
     const handler = HANDLERS[job.kind];
     if (!handler) throw new Error(`no handler for job kind: ${job.kind}`);
     await handler(ctx, job);
     await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'done', last_error = NULL WHERE id = ?").bind(job.id).run();
+    log("job", { ...fields, outcome: "done", ms: Date.now() - started });
   } catch (e) {
     const error = String(e instanceof Error ? e.message : e).slice(0, 500);
-    console.error("job failed", job.id, job.kind, job.attempts, error);
+    // Текст ошибки — в last_error (админка показывает его замаскированным), в лог — только класс
+    log("job", { ...fields, outcome: "error", final: job.attempts >= MAX_ATTEMPTS, error: errorClass(e), ms: Date.now() - started });
     if (job.attempts >= MAX_ATTEMPTS) {
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'failed', last_error = ? WHERE id = ?").bind(error, job.id).run();
     } else {

@@ -92,7 +92,7 @@ docker compose down -v                                # по завершени�
 ## Отладка
 
 - Локально: `docker compose logs dev`; бот — `http://localhost:8787`; фейки наружу не проброшены, состояние — изнутри: `docker compose exec -T fakes node -e "fetch('http://localhost:9100/__fake/telegram/calls').then(r=>r.text()).then(console.log)"` (остальные `/__fake/*` — шапка `acceptance/fakes/server.ts`).
-- Прод: `/admin` (здоровье, замаскированный журнал распознанного US-13, расход) — логин из `.env`, значит, только владелец. Живые пробы провайдеров — `scripts/probe-intents.ts`, `probe-stt.ts`, `probe-voice.ts` (см. правило о квотах).
+- Прод: `/admin` (здоровье, замаскированный журнал распознанного US-13, расход) — логин из `.env`, значит, только владелец. Сбои сами приходят владельцу в Telegram (алерты раз в 5 мин, `src/ops/`, `docs/admin-console.md`); `GET /health` — D1 и возраст cron. Логи — одна строка JSON на событие (`src/log.ts`): `docker compose logs dev | grep '"event":"job"'`, в проде — `wrangler tail`. Алерты локально — `POST /__test/alerts`. Живые пробы провайдеров — `scripts/probe-intents.ts`, `probe-stt.ts`, `probe-voice.ts` (см. правило о квотах).
 - Фраза из журнала → тест: кнопка «В тест» в админке даёт YAML-заготовку (`src/admin/yaml-snippet.ts`).
 
 ## Словарь (термины в коде)

@@ -1,0 +1,106 @@
+# Алерты владельцу в Telegram и /health (docs/admin-console.md, итерация 2; tech-debt #7).
+# Владелец — первый из ALLOWED_TELEGRAM_IDS (1001; OPS_CHAT_ID в dev не задан). Правила оценивает cron раз в 5 минут,
+# здесь — шаг alerts. В алертах только счётчики: ни текстов, ни имён пользователей.
+
+- id: alert-failed-digest-once-reminder-recovered
+  story: ADR-0005
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    # Пользователь 1002: Google отвечает 500 на чтение событий — дайджест падает все 5 попыток
+    - connected_user:
+        from: 1002
+        email: maria@gmail.com
+        calendars: [{ id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, list_error: 500, events: [] }]
+    - alerts: { expect_sent: [] }
+    - expect_no_telegram: true
+    # Попытки: 05:00, 05:01, 05:03, 05:07, 05:15 (повтор через 1, 2, 4, 8 мин); пока задача повторяется — тихо
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - clock: "2026-10-08T05:01:00Z"
+    - tick: true
+    - clock: "2026-10-08T05:03:00Z"
+    - tick: true
+    - clock: "2026-10-08T05:05:00Z"
+    - alerts: { expect_sent: [] }
+    - clock: "2026-10-08T05:07:00Z"
+    - tick: true
+    - clock: "2026-10-08T05:15:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    # Задача failed → один алерт владельцу
+    - clock: "2026-10-08T05:20:00Z"
+    - alerts: { expect_sent: ["digest_failed:fire"] }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["🔴 Алерт: дайджесты не доставлены", "не доставлено за сутки: 1", "http://dev:8787/admin"]
+          text_not_contains: ["Мария", "maria", "500"]
+    # Следующая оценка — без дубля
+    - clock: "2026-10-08T05:25:00Z"
+    - alerts: { expect_sent: [] }
+    - expect_no_telegram: true
+    # Горит 3 часа — одно напоминание
+    - clock: "2026-10-08T08:20:00Z"
+    - alerts: { expect_sent: ["digest_failed:remind"] }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔴 Всё ещё: дайджесты не доставлены (уже 3 ч)"] }
+    - clock: "2026-10-08T08:25:00Z"
+    - alerts: { expect_sent: [] }
+    # Google починился: завтрашняя сводка дошла, сутки без сбоев — «восстановлено»
+    - google_account:
+        email: maria@gmail.com
+        calendars: [{ id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - clock: "2026-10-09T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Доброе утро"] }
+    - clock: "2026-10-09T05:20:00Z"
+    - alerts: { expect_sent: ["digest_failed:resolve"] }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["✅ Восстановлено: дайджесты не доставлены (было 24 ч)", "не доставлено за сутки: 0"] }
+    - clock: "2026-10-09T05:25:00Z"
+    - alerts: { expect_sent: [] }
+    - expect_no_telegram: true
+
+- id: alert-ai-errors-counts-only
+  story: ADR-0005
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1002
+        email: maria@gmail.com
+        calendars: [{ id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    # Оба LLM лежат: три команды подряд — три ошибки цепочки
+    - provider_outage: { provider: llm, status: 503 }
+    - provider_outage: { provider: llm-backup, status: 503 }
+    - telegram: { from: 1002, text: "Созвон с Петей завтра" }
+    - telegram: { from: 1002, text: "Обед с Олей в пятницу" }
+    - telegram: { from: 1002, text: "Что у меня завтра?" }
+    - expect_telegram_count: 3
+    - clock: "2026-10-07T07:05:00Z"
+    - alerts: { expect_sent: ["ai_errors:fire"] }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["🔴 Алерт: ошибки LLM/STT", "ошибок 3 из 3 за 15 мин"]
+          text_not_contains: ["Петей", "Олей", "Созвон"]
+    # Провайдеры вернулись, окно 15 минут прошло — «восстановлено»
+    - provider_outage: { provider: llm, status: 0 }
+    - provider_outage: { provider: llm-backup, status: 0 }
+    - clock: "2026-10-07T07:25:00Z"
+    - alerts: { expect_sent: ["ai_errors:resolve"] }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["✅ Восстановлено: ошибки LLM/STT (было 20 мин)"] }
+
+- id: health-endpoint-d1-and-cron
+  story: ADR-0005
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    # Свежая база: cron ещё не прогонялся — не сбой
+    - http_get: { path: "/health", text_contains: ['"ok":true', '"d1":true', '"lastTickAgeSec":null'] }
+    - tick: true
+    - clock: "2026-10-07T07:04:00Z"
+    - http_get: { path: "/health", text_contains: ['"ok":true', '"lastTickAgeSec":240'] }
+    # Cron молчит больше 5 минут — 503 для внешнего монитора
+    - clock: "2026-10-07T07:06:00Z"
+    - http_get: { path: "/health", expect_status: 503, text_contains: ['"ok":false', '"d1":true', '"lastTickAgeSec":360'] }
+    - tick: true
+    - http_get: { path: "/health", text_contains: ['"ok":true', '"lastTickAgeSec":0'] }
