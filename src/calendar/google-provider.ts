@@ -10,7 +10,18 @@ import { googleTokens, saveAccessToken, type GoogleTokens } from "../db/accounts
 import { refreshAccessToken } from "../google/auth";
 import { GoogleApiError } from "../google/errors";
 import { accessTokenExpiresAt, accessTokenUsable } from "../google/token-cache";
-import { deleteEvent, getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
+import {
+  deleteEvent,
+  getEvent,
+  insertEvent,
+  listEvents,
+  patchEvent,
+  stopChannel,
+  syncEvents,
+  watchEvents,
+  type GoogleEvent,
+  type SyncPage,
+} from "../google/calendar-api";
 import { toCalendarError } from "./google-errors";
 import {
   AuthRevoked,
@@ -24,6 +35,20 @@ import {
   type EventRef,
   type NewEvent,
 } from "./model";
+
+/**
+ * Запись бота в календарь (US-72): после неё синхронизация обновляет снимок события (эхо push не даёт изменений),
+ * рассылает уведомление в другие чаты календаря и переставляет напоминания (US-71). event — ответ Google (null — удалено).
+ */
+export interface BotWrite {
+  calendar: CalendarInfo;
+  op: "create" | "update" | "delete";
+  eventId: string;
+  event: GoogleEvent | null;
+  /** Менялось время — подсказка «перенесено», если прежнего снимка нет. */
+  timeChanged: boolean;
+}
+export type WriteListener = (w: BotWrite) => Promise<void>;
 
 /** Типы событий, которые не показываем (US-20). */
 const HIDDEN_EVENT_TYPES = new Set(["workingLocation", "focusTime"]);
@@ -85,7 +110,18 @@ export class GoogleCalendarProvider implements CalendarProvider {
     private readonly db: D1Database,
     private readonly userId: string,
     private readonly clock: Clock,
+    /** Слушатель записей (src/sync/bot-writes.ts); его ошибки не ломают действие пользователя. */
+    private readonly onWrite?: WriteListener,
   ) {}
+
+  private async written(w: BotWrite): Promise<void> {
+    if (!this.onWrite) return;
+    try {
+      await this.onWrite(w);
+    } catch (e) {
+      console.error("write listener failed", e instanceof Error ? e.message : e);
+    }
+  }
 
   /** Календари пользователя из D1 — один запрос на экземпляр (tech-debt #13). Ошибка не запоминается. */
   calendars(): Promise<CalendarInfo[]> {
@@ -231,6 +267,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
         ...time,
       }),
     );
+    await this.written({ calendar: cal, op: "create", eventId: created.id, event: created, timeChanged: true });
     return {
       ref: { accountId: cal.accountId, calendarId: cal.id, providerEventId: created.id },
       ...(created.htmlLink ? { link: created.htmlLink } : {}),
@@ -267,17 +304,20 @@ export class GoogleCalendarProvider implements CalendarProvider {
         { sendUpdates: opts.notify ? "all" : "none", ...(opts.etag ? { etag: opts.etag } : {}) },
       ),
     );
+    await this.written({ calendar: cal, op: "update", eventId: ref.providerEventId, event: updated, timeChanged: !!(patch.start || patch.end) });
     return updated.etag ? { etag: updated.etag } : {};
   }
 
   async deleteEvent(ref: EventRef, opts: { notify: boolean; etag?: string }): Promise<"deleted" | "gone"> {
     const cal = await this.calendar(ref.calendarId);
-    return this.api((token) =>
+    const result = await this.api((token) =>
       deleteEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, {
         sendUpdates: opts.notify ? "all" : "none",
         ...(opts.etag ? { etag: opts.etag } : {}),
       }),
     );
+    await this.written({ calendar: cal, op: "delete", eventId: ref.providerEventId, event: null, timeChanged: false });
+    return result;
   }
 
   async declineEvent(ref: EventRef, tz: string): Promise<void> {
@@ -285,6 +325,24 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const raw = await this.api((token) => getEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, tz));
     if (!raw) throw new EventGone("event not found");
     const attendees = (raw.attendees ?? []).map((a) => (a.self ? { ...a, responseStatus: "declined" } : a));
-    await this.api((token) => patchEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, { attendees }, { sendUpdates: "all" }));
+    const updated = await this.api((token) =>
+      patchEvent(this.config.googleApiBase, token, cal.providerCalendarId, ref.providerEventId, { attendees }, { sendUpdates: "all" }),
+    );
+    await this.written({ calendar: cal, op: "update", eventId: ref.providerEventId, event: updated, timeChanged: false });
+  }
+
+  // --- Синхронизация (ADR-0005 §2): только Google, вне интерфейса CalendarProvider -----------------------------
+
+  /** Изменения календаря по syncToken или полный список окна. Истёкший токен — SyncTokenExpired (не ошибка календаря). */
+  syncEvents(providerCalendarId: string, opts: { syncToken?: string; timeMin?: string; timeMax?: string }): Promise<SyncPage> {
+    return this.api((token) => syncEvents(this.config.googleApiBase, token, providerCalendarId, opts));
+  }
+
+  watch(providerCalendarId: string, channel: { id: string; token: string; address: string; expiration: number }) {
+    return this.api((token) => watchEvents(this.config.googleApiBase, token, providerCalendarId, channel));
+  }
+
+  stopChannel(channel: { id: string; resourceId: string }): Promise<void> {
+    return this.api((token) => stopChannel(this.config.googleApiBase, token, channel));
   }
 }

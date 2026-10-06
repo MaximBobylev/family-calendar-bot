@@ -96,14 +96,28 @@ type Step =
   /** POST формы (application/x-www-form-urlencoded) — действия на страницах (админка). */
   | { http_post: HttpCheck & { form?: Record<string, string> } }
   | { llm: Record<string, unknown> }
-  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
-  | { press: string | { button: string; from?: number; again?: boolean } }
+  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть; first_name — имя нажавшего в Telegram. */
+  | { press: string | { button: string; from?: number; again?: boolean; first_name?: string } }
   /** Ответить (reply) на последний вопрос бота с ForceReply. */
   | { reply: { from: number; text: string } }
   | { expect_callback_answer: { text_contains?: string[]; empty?: boolean } }
   | { expect_google_events: { email: string; calendar: string; events: ExpectedEvent[]; count?: number } }
   /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
-  | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } };
+  | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } }
+  // --- Синхронизация Google, push (ADR-0005 §2, US-72, US-71) ---
+  /**
+   * Google шлёт push-уведомление во все каналы календаря (state: exists | sync; token — подменить секрет канала).
+   * expect_status — каждый ответ бота (200); channels — сколько каналов должно быть у календаря (по умолчанию ≥ 1).
+   */
+  | { google_push: { calendar: string; state?: string; token?: string; expect_status?: number; channels?: number } }
+  /** Изменение «не через бота» (человек в Google Календаре): create — событие, move — {id, start, end}, update, delete — id. */
+  | { google_external: { calendar: string; create?: unknown; move?: unknown; update?: unknown; delete?: string } }
+  /** Все выданные syncToken календаря просрочены — следующий инкрементальный синк получит 410. */
+  | { google_expire_sync_tokens: string }
+  /** Каналы push календаря у Google: сколько открыто, сколько остановлено всего (channels.stop). */
+  | { expect_google_channels: { calendar: string; active: number; stopped?: number } }
+  /** Запросы синхронизации календаря с начала сценария по видам: {full: 1, incremental: 2, expired: 1}. */
+  | { expect_google_syncs: { calendar: string } & Record<string, number | string> };
 
 /**
  * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
@@ -389,15 +403,15 @@ async function runScenario(s: Scenario): Promise<void> {
 
   let callbackSeq = 0;
   let voiceSeq = 0;
-  let lastPress: { from: number; chatId: number; messageId: number; data: string } | undefined;
+  let lastPress: { from: number; chatId: number; messageId: number; data: string; firstName?: string } | undefined;
 
-  const sendCallback = async (p: { from: number; chatId: number; messageId: number; data: string }, where: string) => {
+  const sendCallback = async (p: { from: number; chatId: number; messageId: number; data: string; firstName?: string }, where: string) => {
     updateId++;
     const update = {
       update_id: updateId,
       callback_query: {
         id: `cq${++callbackSeq}`,
-        from: { id: p.from, is_bot: false, first_name: "Test", language_code: "ru" },
+        from: { id: p.from, is_bot: false, first_name: p.firstName ?? "Test", language_code: "ru" },
         message: { message_id: p.messageId, date: 0, chat: { id: p.chatId, type: "private" } },
         data: p.data,
       },
@@ -591,7 +605,13 @@ async function runScenario(s: Scenario): Promise<void> {
       if (!target) throw new AssertionError(`${where}: no button «${p.button}»`);
       const messageId = target.call.messageId ?? target.call.body.message_id;
       if (!messageId) throw new AssertionError(`${where}: message with «${p.button}» has no id`);
-      lastPress = { from: p.from ?? Number(target.call.body.chat_id), chatId: Number(target.call.body.chat_id), messageId, data: target.data };
+      lastPress = {
+        from: p.from ?? Number(target.call.body.chat_id),
+        chatId: Number(target.call.body.chat_id),
+        messageId,
+        data: target.data,
+        ...(p.first_name ? { firstName: p.first_name } : {}),
+      };
       await sendCallback(lastPress, where);
     } else if ("reply" in step) {
       const q = [...(await allTelegramCalls())].reverse().find((c) => c.body.reply_markup?.force_reply && c.messageId);
@@ -675,6 +695,39 @@ async function runScenario(s: Scenario): Promise<void> {
       await post(`${FAKES}/__fake/telegram/fail`, step.telegram_fails);
     } else if ("queue_retry" in step) {
       await drainInbox("retry", where, step.queue_retry !== true && !!step.queue_retry.expect_failure);
+    } else if ("google_push" in step) {
+      const g = step.google_push;
+      const res = await post(`${FAKES}/__fake/google/push`, {
+        calendar: g.calendar,
+        ...(g.state ? { state: g.state } : {}),
+        ...(g.token ? { token: g.token } : {}),
+      });
+      const { sent } = (await res.json()) as { sent: { id: string; status: number }[] };
+      if (g.channels !== undefined ? sent.length !== g.channels : sent.length === 0)
+        throw new AssertionError(`${where}: push reached ${sent.length} channel(s) of ${g.calendar}, expected ${g.channels ?? "≥ 1"}`);
+      const bad = sent.filter((x) => x.status !== (g.expect_status ?? 200));
+      if (bad.length) throw new AssertionError(`${where}: push → ${JSON.stringify(bad)}, expected ${g.expect_status ?? 200}`);
+    } else if ("google_external" in step) {
+      const res = await post(`${FAKES}/__fake/google/external`, step.google_external);
+      if (!res.ok) throw new AssertionError(`${where}: google_external → ${res.status} ${await res.text()}`);
+    } else if ("google_expire_sync_tokens" in step) {
+      await post(`${FAKES}/__fake/google/expire-sync-tokens`, { calendar: step.google_expire_sync_tokens });
+    } else if ("expect_google_channels" in step) {
+      const e = step.expect_google_channels;
+      const got = (await (await fetch(`${FAKES}/__fake/google/channels`)).json()) as { active: { calendar: string }[]; stopped: unknown[] };
+      const active = got.active.filter((c) => c.calendar === e.calendar).length;
+      if (active !== e.active) throw new AssertionError(`${where}: ${active} active channel(s) on ${e.calendar}, expected ${e.active}`);
+      if (e.stopped !== undefined && got.stopped.length !== e.stopped)
+        throw new AssertionError(`${where}: ${got.stopped.length} stopped channel(s), expected ${e.stopped}`);
+    } else if ("expect_google_syncs" in step) {
+      const { calendar, ...want } = step.expect_google_syncs;
+      const list = (await (await fetch(`${FAKES}/__fake/google/sync-requests`)).json()) as { calendar: string; mode: string }[];
+      const got: Record<string, number> = {};
+      for (const r of list.filter((x) => x.calendar === calendar)) got[r.mode] = (got[r.mode] ?? 0) + 1;
+      for (const [mode, n] of Object.entries(want)) {
+        if ((got[mode] ?? 0) !== n)
+          throw new AssertionError(`${where}: ${mode} syncs of ${calendar}: ${got[mode] ?? 0}, expected ${n}; all: ${JSON.stringify(got)}`);
+      }
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

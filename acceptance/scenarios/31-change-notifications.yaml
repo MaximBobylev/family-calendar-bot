@@ -1,0 +1,152 @@
+# US-72: уведомления об изменениях в календаре — во все чаты, где он виден, кроме чата, из которого изменение сделано.
+# R0-часть: личные чаты двух взрослых с общим календарём «Семья». «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: notify-bot-move-goes-to-other-chat-not-source
+  story: US-72
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              shared: true
+              events:
+                - id: f1
+                  summary: "Ужин у мамы"
+                  htmlLink: "https://calendar.google.com/event?eid=f1"
+                  start: { dateTime: "2026-10-09T18:00:00+03:00" }
+                  end: { dateTime: "2026-10-09T20:00:00+03:00" }
+                - { id: f2, summary: "Бассейн", start: { dateTime: "2026-10-10T11:00:00+03:00" }, end: { dateTime: "2026-10-10T12:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: maria@gmail.com
+          calendars:
+            - { id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: owner, timeZone: Europe/Moscow, shared: true }
+      - llm:
+          "Перенеси ужин у мамы на субботу": { tool: modify_event, args: { event: "ужин у мамы" } }
+          "Удали бассейн": { tool: delete_event, args: { event: "бассейн" } }
+      - hourly: true
+      - tick: true
+      - expect_no_telegram: true
+    - telegram: { from: 1001, text: "Перенеси ужин у мамы на субботу" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Перенести?", "Стало: сб, 10 октября, 18:00–20:00"] }
+    - press: { button: "Подтвердить", first_name: "Максим" }
+    # Мария узнаёт сразу и с автором; Иван видит свою карточку «✅ Изменено» — второго сообщения ему нет
+    - expect_telegram:
+        - chat_id: 1002
+          text_contains: ["🔁 Перенесено: «Ужин у мамы» — сб, 10 октября, 18:00–20:00 (было пт, 9 октября, 18:00)", "👤 Максим"]
+          buttons: ["Открыть в календаре"]
+        - { chat_id: 1001, method: editMessageText, text_contains: ["✅ Изменено"] }
+    # Push Google про эту же правку бота — эхо, не дублируется
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, incremental: 1 }
+
+- id: notify-bot-delete-from-other-chat
+  story: US-72
+  steps:
+    - *setup
+    - telegram: { from: 1002, text: "Удали бассейн" }
+    - press: { button: "Удалить", first_name: "Мария" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Удалить?"] }
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Бассейн» — сб, 10 октября, 11:00–12:00", "👤 Мария"] }
+        - { chat_id: 1002, method: editMessageText, text_contains: ["🗑 Удалено"] }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+
+- id: notify-batch-summary
+  story: US-72
+  steps:
+    - *setup
+    # Импорт: четыре события разом — одно сводное сообщение в чат, а не четыре
+    - google_external:
+        calendar: family@group.calendar.google.com
+        create: { id: x1, summary: "Кружок", start: { dateTime: "2026-10-12T17:00:00+03:00" }, end: { dateTime: "2026-10-12T18:00:00+03:00" } }
+    - google_external:
+        calendar: family@group.calendar.google.com
+        create: { id: x2, summary: "Кружок", start: { dateTime: "2026-10-14T17:00:00+03:00" }, end: { dateTime: "2026-10-14T18:00:00+03:00" } }
+    - google_external:
+        calendar: family@group.calendar.google.com
+        create: { id: x3, summary: "Кружок", start: { dateTime: "2026-10-16T17:00:00+03:00" }, end: { dateTime: "2026-10-16T18:00:00+03:00" } }
+    - google_external: { calendar: family@group.calendar.google.com, delete: f2 }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["📋 Изменения в календаре (4):", "➕ Новое: «Кружок» — пн, 12 октября, 17:00–18:00", "❌ Отменено: «Бассейн»"]
+        - { chat_id: 1002, text_contains: ["📋 Изменения в календаре (4):"] }
+    # Два изменения сразу после пачки — тоже сводкой (больше трёх за 2 минуты)
+    - google_external: { calendar: family@group.calendar.google.com, delete: x1 }
+    - google_external: { calendar: family@group.calendar.google.com, delete: x2 }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["📋 Изменения в календаре (2):"] }
+        - { chat_id: 1002, text_contains: ["📋 Изменения в календаре (2):"] }
+
+- id: notify-quiet-hours-until-morning
+  story: US-72
+  steps:
+    - *setup
+    # Полночь по Москве: копим до 08:00
+    - clock: "2026-10-07T21:00:00Z"
+    - google_external:
+        calendar: family@group.calendar.google.com
+        create:
+          id: x1
+          summary: "Родительское собрание"
+          organizer: { email: "school@example.com", displayName: "Школа №5" }
+          start: { dateTime: "2026-10-12T19:00:00+03:00" }
+          end: { dateTime: "2026-10-12T20:00:00+03:00" }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-08T04:59:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        # Утренние сводки — задачи на то же 08:00, поставлены раньше
+        - { chat_id: 1001, text_contains: ["☀️ Доброе утро!"] }
+        - { chat_id: 1002, text_contains: ["☀️ Доброе утро!"] }
+        - { chat_id: 1001, text_contains: ["➕ Новое: «Родительское собрание» — пн, 12 октября, 19:00–20:00", "👤 Организатор: Школа №5"] }
+        - { chat_id: 1002, text_contains: ["➕ Новое: «Родительское собрание»"] }
+    - tick: true
+    - expect_no_telegram: true
+
+- id: notify-setting-off-and-what-is-not-reported
+  story: US-72
+  steps:
+    - *setup
+    - telegram: { from: 1002, text: "/settings" }
+    - press: "📣 Уведомления"
+    - press: "✓ Об изменениях: вкл"
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["📣 Об изменениях в календаре: включены", "⏰ Напоминать в Telegram: нет"] }
+        - { method: editMessageText, text_contains: ["📣 <b>Уведомления</b>"], buttons: ["✓ Об изменениях: вкл", "за 5 мин", "за 10 мин", "за 15 мин", "за 30 мин", "за 60 мин", "✓ Не напоминать", "← Назад"] }
+        - { method: editMessageText, buttons: ["Об изменениях: выкл", "за 5 мин", "за 10 мин", "за 15 мин", "за 30 мин", "за 60 мин", "✓ Не напоминать", "← Назад"] }
+    - google_external: { calendar: family@group.calendar.google.com, move: { id: f2, start: { dateTime: "2026-10-10T12:00:00+03:00" }, end: { dateTime: "2026-10-10T13:00:00+03:00" } } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Бассейн» — сб, 10 октября, 12:00–13:00 (было 11:00)"] }
+    # Только название — не сообщаем; событие через 40 дней — вне окна 30 дней
+    - google_external: { calendar: family@group.calendar.google.com, update: { id: f1, summary: "Ужин у бабушки" } }
+    - google_external:
+        calendar: family@group.calendar.google.com
+        create: { id: x9, summary: "Отпуск", start: { date: "2026-11-16" }, end: { date: "2026-11-20" } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true

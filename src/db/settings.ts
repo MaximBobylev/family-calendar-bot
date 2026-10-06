@@ -12,6 +12,10 @@ export interface UserSettings {
   digestOff?: boolean;
   /** Время дайджеста «ЧЧ:ММ» по поясу пользователя. Нет — 08:00. */
   digestTime?: string;
+  /** Уведомления об изменениях в календарях выключены (US-72). По умолчанию — включены. */
+  changeNotifyOff?: boolean;
+  /** Напоминать в Telegram за столько минут до встреч (US-71). Нет — не напоминать. */
+  tgReminderMin?: number;
 }
 
 export const DEFAULT_DURATION_MIN = 60;

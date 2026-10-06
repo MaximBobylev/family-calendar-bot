@@ -5,6 +5,7 @@
 import { googleCredentials, linkedElsewhere } from "../db/accounts";
 import { attachMessage, createPendingAction, ensureConversation, type PendingAction } from "../db/conversations";
 import { deleteUserData, type User } from "../db/users";
+import { dropOrphanSyncs, stopUserChannels } from "../sync/engine";
 import { revokeStoredToken } from "../google/oauth";
 import type { AppContext } from "./context";
 import { callbackData } from "./keyboards";
@@ -53,6 +54,8 @@ export async function confirmDisconnect(
     await reply("cancelled");
     return;
   }
+  // Каналы push, открытые его токеном, может остановить только он — до отзыва токена (ADR-0005 §2)
+  await stopUserChannels(ctx, user.id).catch((e) => console.warn("stop channels failed", e instanceof Error ? e.message : e));
   const creds = await googleCredentials(ctx.db, user.id);
   let result: MessageKey = "disconnectDoneNoAccount";
   if (creds) {
@@ -60,5 +63,7 @@ export async function confirmDisconnect(
     else result = (await revokeStoredToken(ctx.config, creds)) ? "disconnectDone" : "disconnectRevokeFailed";
   }
   await deleteUserData(ctx.db, user.id, telegramId);
+  // Календари, которых больше нет ни у кого, — без подписки и снимков событий
+  await dropOrphanSyncs(ctx.db);
   await reply(result);
 }

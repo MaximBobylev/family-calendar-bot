@@ -4,6 +4,7 @@
 import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { AuthRevoked, CalendarError, PermissionDenied } from "../calendar/model";
 import type { User } from "../db/users";
+import { botWriteListener } from "../sync/bot-writes";
 import type { AppContext } from "./context";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
@@ -15,7 +16,8 @@ import { t } from "./messages";
  */
 export async function withCalendar(ctx: AppContext, user: User, chatId: number, action: (provider: GoogleCalendarProvider) => Promise<void>): Promise<boolean> {
   try {
-    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock));
+    // Записи в календарь — уведомление в другие чаты календаря (US-72) и пересчёт напоминаний (US-71)
+    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock, botWriteListener(ctx, user, chatId)));
     return true;
   } catch (e) {
     console.error("calendar action failed", e instanceof Error ? e.message : e);

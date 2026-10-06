@@ -1,7 +1,7 @@
 // Тестовые эндпоинты (ADR-0006). Доступны только при TEST_MODE=true — в проде маршрутов нет.
 //   POST /__test/clock  {"now": "2026-10-07T07:00:00Z"} — установить «сейчас»
 //   POST /__test/tick   — выполнить планировщик до текущего «сейчас» (задачи — сразу, без очереди)
-//   POST /__test/hourly — часовые работы cron: ретеншн и страховка дайджестов
+//   POST /__test/hourly — часовые работы cron: ретеншн, страховка дайджестов и синхронизации календарей
 //   POST /__test/drain  — синхронно обработать все апдейты из inbox; упавшие — 500 со списком {failed: [update_id]}
 //   POST /__test/retry  — повторить упавшие апдейты (status 'failed'), как это сделал бы ретрай очереди (tech-debt #5)
 //   POST /__test/alerts — оценить правила алертов сейчас (в cron — раз в 5 минут) → {sent: ["jobs:fire", …]}
@@ -15,8 +15,13 @@ import { ensureDigests } from "../jobs/digest";
 import { cleanup, runQueuedJob, tick } from "../scheduler";
 import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "../db/ops-state";
 import { runAlerts } from "../ops/alerts";
+import { ensureCalendarSyncs } from "../sync/engine";
 
 const TABLES = [
+  "change_notices",
+  "bot_writes",
+  "event_snapshots",
+  "calendar_sync",
   "alert_state",
   "admin_audit",
   "ops_state",
@@ -64,6 +69,7 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
     case "/__test/hourly":
       await cleanup(ctx.db, ctx.clock.now());
       await ensureDigests(ctx.db, ctx.clock.now());
+      await ensureCalendarSyncs(ctx.db, ctx.clock.now());
       await setOpsState(ctx.db, OPS_LAST_HOURLY, "", ctx.clock.now());
       return Response.json({ ok: true });
     case "/__test/alerts":

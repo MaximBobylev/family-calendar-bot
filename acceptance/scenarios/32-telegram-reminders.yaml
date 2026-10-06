@@ -1,0 +1,121 @@
+# US-71: напоминания о встречах в Telegram «за N минут» — независимо от напоминаний Google.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК. Источник времени — синхронизация календаря (ADR-0005 §2).
+
+- id: tg-reminder-fires-n-minutes-before
+  story: US-71
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - id: e1
+                  summary: "Планёрка"
+                  location: "Переговорная 3"
+                  hangoutLink: "https://meet.google.com/abc-defg-hij"
+                  start: { dateTime: "2026-10-08T10:00:00+03:00" }
+                  end: { dateTime: "2026-10-08T11:00:00+03:00" }
+                - { id: e2, summary: "День рождения Пети", start: { date: "2026-10-08" }, end: { date: "2026-10-09" } }
+                - id: e3
+                  summary: "Чужая встреча"
+                  start: { dateTime: "2026-10-08T12:00:00+03:00" }
+                  end: { dateTime: "2026-10-08T13:00:00+03:00" }
+                  organizer: { self: false, email: "boss@example.com" }
+                  attendees: [{ self: true, responseStatus: declined }, { email: "boss@example.com" }]
+      - llm:
+          "Перенеси планёрку на 15": { tool: modify_event, args: { event: "планёрку" } }
+      - hourly: true
+      - tick: true
+      - telegram: { from: 1001, text: "/settings" }
+      - press: "📣 Уведомления"
+      - press: "за 10 мин"
+      - expect_telegram:
+          - { text_contains: ["⏰ Напоминать в Telegram: нет"] }
+          - { method: editMessageText, text_contains: ["📣 <b>Уведомления</b>"] }
+          - { method: editMessageText, buttons: ["✓ Об изменениях: вкл", "за 5 мин", "✓ за 10 мин", "за 15 мин", "за 30 мин", "за 60 мин", "Не напоминать", "← Назад"] }
+    # Утренняя сводка в 08:00 — своим чередом
+    - clock: "2026-10-08T06:49:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["☀️ Доброе утро!"] }
+    - clock: "2026-10-08T06:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["⏰ Через 10 мин: <b>Планёрка</b>", "чт, 8 октября, 10:00–11:00", "📍 Переговорная 3", "🔗 https://meet.google.com/abc-defg-hij"]
+    # На весь день и отклонённые — не напоминаются
+    - clock: "2026-10-08T09:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: tg-reminder-follows-external-move-and-delete
+  story: US-71
+  steps:
+    - *setup
+    - google_external: { calendar: ivan@gmail.com, move: { id: e1, start: { dateTime: "2026-10-08T12:00:00+03:00" }, end: { dateTime: "2026-10-08T13:00:00+03:00" } } }
+    - google_push: { calendar: ivan@gmail.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Планёрка»"] }
+    - clock: "2026-10-08T06:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["☀️ Доброе утро!"], text_not_contains: ["⏰"] }
+    - clock: "2026-10-08T08:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["⏰ Через 10 мин: <b>Планёрка</b>", "12:00–13:00"] }
+
+- id: tg-reminder-deleted-event-silent
+  story: US-71
+  steps:
+    - *setup
+    - google_external: { calendar: ivan@gmail.com, delete: e1 }
+    - google_push: { calendar: ivan@gmail.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Планёрка»"] }
+    - clock: "2026-10-08T06:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["☀️ Доброе утро!"], text_not_contains: ["⏰"] }
+
+- id: tg-reminder-follows-bot-move-and-turn-off
+  story: US-71
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Перенеси планёрку на 15" }
+    - press: "Подтвердить"
+    - expect_telegram:
+        - { text_contains: ["Перенести?"] }
+        - { method: editMessageText, text_contains: ["✅ Изменено"] }
+    - clock: "2026-10-08T06:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["☀️ Доброе утро!"], text_not_contains: ["⏰"] }
+    - clock: "2026-10-08T11:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["⏰ Через 10 мин: <b>Планёрка</b>", "15:00–16:00"] }
+    # Выключили — новых напоминаний нет
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "📣 Уведомления"
+    - press: "Не напоминать"
+    - expect_telegram_count: 3
+    - google_external:
+        calendar: ivan@gmail.com
+        create: { id: x1, summary: "Созвон", start: { dateTime: "2026-10-08T17:00:00+03:00" }, end: { dateTime: "2026-10-08T17:30:00+03:00" } }
+    - google_push: { calendar: ivan@gmail.com }
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["➕ Новое: «Созвон»"] }
+    - clock: "2026-10-08T13:50:00Z"
+    - tick: true
+    - expect_no_telegram: true

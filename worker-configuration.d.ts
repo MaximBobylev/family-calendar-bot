@@ -14,6 +14,7 @@ interface __BaseEnv_Env {
 	STT_BASE?: "http://fakes:9100/stt";
 	STT_MODEL: "fake-whisper" | "@cf/openai/whisper-large-v3-turbo";
 	TEST_MODE: "true" | "false";
+	GOOGLE_PUSH_ENABLED: "true" | "false";
 	CLOUDFLARE_ACCOUNT_ID: string;
 	CLOUDFLARE_API_TOKEN: string;
 	TELEGRAM_BOT_TOKEN: string;
@@ -44,6 +45,7 @@ declare namespace Cloudflare {
 		STT_BASE: "http://fakes:9100/stt";
 		STT_MODEL: "fake-whisper";
 		TEST_MODE: "true";
+		GOOGLE_PUSH_ENABLED: "true";
 		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		TELEGRAM_BOT_TOKEN: string;
@@ -63,7 +65,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TELEGRAM_API_BASE" | "GOOGLE_API_BASE" | "GOOGLE_OAUTH_BASE" | "GOOGLE_ACCOUNTS_BASE" | "PUBLIC_BASE_URL" | "LLM_BASE" | "LLM_MODEL" | "STT_BASE" | "STT_MODEL" | "TEST_MODE" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_API_TOKEN" | "TELEGRAM_BOT_TOKEN" | "ALLOWED_TELEGRAM_IDS" | "TELEGRAM_WEBHOOK_SECRET" | "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET" | "TOKEN_ENCRYPTION_KEY" | "LLM_API_KEY" | "ADMIN_USER" | "ADMIN_PASSWORD">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TELEGRAM_API_BASE" | "GOOGLE_API_BASE" | "GOOGLE_OAUTH_BASE" | "GOOGLE_ACCOUNTS_BASE" | "PUBLIC_BASE_URL" | "LLM_BASE" | "LLM_MODEL" | "STT_BASE" | "STT_MODEL" | "TEST_MODE" | "GOOGLE_PUSH_ENABLED" | "CLOUDFLARE_ACCOUNT_ID" | "CLOUDFLARE_API_TOKEN" | "TELEGRAM_BOT_TOKEN" | "ALLOWED_TELEGRAM_IDS" | "TELEGRAM_WEBHOOK_SECRET" | "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET" | "TOKEN_ENCRYPTION_KEY" | "LLM_API_KEY" | "ADMIN_USER" | "ADMIN_PASSWORD">> {}
 }
 
 // Begin runtime types
