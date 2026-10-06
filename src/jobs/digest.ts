@@ -10,6 +10,7 @@ import { AuthRevoked, type CalendarInfo, type EventList } from "../calendar/mode
 import { localToUtc, utcToLocal } from "../dates/calendar";
 import { nextDailyAt, parseHhmm } from "../dates/daily";
 import { hasGoogleAccount, telegramChatOf } from "../db/accounts";
+import { recordFeature } from "../db/features";
 import { DEFAULT_DIGEST_TIME } from "../db/settings";
 import { findUserById, type User } from "../db/users";
 import type { DueJob } from "../scheduler";
@@ -88,4 +89,5 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   parts[0] = `${t("digestGreeting", user.locale)}\n\n${parts[0]}`;
   appendFailedNote(parts, list.failed, user.locale);
   for (const text of parts) await ctx.telegram.sendMessage(Number(chatId), text, undefined, { html: true });
+  await recordFeature(ctx.db, user.id, "digest", ctx.clock.now());
 }

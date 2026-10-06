@@ -1,0 +1,42 @@
+# US-64: учёт использованных функций (feature_usage) — только успешное действие; видно в /admin/usage.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: feature-usage-counts-successful-actions
+  story: US-64
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - llm:
+        "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+        "Каждый понедельник в 10 планёрка": { tool: create_event, args: { start: "Каждый понедельник в 10", title: "Планёрка" } }
+        "Созвон с Петей завтра в 15:30": { tool: create_event, args: { start: "завтра в 15:30", title: "Созвон с Петей" } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    # Отменённая карточка — не использование
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30" }
+    - press: "Отмена"
+    - telegram: { from: 1001, text: "Каждый понедельник в 10 планёрка" }
+    - press: "Создать"
+    - press: "↩ Отменить"
+    - expect_telegram:
+        - { text_contains: ["Встреч нет"] }
+        - { text_contains: ["Встреч нет"] }
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Создать повторяющееся событие?"] }
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { method: editMessageText, text_contains: ["Отменено"] }
+    - http_get:
+        path: "/admin/usage"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - "Функции (US-64"
+          - "<td>list</td><td>1</td><td>2</td>"
+          - "<td>create</td><td>1</td><td>1</td>"
+          - "<td>recurring</td><td>1</td><td>1</td>"
+          - "<td>undo</td><td>1</td><td>1</td>"
+          - "2026-10-07 07:00 UTC"
+        text_not_contains: ["<td>delete</td>", "<td>voice</td>"]

@@ -3,6 +3,7 @@
 // R1 (US-65): здесь же будет кнопка «Создать событие из этого» — разбор чужого текста в событие.
 
 import { attachMessage, createPendingAction, type PendingAction } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { AppContext } from "./context";
 import { escapeHtml } from "./format";
@@ -61,5 +62,6 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
       { html: true },
     );
   }
+  if (run) await recordFeature(ctx.db, user.id, "forwarded_confirm", ctx.clock.now());
   return run ? text : null;
 }

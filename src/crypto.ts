@@ -1,5 +1,10 @@
-// Шифрование секретов в D1 (refresh token Google): AES-GCM, ключ — секрет TOKEN_ENCRYPTION_KEY (base64, 32 байта).
-// Формат: base64(iv[12] || ciphertext).
+// Шифрование секретов в D1 (refresh token Google, PKCE verifier): AES-GCM, ключ — секрет TOKEN_ENCRYPTION_KEY
+// (base64, 32 байта). tech-debt #8 — версия формата и ротация ключей:
+//   v1:     "v1:" + base64(iv[12] || ciphertext), AAD = контекст записи («account:<id>», «oauth_state:<state>») —
+//           шифротекст не подставить в чужую строку БД;
+//   legacy: base64(iv[12] || ciphertext) без AAD — записи до v1, только расшифровка (перешифруются при переподключении).
+// Ротация: новый ключ — в TOKEN_ENCRYPTION_KEY, прежние — в TOKEN_ENCRYPTION_KEYS_OLD (через запятую): шифрует
+// только текущий, расшифровка пробует текущий, затем старые.
 
 const b64 = {
   encode: (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)),
@@ -13,20 +18,48 @@ async function importKey(keyB64: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
-export async function encryptSecret(plain: string, keyB64: string): Promise<string> {
+const V1 = "v1:";
+
+/** Ключи: первый — текущий (шифрует), остальные — прежние (только расшифровка). */
+export type KeyRing = readonly [current: string, ...old: string[]];
+
+/** Зашифровать (формат v1). aad — контекст записи, тот же нужен для расшифровки. */
+export async function encryptSecret(plain: string, keys: KeyRing, aad: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await importKey(keyB64), new TextEncoder().encode(plain)));
+  const params = { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) };
+  const ct = new Uint8Array(await crypto.subtle.encrypt(params, await importKey(keys[0]), new TextEncoder().encode(plain)));
   const out = new Uint8Array(iv.length + ct.length);
   out.set(iv);
   out.set(ct, iv.length);
-  return b64.encode(out);
+  return V1 + b64.encode(out);
 }
 
-export async function decryptSecret(sealed: string, keyB64: string): Promise<string> {
-  const bytes = b64.decode(sealed);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, await importKey(keyB64), bytes.slice(12));
-  return new TextDecoder().decode(plain);
+/** Расшифровать v1 (с aad) или legacy (без AAD) любым ключом из связки. Ни один не подошёл — ошибка. */
+export async function decryptSecret(sealed: string, keys: KeyRing, aad: string): Promise<string> {
+  const v1 = sealed.startsWith(V1);
+  const bytes = b64.decode(v1 ? sealed.slice(V1.length) : sealed);
+  const params = { name: "AES-GCM", iv: bytes.slice(0, 12), ...(v1 ? { additionalData: new TextEncoder().encode(aad) } : {}) };
+  for (const key of keys) {
+    try {
+      return new TextDecoder().decode(await crypto.subtle.decrypt(params, await importKey(key), bytes.slice(12)));
+    } catch {
+      // Не этот ключ — следующий (ротация)
+    }
+  }
+  throw new Error("secret cannot be decrypted with any configured key");
 }
+
+/** Связка ключей из секретов: TOKEN_ENCRYPTION_KEY и необязательный TOKEN_ENCRYPTION_KEYS_OLD (через запятую). */
+export function keyRing(current: string, old: string | undefined): KeyRing {
+  const rest = (old ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k && k !== current);
+  return [current, ...rest];
+}
+
+/** AAD для refresh token аккаунта и для PKCE verifier OAuth-ссылки. */
+export const aadFor = { account: (accountId: string) => `account:${accountId}`, oauthState: (state: string) => `oauth_state:${state}` };
 
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

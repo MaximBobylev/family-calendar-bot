@@ -227,7 +227,9 @@ function regularWeekday(text: string, now: string, tz: string): RecurrenceSpan |
   const marker = REGULAR.exec(text)?.[1];
   if (!marker) return undefined;
   const point = extractDateSpans(text.replace(marker, " "), now, tz, "point").point;
-  if (!point || !point.split(/\s+/).some((w) => WEEKDAYS.has(w.toLowerCase()))) return undefined;
+  // Две проверки, а не `!point?.split(…)`: так TypeScript сужает point до string для строк ниже
+  if (!point) return undefined;
+  if (!point.split(/\s+/).some((w) => WEEKDAYS.has(w.toLowerCase()))) return undefined;
   const span = `каждый ${point.replace(/^(на|в|во|on)\s+/i, "")}`;
   if (!("recurrence" in parseDateFragment({ text: span, kind: "recurrence", now, tz }))) return undefined;
   const rest = text.replace(marker, " ").replace(point, " ").replace(/\s+/g, " ").trim();

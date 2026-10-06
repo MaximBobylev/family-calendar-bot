@@ -1,10 +1,11 @@
 // Голосовое → текст (US-10): проверка длины и размера, лимит STT, скачивание, цепочка STT, журнал (US-13),
 // поправки известных ошибок Whisper и ответ «Услышал: …».
 
+import { recordFeature } from "../../db/features";
 import { recordUsage } from "../../db/usage";
 import type { User } from "../../db/users";
 import { sttCostMicroUsd } from "../../limits";
-import { fixTranscript, isEmptySpeech, transcribeChain, type Transcript } from "../../stt/whisper";
+import { fixTranscript, isEmptySpeech, SttChainError, transcribeChain, type Transcript } from "../../stt/whisper";
 import type { TgMessage } from "../../telegram/types";
 import type { AppContext } from "../context";
 import { escapeHtml } from "../format";
@@ -57,10 +58,11 @@ export async function recognizeVoice(ctx: AppContext, user: User, message: TgMes
     await recordUsage(ctx.db, {
       userId: user.id,
       kind: "stt",
-      provider: "chain",
+      // Как у LLM (nlu-step.ts): упала вся цепочка — «chain» и список причин; иначе — сбой вне цепочки (D1 и т.п.)
+      provider: e instanceof SttChainError ? "chain" : (first?.name ?? first?.baseUrl ?? "none"),
       model: first?.model ?? "none",
       audioMs,
-      result: String(e),
+      result: e instanceof SttChainError ? { failed: e.failed } : String(e),
       outcome: "error",
       now: ctx.clock.now(),
     });
@@ -75,5 +77,6 @@ export async function recognizeVoice(ctx: AppContext, user: User, message: TgMes
   const heard = fixTranscript(transcript.text);
   // Показываем, что услышали, — до долгой обработки (US-10)
   await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(heard) }), undefined, { html: true });
+  await recordFeature(ctx.db, user.id, "voice", ctx.clock.now());
   return heard;
 }

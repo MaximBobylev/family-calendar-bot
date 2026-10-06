@@ -2,14 +2,15 @@
 // Стоимость — из usage_events.cost_micro_usd (пишется в момент вызова, ADR-0004), а не по ценам в админке.
 
 import type { UsageLimits } from "../../limits";
-import type { ModelUsage, UserUsage } from "../queries";
-import { esc, raw, table, usd } from "./layout";
+import type { FeatureRow, ModelUsage, UserUsage } from "../queries";
+import { esc, fmtTime, raw, table, usd } from "./layout";
 
 export interface UsageView {
   byUser: (UserUsage & { user: string })[];
   byModel: ModelUsage[];
   intents: { intent: string; n: number }[];
   cards: { kind: string; status: string; n: number }[];
+  features: FeatureRow[];
   limits: UsageLimits;
 }
 
@@ -54,5 +55,10 @@ ${table(
 ${table(
   ["Тип", "Статус", "Количество"],
   v.cards.map((c) => [c.kind, c.status, c.n]),
+)}
+<h2>Функции (US-64, за всё время)</h2>
+${table(
+  ["Функция", "Пользователей", "Раз", "Впервые"],
+  v.features.map((f) => [f.feature, f.users, f.uses, fmtTime(f.first_at)]),
 )}`;
 }

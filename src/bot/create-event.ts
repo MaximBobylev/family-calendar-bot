@@ -4,11 +4,21 @@
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { localToUtc, utcToLocal } from "../dates/calendar";
-import { attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
+import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
+import { type Feature, recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { AppContext } from "./context";
-import { type CreateCardPayload, type CreateDraft, type CreateOption, resolveCalendar, resolveDraft, type TitleQuestionPayload } from "./create-logic";
+import {
+  type CalendarResolution,
+  type CreateCardPayload,
+  type CreateDraft,
+  type CreateOption,
+  namedByAlias,
+  resolveCalendar,
+  resolveDraft,
+  type TitleQuestionPayload,
+} from "./create-logic";
 import { cardBody, createCard } from "./create-view";
 import { dateLabel, escapeHtml, hhmm } from "./format";
 import { attachUndoMessage, recordUndo } from "./undo";
@@ -18,7 +28,6 @@ export { type CreateCardPayload, type CreateDraft, draftFromIntent, type TitleQu
 
 export const CREATE_CARD = "create";
 export const TITLE_QUESTION = "title";
-const AWAIT_TTL_MS = 15 * 60 * 1000;
 
 // --- Сценарий --------------------------------------------------------------
 
@@ -38,17 +47,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   const calendars = await provider.calendars();
   const cal = resolveCalendar(calendars, a.draft.calendar);
   if ("error" in cal) {
-    const text =
-      cal.error === "readOnly"
-        ? t("calendarReadOnly", locale, { name: cal.name })
-        : t("calendarNotFound", locale, {
-            name: cal.name,
-            list: calendars
-              .filter((c) => c.writable)
-              .map((c) => `«${c.title}»`)
-              .join(", "),
-          });
-    await ctx.telegram.sendMessage(chatId, text);
+    await ctx.telegram.sendMessage(chatId, calendarErrorText(cal, calendars, locale));
     return;
   }
 
@@ -76,19 +75,29 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     conversationId: a.conversationId,
     userId: user.id,
     kind: CREATE_CARD,
-    payload: { chatId, options: res.options } satisfies CreateCardPayload,
+    payload: { chatId, options: res.options, ...(namedByAlias(cal, a.draft.calendar) ? { viaAlias: true } : {}) } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
 
   // Пересечения — только для единственного варианта (US-30)
-  const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars) : [];
+  const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
   const { text, buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps);
   const sent = await ctx.telegram.sendMessage(chatId, text, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
+function calendarErrorText(cal: Exclude<CalendarResolution, CalendarInfo>, calendars: CalendarInfo[], locale: string): string {
+  if (cal.error === "noWritable") return t("noWritableCalendar", locale);
+  if (cal.error === "readOnly") return t("calendarReadOnly", locale, { name: cal.name });
+  const list = calendars
+    .filter((c) => c.writable)
+    .map((c) => `«${c.title}»`)
+    .join(", ");
+  return t("calendarNotFound", locale, { name: cal.name, list });
+}
+
 /** Пересечения с событиями в целевом календаре и календаре по умолчанию (US-30). */
-async function findOverlaps(provider: CalendarProvider, o: CreateOption, calendars: CalendarInfo[]): Promise<string[]> {
+async function findOverlaps(provider: CalendarProvider, o: CreateOption, calendars: CalendarInfo[], locale: string): Promise<string[]> {
   if (o.allDay) return [];
   const relevant = new Set([o.calendarId, calendars.find((c) => c.isDefault)?.id]);
   const { events } = await provider.listEvents(localToUtc(o.start!, o.tz), localToUtc(o.end!, o.tz), o.tz);
@@ -96,7 +105,7 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
     .filter((e) => !e.allDay && !e.free && relevant.has(e.ref.calendarId))
     .map((e) => {
       // Пересечение, начавшееся в другой день, — с меткой дня
-      const otherDay = e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, "ru")})` : "";
+      const otherDay = e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, locale)})` : "";
       return `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}${otherDay} ${escapeHtml(e.title)}`;
     });
 }
@@ -114,17 +123,17 @@ export async function confirmCreate(
   user: User,
   action: PendingAction<CreateCardPayload>,
   choice: string,
-): Promise<void> {
+): Promise<boolean> {
   const { chatId, options } = action.payload;
   const locale = user.locale;
   const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
 
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", locale));
-    return;
+    return false;
   }
   const o = options[Number(choice.slice(1))];
-  if (!o) return;
+  if (!o) return false;
 
   const created = await provider.createEvent({
     idempotencyKey: `${action.id}${choice.slice(1)}`,
@@ -156,6 +165,8 @@ export async function confirmCreate(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
+  const features: Feature[] = ["create", ...(o.series ? ["recurring" as const] : []), ...(action.payload.viaAlias ? ["alias" as const] : [])];
+  await recordFeature(ctx.db, user.id, features, ctx.clock.now());
 
   // Название не задано — спросить; ответом считается только reply на этот вопрос (US-30)
   if (!o.titleGiven) {
@@ -169,4 +180,5 @@ export async function confirmCreate(
     const q = await ctx.telegram.sendMessage(chatId, t("askTitle", locale), { force_reply: true });
     await attachMessage(ctx.db, qId, q.message_id);
   }
+  return true;
 }

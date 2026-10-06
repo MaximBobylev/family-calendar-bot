@@ -3,6 +3,7 @@
 import { parseHhmm } from "../../dates/daily";
 import { parseTimeZone } from "../../dates/timezone";
 import { rescheduleDigest } from "../../jobs/digest";
+import { recordFeature } from "../../db/features";
 import { addAliases, setHomeTz } from "../../db/settings";
 import type { User } from "../../db/users";
 import type { AppContext } from "../context";
@@ -31,6 +32,7 @@ export async function handleSettingsInput(
     await setHomeTz(ctx.db, user.id, tz);
     await rescheduleDigest(ctx.db, user.id, ctx.clock.now());
     await ctx.telegram.sendMessage(chatId, t("settingsTzSet", l, { value: tz, time: nowIn(ctx, tz) }));
+    await recordFeature(ctx.db, user.id, "settings", ctx.clock.now());
     return true;
   }
   if (awaiting.kind === "settings_digest_time") {
@@ -42,6 +44,7 @@ export async function handleSettingsInput(
     const time = hhmm(minutes);
     await setDigest(ctx, user, time);
     await ctx.telegram.sendMessage(chatId, t("settingsDigestSet", l, { time }));
+    await recordFeature(ctx.db, user.id, "settings", ctx.clock.now());
     return true;
   }
   const cal = (await calendarsOf(ctx, user)).find((c) => c.id === awaiting.calendarId);
@@ -51,5 +54,6 @@ export async function handleSettingsInput(
     return true;
   }
   await ctx.telegram.sendMessage(chatId, t("settingsAliasesAdded", l, { name: cal.title, aliases: added.map((a) => `«${a}»`).join(", "), first: added[0]! }));
+  await recordFeature(ctx.db, user.id, ["settings", "alias"], ctx.clock.now());
   return true;
 }

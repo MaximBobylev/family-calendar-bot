@@ -2,6 +2,7 @@
 // Используются и кнопками (callbacks.ts), и вводом текстом (input.ts).
 
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
+import { googleAccountEmail } from "../../db/accounts";
 import { rescheduleDigest } from "../../jobs/digest";
 import { DEFAULT_DIGEST_TIME, updateSettings } from "../../db/settings";
 import type { User } from "../../db/users";
@@ -31,10 +32,7 @@ export async function showSettings(ctx: AppContext, user: User, chatId: number):
 
 /** Ссылка «Подключить» для уже подключённого: переподключение того же аккаунта сохраняет настройки (tech-debt #19). */
 export async function sendReconnect(ctx: AppContext, user: User, chatId: number): Promise<void> {
-  const row = await ctx.db
-    .prepare("SELECT email FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
-    .bind(user.id)
-    .first<{ email: string | null }>();
+  const row = await googleAccountEmail(ctx.db, user.id);
   const text = row ? t("reconnectPrompt", user.locale, { email: row.email ?? "Google" }) : t("connectPrompt", user.locale);
   await ctx.telegram.sendMessage(chatId, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
 }

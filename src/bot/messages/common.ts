@@ -47,6 +47,11 @@ export const commonMessages = {
   cancelButton: { ru: "Отмена", en: "Cancel" },
   cancelled: { ru: "Отменено.", en: "Cancelled." },
   alreadyDone: { ru: "Уже сделано.", en: "Already done." },
+  cardInProgress: { ru: "Уже выполняю — пару секунд.", en: "Working on it — a few seconds." },
+  actionNotCompleted: {
+    ru: "Действие не завершилось — повторите команду.",
+    en: "The action didn't complete — please send the command again.",
+  },
   cardExpired: { ru: "Карточка устарела — повторите команду.", en: "This card has expired — please repeat the command." },
   confirmButton: { ru: "Подтвердить", en: "Confirm" },
   internalError: { ru: "Что-то пошло не так. Попробуйте ещё раз.", en: "Something went wrong. Please try again." },

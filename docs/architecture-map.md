@@ -32,7 +32,8 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | Разбор дат, длительностей, повторений | `src/dates/*` + `testdata/dates/*.yaml` (правила — `docs/date-rules.md`) |
 | Даты из всего сообщения, название без дат | `src/dates/extract.ts` + `testdata/extract/*.yaml` |
 | Тексты ответов бота | `src/bot/messages/*.ts` — словарь RU/EN по областям (новый текст — в файл своей области), `t()` и `MessageKey` — `src/bot/messages.ts`; форматирование — `src/bot/format.ts`, `format-events.ts` |
-| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`) |
+| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/db/card-status.ts` (статусы, повтор), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`, `RETRYABLE`) |
+| Учёт функций (US-64) | `src/db/features.ts` (`Feature`, `recordFeature` — вызывать после успешного действия), сводка — `/admin/usage` |
 | Настройки пользователя | `src/bot/settings/*` (экраны, кнопки, ввод текстом, подписи), `src/db/settings.ts` |
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
 | Внешние URL, лимиты, цены | `src/config.ts` |
@@ -50,7 +51,7 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | `scheduler.ts` | Планировщик `scheduled_jobs`: tick раздаёт в очередь, повторы с backoff, `cleanup` (ретеншн) |
 | `config.ts` | Конфиг из Env: URL внешних API, цепочки провайдеров, `USAGE_LIMITS`, `COST_ESTIMATES` |
 | `clock.ts` | Внедряемые часы; в TEST_MODE «сейчас» хранится в D1 |
-| `crypto.ts` | AES-GCM для refresh token, сравнение за постоянное время |
+| `crypto.ts` | AES-GCM для секретов в D1: формат `v1:` с AAD, legacy без префикса, связка ключей для ротации (tech-debt #8); сравнение за постоянное время |
 | `limits.ts` | Лимиты расходов на пользователя (час/сутки), оценка стоимости |
 | `env.d.ts` | Секреты в типе `Env` (`wrangler types` их не знает) |
 | `oauth-routes.ts` | `/oauth/google/*`: промежуточная страница, PKCE, привязка к браузеру, callback |
@@ -119,7 +120,8 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари), `conversations.ts` (диалог, карточки), `settings.ts`, `usage.ts` (журнал и учёт), `ops-state.ts` |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts` |
+| `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 утренний дайджест |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
 | **net/** | `fetch.ts` — fetch с таймаутом |

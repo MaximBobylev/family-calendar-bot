@@ -93,4 +93,9 @@ describe("resolveCalendar", () => {
   it("не найден", () => expect(resolveCalendar(all, "Спорт")).toEqual({ error: "notFound", name: "Спорт" }));
   it("основной только для чтения — первый доступный для записи", () =>
     expect(resolveCalendar([cal("c4", "Чужой", { isDefault: true, writable: false }), family], undefined)).toBe(family));
+  it("все только для чтения — записать некуда, а не «не найден» с пустым именем", () => {
+    expect(resolveCalendar([ro], undefined)).toEqual({ error: "noWritable" });
+    expect(resolveCalendar([ro], "Спорт")).toEqual({ error: "noWritable" });
+    expect(resolveCalendar([ro], "Праздники")).toEqual({ error: "readOnly", name: "Праздники" });
+  });
 });

@@ -4,6 +4,7 @@
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, extractRecurrenceSpan, looksAllDay } from "../dates/extract";
 import { mergeDialogState } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import { detailHints } from "../nlu/detail-hints";
 import { effectiveIntent, lookupQuery, NEXT_WORD } from "../nlu/intent-overrides";
@@ -105,15 +106,16 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
     case "find_event": {
       const query = lookupQuery(text) ?? intent.event;
       const next = intent.next || NEXT_WORD.test(text);
-      await withCalendar(ctx, user, chatId, (provider) =>
+      const found = await withCalendar(ctx, user, chatId, (provider) =>
         lookupEvent(ctx, provider, { user, chatId, conversationId, ...(query ? { query } : {}), ...(next ? { next } : {}) }),
       );
+      if (found) await recordFeature(ctx.db, user.id, "find", ctx.clock.now());
       return;
     }
-    case "list_events":
+    case "list_events": {
       // Список показан — повтор того же вопроса голосом не сигнал «не понял» (multimodal-voice, D)
       await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
-      await withCalendar(ctx, user, chatId, (provider) =>
+      const listed = await withCalendar(ctx, user, chatId, (provider) =>
         readEvents(ctx, provider, {
           userId: user.id,
           chatId,
@@ -124,7 +126,9 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
           ...(intent.calendar ? { calendar: intent.calendar } : {}),
         }),
       );
+      if (listed) await recordFeature(ctx.db, user.id, "list", ctx.clock.now());
       return;
+    }
   }
 }
 

@@ -1,25 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret, pkceChallenge, pkceVerifier, randomToken, sha256Hex, timingSafeEqual } from "../src/crypto";
+import { decryptSecret, encryptSecret, keyRing, type KeyRing, pkceChallenge, pkceVerifier, randomToken, sha256Hex, timingSafeEqual } from "../src/crypto";
 
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+const OTHER = btoa(String.fromCharCode(...new Uint8Array(32).fill(8)));
+const RING: KeyRing = [KEY];
+const AAD = "account:a1";
+
+/** Шифротекст в формате до v1 (без префикса и AAD) — как лежат записи в проде до tech-debt #8. */
+async function legacySeal(plain: string, keyB64: string): Promise<string> {
+  const raw = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plain)));
+  return btoa(String.fromCharCode(...iv, ...ct));
+}
 
 describe("crypto", () => {
-  it("round-trips a secret and uses a fresh IV each time", async () => {
-    const a = await encryptSecret("rt-ivan@gmail.com", KEY);
-    const b = await encryptSecret("rt-ivan@gmail.com", KEY);
+  it("round-trips a secret in v1 format and uses a fresh IV each time", async () => {
+    const a = await encryptSecret("rt-ivan@gmail.com", RING, AAD);
+    const b = await encryptSecret("rt-ivan@gmail.com", RING, AAD);
+    expect(a).toMatch(/^v1:/);
     expect(a).not.toBe(b);
     expect(a).not.toContain("ivan");
-    expect(await decryptSecret(a, KEY)).toBe("rt-ivan@gmail.com");
+    expect(await decryptSecret(a, RING, AAD)).toBe("rt-ivan@gmail.com");
+  });
+
+  it("binds v1 ciphertext to its record (AAD)", async () => {
+    const sealed = await encryptSecret("secret", RING, "account:a1");
+    await expect(decryptSecret(sealed, RING, "account:a2")).rejects.toThrow();
+  });
+
+  it("decrypts legacy ciphertext (no prefix, no AAD) whatever the AAD", async () => {
+    const legacy = await legacySeal("rt-legacy", KEY);
+    expect(await decryptSecret(legacy, RING, AAD)).toBe("rt-legacy");
+    expect(await decryptSecret(legacy, [OTHER, KEY], "")).toBe("rt-legacy");
+  });
+
+  it("rotation: the current key encrypts, old keys still decrypt", async () => {
+    const before = await encryptSecret("secret", [KEY], AAD);
+    const legacy = await legacySeal("old", KEY);
+    const rotated: KeyRing = [OTHER, KEY];
+    expect(await decryptSecret(before, rotated, AAD)).toBe("secret");
+    expect(await decryptSecret(legacy, rotated, AAD)).toBe("old");
+    const after = await encryptSecret("secret", rotated, AAD);
+    await expect(decryptSecret(after, [KEY], AAD)).rejects.toThrow();
+    expect(await decryptSecret(after, [OTHER], AAD)).toBe("secret");
   });
 
   it("fails to decrypt with another key", async () => {
-    const sealed = await encryptSecret("secret", KEY);
-    const other = btoa(String.fromCharCode(...new Uint8Array(32).fill(8)));
-    await expect(decryptSecret(sealed, other)).rejects.toThrow();
+    const sealed = await encryptSecret("secret", RING, AAD);
+    await expect(decryptSecret(sealed, [OTHER], AAD)).rejects.toThrow();
   });
 
   it("rejects keys of wrong length", async () => {
-    await expect(encryptSecret("x", btoa("short"))).rejects.toThrow(/32 bytes/);
+    await expect(encryptSecret("x", [btoa("short")], AAD)).rejects.toThrow(/32 bytes/);
+  });
+
+  it("builds the key ring from secrets", () => {
+    expect(keyRing(KEY, undefined)).toEqual([KEY]);
+    expect(keyRing(KEY, "")).toEqual([KEY]);
+    expect(keyRing(OTHER, ` ${KEY} , ,${OTHER}`)).toEqual([OTHER, KEY]);
   });
 
   it("hashes and generates url-safe tokens", async () => {

@@ -395,3 +395,23 @@ export async function cardCounts(db: D1Database, now: number): Promise<{ kind: s
     .all<{ kind: string; status: string; n: number }>();
   return results;
 }
+
+export interface FeatureRow {
+  feature: string;
+  users: number;
+  uses: number;
+  first_at: number;
+}
+
+/** US-64: какие функции использовали — пользователей, раз всего, самое раннее первое использование. */
+export async function featureUsage(db: D1Database): Promise<FeatureRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT feature, count(*) users, sum(count) uses, min(first_used_at) first_at
+       FROM feature_usage
+       GROUP BY feature
+       ORDER BY users DESC, uses DESC, feature`,
+    )
+    .all<FeatureRow>();
+  return results;
+}

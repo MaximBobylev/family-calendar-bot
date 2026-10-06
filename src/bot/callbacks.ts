@@ -1,8 +1,9 @@
 // Нажатия кнопок: меню настроек (без карточки) и карточки pending_actions — атомарный захват (US-05),
 // затем обработчик по kind. Карточки с действием в календаре — таблица CALENDAR_CARDS (шаг к tech-debt #15).
+// Статусы карточки open → executing → done | failed (tech-debt #6, src/db/card-status.ts).
 
 import type { CalendarProvider } from "../calendar/model";
-import { claimPendingAction, ensureConversation, mergeDialogState, type PendingAction } from "../db/conversations";
+import { claimCard, ensureConversation, finishCard, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
 import type { TgCallbackQuery } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -20,8 +21,12 @@ import { UNDO_CARD, performUndo } from "./undo";
 import { withCalendar } from "./with-calendar";
 import { withTyping } from "./with-typing";
 
-/** Подтверждение карточки, которое действует в календаре (ошибки — через withCalendar). */
-type CalendarCardHandler = (ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction, choice: string) => Promise<void>;
+/**
+ * Подтверждение карточки, которое действует в календаре (ошибки — через withCalendar).
+ * true — действие выполнено (создано, изменено, удалено, отменено); false — отмена кнопкой, «уже удалено»,
+ * или карточка лишь открыла следующую (выбор события).
+ */
+type CalendarCardHandler = (ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction, choice: string) => Promise<boolean>;
 
 /** kind карточки → обработчик. Касты payload — до реестра с проверкой версии (tech-debt #15). */
 const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
@@ -35,9 +40,26 @@ const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
       const picked = await confirmPick(ctx, provider, user, action as Parameters<typeof confirmPick>[3], choice);
       if (picked?.purpose === "modify") await proposeChange(ctx, provider, user, picked.chatId, action.conversationId, picked.event, picked.request);
       if (picked?.purpose === "delete") await proposeDelete(ctx, provider, user, picked.chatId, action.conversationId, picked.event, picked.request);
+      return false;
     },
   ],
 ]);
+
+/**
+ * Повтор после умершего обработчика безопасен: create — свой id события (повтор → 409 → успех), modify/delete/undo —
+ * etag (уже применённое — «изменили»/«уже удалена», без второго действия), pick — лишь снова показывает карточку.
+ * forward и disconnect не повторяем: честное «не завершилось, повторите команду».
+ */
+const RETRYABLE = new Set([CREATE_CARD, MODIFY_CARD, DELETE_CARD, UNDO_CARD, PICK_CARD]);
+
+/** Ответ на нажатие карточки, которую забрать не удалось (US-05, tech-debt #6). */
+const BUSY_ANSWER = {
+  inProgress: "cardInProgress",
+  notCompleted: "actionNotCompleted",
+  abandoned: "actionNotCompleted",
+  done: "alreadyDone",
+  stale: "cardExpired",
+} as const;
 
 /** Нажатие кнопки на карточке: атомарно «забираем» карточку — повторное нажатие ничего не делает (US-05). */
 export async function handleCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
@@ -54,18 +76,25 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
     await ctx.telegram.answerCallbackQuery(cq.id);
     return;
   }
-  const claim = await claimPendingAction(ctx.db, parsed.actionId, user.id, ctx.clock.now());
+  const claim = await claimCard(ctx.db, parsed.actionId, user.id, ctx.clock.now(), (kind) => RETRYABLE.has(kind));
   if (!claim.ok) {
-    const stale = claim.reason !== "done";
-    await ctx.telegram.answerCallbackQuery(cq.id, t(stale ? "cardExpired" : "alreadyDone", user.locale));
-    if (stale && cq.message) await ctx.telegram.editMessageText(cq.message.chat.id, cq.message.message_id, t("cardExpired", user.locale));
+    const key = BUSY_ANSWER[claim.verdict];
+    await ctx.telegram.answerCallbackQuery(cq.id, t(key, user.locale));
+    // Убрать кнопки, по которым уже ничего не случится. failed уже показывает «Не получилось», «выполняю» и
+    // «уже сделано» — только всплывающим ответом
+    if ((claim.verdict === "stale" || claim.verdict === "abandoned") && cq.message) {
+      await ctx.telegram.editMessageText(cq.message.chat.id, cq.message.message_id, t(key, user.locale)).catch(() => undefined);
+    }
     return;
   }
+  if (claim.retry) console.warn("card retry after abandoned execution", claim.action.kind, claim.action.id);
   await ctx.telegram.answerCallbackQuery(cq.id);
   const chatId = cq.message?.chat.id ?? cq.from.id;
   const action = claim.action;
   if (action.kind === FORWARD_CARD) {
     const text = await confirmForwarded(ctx, user, action as PendingAction<ForwardCardPayload>, parsed.choice);
+    // Решение по карточке принято; дальше — обычная команда со своими карточками
+    await finishCard(ctx.db, action.id, "done");
     // Выполняем от имени нажавшего — как если бы он сам написал это (US-10)
     if (text) await withTyping(ctx, chatId, () => runCommand(ctx, user, chatId, action.conversationId, text));
     return;
@@ -73,18 +102,23 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
   if (action.kind === DISCONNECT_CARD) {
     try {
       await confirmDisconnect(ctx, user, cq.from.id, action as Parameters<typeof confirmDisconnect>[3], parsed.choice);
+      await finishCard(ctx.db, action.id, "done");
     } catch (e) {
-      // Карточка уже «done» — не оставлять кнопки на несделанном; повторить можно новой командой
+      // Не оставлять кнопки на несделанном; повторить можно новой командой
       console.error("disconnect failed", e instanceof Error ? e.message : e);
+      await finishCard(ctx.db, action.id, "failed");
       if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale)).catch(() => undefined);
     }
     return;
   }
+  let completed = false;
   const ok = await withCalendar(ctx, user, chatId, async (provider) => {
-    await CALENDAR_CARDS.get(action.kind)?.(ctx, provider, user, action, parsed.choice);
+    completed = (await CALENDAR_CARDS.get(action.kind)?.(ctx, provider, user, action, parsed.choice)) ?? false;
   });
-  // Карточка уже «done»: при сбое убираем кнопки, чтобы не было «Уже сделано» на несделанном (ревью 2026-10-05)
+  // Сбой обработан — failed: кнопки убираем, повторное нажатие получит «не выполнено», а не «Уже сделано»
+  await finishCard(ctx.db, action.id, ok ? "done" : "failed");
   if (!ok && action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale));
-  // Действие по голосовому подтверждено — его повтор дальше не сигнал «не понял» (multimodal-voice, D)
-  if (ok && parsed.choice !== "x") await mergeDialogState(ctx.db, action.conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
+  // Действие по голосовому выполнено — его повтор дальше не сигнал «не понял» (multimodal-voice, D).
+  // Только завершённое действие: выбор события лишь открывает следующую карточку, голосовое ещё может быть понято неверно
+  if (ok && completed) await mergeDialogState(ctx.db, action.conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
 }

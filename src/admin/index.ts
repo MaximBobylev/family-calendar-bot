@@ -229,17 +229,19 @@ async function reveal(
 
 async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<string> {
   const dayStart = now - (now % 86_400_000);
-  const [byUser, byModel, intents, cards] = await Promise.all([
+  const [byUser, byModel, intents, cards, features] = await Promise.all([
     q.usageByUser(ctx.db, now, dayStart),
     q.usageByModel(ctx.db, now),
     q.intentCounts(ctx.db, now),
     q.cardCounts(ctx.db, now),
+    q.featureUsage(ctx.db),
   ]);
   return usageBody({
     byUser: await Promise.all(byUser.map(async (u) => ({ ...u, user: await pseudo(u.user_id) }))),
     byModel,
     intents,
     cards,
+    features,
     limits: ctx.config.limits,
   });
 }

@@ -34,6 +34,10 @@ export const createMessages = {
   inPast: { ru: "Это время уже прошло. Когда поставить?", en: "That time has already passed. When should I schedule it?" },
   durationUnparseable: { ru: "Не понял длительность. Например: «на полчаса», «на два часа».", en: "I didn't get the duration. For example: “for 30 minutes”." },
   calendarReadOnly: { ru: "В календарь «{name}» нельзя записывать.", en: "The calendar “{name}” is read-only." },
+  noWritableCalendar: {
+    ru: "Нет календаря, куда можно записать: все подключённые — только для чтения. Проверьте права в Google Календаре и переподключите его: /connect.",
+    en: "There's no calendar I can write to: all connected calendars are read-only. Check permissions in Google Calendar and reconnect: /connect.",
+  },
   overlap: { ru: "⚠️ Пересекается: {list}", en: "⚠️ Overlaps: {list}" },
   defaultTitle: { ru: "Встреча", en: "Meeting" },
   allDayLower: { ru: "весь день", en: "all day" },

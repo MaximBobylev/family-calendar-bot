@@ -77,6 +77,8 @@ export interface LinkedAccount {
 }
 
 export interface StoredCredentials {
+  /** id строки provider_accounts — AAD шифротекста (tech-debt #8). */
+  accountId: string;
   credentialsEnc: string;
   emailHash: string | null;
 }
@@ -93,7 +95,8 @@ export async function saveGoogleAccount(
     userId: string;
     email: string;
     emailHash: string;
-    credentialsEnc: string;
+    /** Зашифровать refresh token для этой строки: AAD — id аккаунта, который известен только здесь (tech-debt #8). */
+    sealCredentials: (accountId: string) => Promise<string>;
     scopes: string;
     calendars: GoogleCalendarListEntry[];
     now: number;
@@ -108,6 +111,7 @@ export async function saveGoogleAccount(
 
   if (existing && existing.email?.toLowerCase() === args.email.toLowerCase()) {
     const accountId = existing.id;
+    const credentialsEnc = await args.sealCredentials(accountId);
     const prevDefault = await db
       .prepare("SELECT provider_calendar_id FROM calendars WHERE account_id = ? AND is_default = 1")
       .bind(accountId)
@@ -119,7 +123,7 @@ export async function saveGoogleAccount(
     await db.batch([
       db
         .prepare("UPDATE provider_accounts SET credentials_enc = ?, granted_scopes = ?, email_hash = ? WHERE id = ?")
-        .bind(args.credentialsEnc, args.scopes, args.emailHash, accountId),
+        .bind(credentialsEnc, args.scopes, args.emailHash, accountId),
       // Исчезнувшие календари — вместе с их алиасами (ON DELETE CASCADE)
       db
         .prepare("DELETE FROM calendars WHERE account_id = ? AND provider_calendar_id NOT IN (SELECT value FROM json_each(?))")
@@ -141,6 +145,7 @@ export async function saveGoogleAccount(
   }
 
   const accountId = crypto.randomUUID();
+  const credentialsEnc = await args.sealCredentials(accountId);
   const primary = args.calendars.find((c) => c.primary);
   const timeZone = primary?.timeZone ?? "UTC";
   await db.batch([
@@ -151,7 +156,7 @@ export async function saveGoogleAccount(
         `INSERT INTO provider_accounts (id, user_id, provider, email, email_hash, credentials_enc, granted_scopes, created_at)
          VALUES (?, ?, 'google', ?, ?, ?, ?, ?)`,
       )
-      .bind(accountId, args.userId, args.email, args.emailHash, args.credentialsEnc, args.scopes, args.now),
+      .bind(accountId, args.userId, args.email, args.emailHash, credentialsEnc, args.scopes, args.now),
     ...args.calendars.map((c) =>
       db
         .prepare(
@@ -169,16 +174,16 @@ export async function saveGoogleAccount(
     timeZone,
     writableCalendars,
     relinked: false,
-    ...(existing ? { replaced: { credentialsEnc: existing.credentials_enc, emailHash: existing.email_hash } } : {}),
+    ...(existing ? { replaced: { accountId: existing.id, credentialsEnc: existing.credentials_enc, emailHash: existing.email_hash } } : {}),
   };
 }
 
 export async function googleCredentials(db: D1Database, userId: string): Promise<StoredCredentials | null> {
   const row = await db
-    .prepare("SELECT credentials_enc, email_hash FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
+    .prepare("SELECT id, credentials_enc, email_hash FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
     .bind(userId)
-    .first<{ credentials_enc: string; email_hash: string | null }>();
-  return row ? { credentialsEnc: row.credentials_enc, emailHash: row.email_hash } : null;
+    .first<{ id: string; credentials_enc: string; email_hash: string | null }>();
+  return row ? { accountId: row.id, credentialsEnc: row.credentials_enc, emailHash: row.email_hash } : null;
 }
 
 /**
@@ -197,6 +202,12 @@ export async function linkedElsewhere(db: D1Database, emailHash: string | null, 
 export async function hasGoogleAccount(db: D1Database, userId: string): Promise<boolean> {
   const row = await db.prepare("SELECT 1 FROM provider_accounts WHERE user_id = ? AND provider = 'google'").bind(userId).first();
   return row !== null;
+}
+
+/** Подключённый Google: undefined — не подключён; email может быть null (Google его не отдал). */
+export async function googleAccountEmail(db: D1Database, userId: string): Promise<{ email: string | null } | undefined> {
+  const row = await db.prepare("SELECT email FROM provider_accounts WHERE user_id = ? AND provider = 'google'").bind(userId).first<{ email: string | null }>();
+  return row ?? undefined;
 }
 
 /** Названия календарей пользователя и их алиасы (US-06) — подсказка LLM и мультимодальной модели. */

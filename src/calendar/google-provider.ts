@@ -1,7 +1,7 @@
 // CalendarProvider для Google: календари из D1, события из Google Calendar API.
 
 import type { Config } from "../config";
-import { decryptSecret } from "../crypto";
+import { aadFor, decryptSecret } from "../crypto";
 import { formatDate, formatMoment, makeDay, utcToLocal, type Moment } from "../dates/calendar";
 import { refreshAccessToken } from "../google/auth";
 import { deleteEvent, getEvent, insertEvent, listEvents, patchEvent, type GoogleEvent } from "../google/calendar-api";
@@ -102,13 +102,13 @@ export class GoogleCalendarProvider implements CalendarProvider {
   private async token(): Promise<string> {
     if (this.accessToken) return this.accessToken;
     const row = await this.db
-      .prepare("SELECT credentials_enc FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
+      .prepare("SELECT id, credentials_enc FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
       .bind(this.userId)
-      .first<{ credentials_enc: string }>();
+      .first<{ id: string; credentials_enc: string }>();
     // Аккаунта уже нет (отключили в параллельном апдейте) — как отозванный доступ: предложить подключить
     if (!row) throw new AuthRevoked("no google account");
     // Не расшифровался (сменили ключ) — для пользователя это как отозванный доступ: переподключить
-    const refresh = await decryptSecret(row.credentials_enc, this.config.tokenEncryptionKey).catch(() => {
+    const refresh = await decryptSecret(row.credentials_enc, this.config.tokenKeys, aadFor.account(row.id)).catch(() => {
       throw new AuthRevoked("refresh token cannot be decrypted");
     });
     this.accessToken = await google(() => refreshAccessToken(this.config, refresh));

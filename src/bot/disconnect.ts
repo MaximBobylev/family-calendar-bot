@@ -57,7 +57,7 @@ export async function confirmDisconnect(
   let result: MessageKey = "disconnectDoneNoAccount";
   if (creds) {
     if (await linkedElsewhere(ctx.db, creds.emailHash, user.id)) result = "disconnectRevokeShared";
-    else result = (await revokeStoredToken(ctx.config, creds.credentialsEnc)) ? "disconnectDone" : "disconnectRevokeFailed";
+    else result = (await revokeStoredToken(ctx.config, creds)) ? "disconnectDone" : "disconnectRevokeFailed";
   }
   await deleteUserData(ctx.db, user.id, telegramId);
   await reply(result);

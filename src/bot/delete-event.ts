@@ -4,6 +4,7 @@
 import { EventConflict, EventGone, type CalendarEvent, type CalendarProvider, type EventRef } from "../calendar/model";
 import { utcToLocal } from "../dates/calendar";
 import { attachMessage, createPendingAction, getDialogState, mergeDialogState, type PendingAction } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -101,7 +102,7 @@ export async function confirmDelete(
   user: User,
   action: PendingAction<DeleteCardPayload>,
   choice: string,
-): Promise<void> {
+): Promise<boolean> {
   const p = action.payload;
   const locale = user.locale;
   const edit = (text: string) =>
@@ -110,7 +111,7 @@ export async function confirmDelete(
 
   if (choice === "x") {
     await edit(t("cancelled", locale));
-    return;
+    return false;
   }
   try {
     if (choice === "decline") {
@@ -126,14 +127,15 @@ export async function confirmDelete(
   } catch (e) {
     if (e instanceof EventConflict) {
       await edit(t("eventChangedMeanwhile", locale));
-      return;
+      return false;
     }
     if (e instanceof EventGone) {
       await edit(t("eventGone", locale));
-      return;
+      return false;
     }
     throw e;
   }
+  await recordFeature(ctx.db, user.id, "delete", ctx.clock.now());
   // Удаление и отклонение не отменяются (US-61) — «отмени последнее» не должно откатить предыдущее действие
   await markNotUndoable(ctx, action.conversationId, user, choice === "decline" ? "decline" : "delete");
   // Удалённое событие больше не «её» для следующих команд (US-60)
@@ -141,4 +143,5 @@ export async function confirmDelete(
   if (state.lastEvent?.ref.providerEventId === p.ref.providerEventId) {
     await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: undefined }, ctx.clock.now());
   }
+  return true;
 }

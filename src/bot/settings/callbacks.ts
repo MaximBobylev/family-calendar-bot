@@ -2,7 +2,8 @@
 // Настройка идемпотентна, карточка в D1 не нужна; значения проверяются по белым спискам (screens.ts).
 
 import { TZ_PRESETS } from "../../dates/timezone";
-import { mergeDialogState } from "../../db/conversations";
+import { AWAIT_TTL_MS, mergeDialogState } from "../../db/conversations";
+import { recordFeature } from "../../db/features";
 import { rescheduleDigest } from "../../jobs/digest";
 import { clearAliases, DEFAULT_DURATION_MIN, setDefaultCalendar, setHomeTz, setLocale, updateSettings } from "../../db/settings";
 import type { User } from "../../db/users";
@@ -24,8 +25,6 @@ import {
   type Screen,
   tzScreen,
 } from "./screens";
-
-const AWAIT_TTL_MS = 15 * 60 * 1000;
 
 export function parseSettingsCallback(data: string | undefined): { section: string; value?: string } | null {
   const m = /^st:(\w+)(?::([\w-]+))?$/.exec(data ?? "");
@@ -182,5 +181,6 @@ export async function handleSettingsCallback(
   }
   screen ??= mainScreen(ctx, u, calendars);
   await ctx.telegram.editMessageText(chatId, messageId, screen.text, { inline_keyboard: screen.buttons }, { html: true });
+  if (saved) await recordFeature(ctx.db, user.id, "settings", ctx.clock.now());
   return saved ? t("settingsSaved", u.locale) : undefined;
 }

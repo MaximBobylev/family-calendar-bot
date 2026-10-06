@@ -28,8 +28,9 @@
 //   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой
 //   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
 //   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
-//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai, status}: провайдер отвечает
-//                                     этой ошибкой (0 — снова работает); проверка переключения на запасной
+//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai | google-write, status}: провайдер отвечает
+//                                     этой ошибкой (0 — снова работает); проверка переключения на запасной;
+//                                     google-write — запись событий (insert/patch/delete) в Google
 //   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
 //   POST /__fake/voice/fixtures     — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
 //   GET  /__fake/voice/requests     — запросы мультимодального разбора: [{content}]
@@ -418,6 +419,8 @@ const server = createServer(async (req, res) => {
     if (evOne && req.method === "DELETE") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const outage = outages.get("google-write");
+      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
       const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
       if (!cal || !ev || ev.status === "cancelled") return send(res, 410, { error: { code: 410, message: "Resource has been deleted" } });
@@ -437,6 +440,8 @@ const server = createServer(async (req, res) => {
       const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
       if (!cal || !ev || ev.status === "cancelled") return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (req.method === "GET") return send(res, 200, ev);
+      const outage = outages.get("google-write");
+      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
       const ifMatch = req.headers["if-match"];
       if (ifMatch && ifMatch !== ev.etag) return send(res, 412, { error: { code: 412, message: "Precondition Failed" } });
@@ -450,6 +455,8 @@ const server = createServer(async (req, res) => {
     if (evList && req.method === "POST") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const outage = outages.get("google-write");
+      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });

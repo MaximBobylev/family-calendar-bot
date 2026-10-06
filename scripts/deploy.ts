@@ -130,6 +130,9 @@ const secrets: Record<string, string> = {
   STT_CHAIN: JSON.stringify(sttChain),
   VOICE_CHAIN: JSON.stringify(voiceChain),
 };
+// Ротация ключа (tech-debt #8): прежние ключи — только если заданы; пусто — секрет не трогаем
+const oldKeys = env.TOKEN_ENCRYPTION_KEYS_OLD?.trim();
+if (oldKeys) secrets.TOKEN_ENCRYPTION_KEYS_OLD = oldKeys;
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
   const v = env[name]?.trim();
   if (v) secrets[name] = v;

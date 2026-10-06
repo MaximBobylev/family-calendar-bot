@@ -279,3 +279,41 @@
     - telegram: { from: 1001, text: "на весь день" }
     - expect_telegram:
         - { text_contains: ["Встреча с Машей", "пт, 9 октября, весь день"] }
+
+- id: create-overlap-from-previous-day-labelled-in-user-language
+  story: US-30
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Ivan"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: n1, summary: "Night shift", start: { dateTime: "2026-10-07T23:00:00+03:00" }, end: { dateTime: "2026-10-08T01:00:00+03:00" } }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🗣 English"
+    - llm: { "Call tomorrow at 00:30": { tool: create_event, args: { start: "tomorrow at 00:30", title: "Call" } } }
+    - telegram: { from: 1001, text: "Call tomorrow at 00:30" }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+        - { method: editMessageText, text_contains: ["Settings"] }
+        - { text_contains: ["Overlaps: 23:00–01:00 (Wed", "October) Night shift"], text_not_contains: ["октября)"] }
+
+- id: create-when-no-writable-calendar
+  story: US-30
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: reader, primary: true, timeZone: Europe/Moscow }
+    - llm: { "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } } }
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["Нет календаря, куда можно записать"], text_not_contains: ["«»"] }

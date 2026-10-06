@@ -15,6 +15,7 @@ import {
   mergeDialogState,
   type PendingAction,
 } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
@@ -69,7 +70,7 @@ export async function markNotUndoable(ctx: AppContext, conversationId: string, u
 }
 
 /** Выполнить отмену по карточке (кнопка или команда). Карточка уже «забрана». */
-export async function performUndo(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<UndoPayload>): Promise<void> {
+export async function performUndo(ctx: AppContext, provider: CalendarProvider, user: User, action: PendingAction<UndoPayload>): Promise<boolean> {
   const { chatId, record, summary } = action.payload;
   const locale = user.locale;
   const reply = async (text: string) => {
@@ -80,7 +81,7 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
   const state = await getDialogState(ctx.db, action.conversationId, user.id);
   if (state.lastUndo?.actionId !== action.id) {
     await ctx.telegram.sendMessage(chatId, t("undoOnlyLast", locale));
-    return;
+    return false;
   }
 
   try {
@@ -92,16 +93,18 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
   } catch (e) {
     if (e instanceof EventConflict) {
       await ctx.telegram.sendMessage(chatId, t("undoChangedAfter", locale));
-      return;
+      return false;
     }
     if (e instanceof EventGone) {
       await ctx.telegram.sendMessage(chatId, t("eventGone", locale));
-      return;
+      return false;
     }
     throw e;
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastUndo: undefined, lastEvent: undefined }, ctx.clock.now());
   await reply(`${t("undone", locale)}\n\n${summary}`);
+  await recordFeature(ctx.db, user.id, "undo", ctx.clock.now());
+  return true;
 }
 
 /** «Отмени последнее» текстом. */

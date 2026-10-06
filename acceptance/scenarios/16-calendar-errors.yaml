@@ -73,3 +73,34 @@
     - tick: true
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["Доброе утро", "Планёрка", "Календарь «Семья» не загрузился"] }
+
+# tech-debt #6: сбой Google при подтверждении — карточка failed: «Не получилось», повторное нажатие не «Уже сделано»,
+# события нет; новая команда создаёт ровно одно.
+- id: create-google-5xx-on-confirm-then-second-press
+  story: US-05
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"], buttons: ["Создать", "Отмена"] }
+    - provider_outage: { provider: google-write, status: 503 }
+    - press: "Создать"
+    - expect_telegram:
+        - { text_contains: ["Google Календарь не отвечает"] }
+        - { method: editMessageText, text_contains: ["Не получилось — ничего не изменено"] }
+    - provider_outage: { provider: google-write, status: 0 }
+    - press: { button: "Создать", again: true }
+    - expect_callback_answer: { text_contains: ["Действие не завершилось"] }
+    - expect_no_telegram: true
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 1 }
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - press: "Создать"
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { text_contains: ["Как назвать встречу?"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events: [{ summary: "Встреча", start: "2026-10-08T10:30:00+03:00", end: "2026-10-08T11:30:00+03:00" }]

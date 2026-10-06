@@ -42,7 +42,14 @@ export async function transcribeChain(chain: SttConfig[], audio: ArrayBuffer): P
       failed.push(`${cfg.name ?? cfg.baseUrl}: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`);
     }
   }
-  throw new Error(failed.join("; ") || "no STT providers configured");
+  throw new SttChainError(failed);
+}
+
+/** Все провайдеры цепочки упали; failed — «имя: причина» по каждому (для журнала US-13). */
+export class SttChainError extends Error {
+  constructor(readonly failed: string[]) {
+    super(failed.join("; ") || "no STT providers configured");
+  }
 }
 
 async function transcribeWorkersAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Transcript> {

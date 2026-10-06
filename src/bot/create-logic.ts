@@ -52,6 +52,13 @@ export interface SeriesInfo {
 export interface CreateCardPayload {
   chatId: number;
   options: CreateOption[];
+  /** Календарь назван другим именем (алиасом), а не названием — учёт функций (US-64). */
+  viaAlias?: boolean;
+}
+
+/** Календарь найден по алиасу: по одним названиям (без алиасов) это имя его не находит. */
+export function namedByAlias(cal: CalendarInfo, name: string | undefined): boolean {
+  return !!name && cal.aliases.length > 0 && !findCalendarByName([{ ...cal, aliases: [] }], name);
 }
 
 export interface TitleQuestionPayload {
@@ -78,14 +85,19 @@ export type Resolution =
   | { kind: "ask"; question: "askWhen" | "askTime" | "inPast"; keepStart: boolean }
   | { kind: "reply"; text: string };
 
-export function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): CalendarInfo | { error: "notFound" | "readOnly"; name: string } {
+export type CalendarResolution = CalendarInfo | { error: "notFound" | "readOnly"; name: string } | { error: "noWritable" };
+
+/** Календарь для создания: по имени/алиасу или по умолчанию. noWritable — записать некуда (все только для чтения). */
+export function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): CalendarResolution {
+  const fallback = calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable);
   if (name) {
     const cal = findCalendarByName(calendars, name);
-    if (!cal) return { error: "notFound", name };
-    if (!cal.writable) return { error: "readOnly", name: cal.title };
-    return cal;
+    if (cal && !cal.writable) return { error: "readOnly", name: cal.title };
+    if (cal) return cal;
+    // Не нашли, а предложить нечего — без пустого списка «Ваши календари: .»
+    return fallback ? { error: "notFound", name } : { error: "noWritable" };
   }
-  return calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable) ?? { error: "notFound", name: "" };
+  return fallback ?? { error: "noWritable" };
 }
 
 export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {

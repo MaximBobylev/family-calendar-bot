@@ -2,7 +2,7 @@
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
-import { decryptSecret } from "../crypto";
+import { aadFor, decryptSecret } from "../crypto";
 
 /** Минимальные scopes (ADR-0001 п.4). */
 export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"];
@@ -79,9 +79,9 @@ export async function revokeToken(config: Config, token: string): Promise<void> 
 }
 
 /** Расшифровать сохранённый refresh token и отозвать. false — не получилось (сеть, Google, сменился ключ). */
-export async function revokeStoredToken(config: Config, credentialsEnc: string): Promise<boolean> {
+export async function revokeStoredToken(config: Config, stored: { accountId: string; credentialsEnc: string }): Promise<boolean> {
   try {
-    await revokeToken(config, await decryptSecret(credentialsEnc, config.tokenEncryptionKey));
+    await revokeToken(config, await decryptSecret(stored.credentialsEnc, config.tokenKeys, aadFor.account(stored.accountId)));
     return true;
   } catch (e) {
     console.error("token revoke failed", e instanceof Error ? e.message : e);

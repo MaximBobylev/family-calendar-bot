@@ -1,5 +1,6 @@
 // Конфигурация из Env. Все внешние URL — отсюда (ADR-0006: в тестах указывают на фейки).
 
+import { type KeyRing, keyRing } from "./crypto";
 import type { CostEstimates, UsageLimits } from "./limits";
 import type { LlmConfig } from "./nlu/llm";
 import type { SttConfig } from "./stt/whisper";
@@ -18,7 +19,10 @@ export interface Config {
   googleAccountsBase: string;
   googleClientId: string;
   googleClientSecret: string;
+  /** Текущий ключ AES-GCM (и основа псевдонимов админки). */
   tokenEncryptionKey: string;
+  /** Текущий + прежние ключи для расшифровки (ротация, tech-debt #8). */
+  tokenKeys: KeyRing;
   allowedTelegramIds: Set<string>;
   testMode: boolean;
   admin: { user: string; password: string };
@@ -64,6 +68,7 @@ export function loadConfig(env: Env): Config {
     googleClientId: env.GOOGLE_CLIENT_ID,
     googleClientSecret: env.GOOGLE_CLIENT_SECRET,
     tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,
+    tokenKeys: keyRing(env.TOKEN_ENCRYPTION_KEY, env.TOKEN_ENCRYPTION_KEYS_OLD),
     allowedTelegramIds: new Set(
       (env.ALLOWED_TELEGRAM_IDS ?? "")
         .split(",")

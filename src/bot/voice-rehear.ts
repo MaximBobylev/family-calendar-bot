@@ -3,6 +3,7 @@
 
 import { calendarNamesOf } from "../db/accounts";
 import { mergeDialogState } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import { recordUsage } from "../db/usage";
 import type { User } from "../db/users";
 import { llmCostMicroUsd } from "../limits";
@@ -84,6 +85,7 @@ export async function escalateVoice(
     return true;
   }
   await ctx.telegram.sendMessage(chatId, t("reheard", user.locale, { text: escapeHtml(result.transcript) }), undefined, { html: true });
+  await recordFeature(ctx.db, user.id, "voice_rehear", ctx.clock.now());
   await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: { ...voice, transcript: result.transcript, reheard: true } }, ctx.clock.now());
   await routeIntent(ctx, user, chatId, conversationId, result.transcript, result.intent);
   return true;

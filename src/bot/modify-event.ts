@@ -6,6 +6,7 @@ import { findCalendarByName } from "../calendar/match";
 import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventReminders } from "../calendar/model";
 import { addMinutes, minutesBetween, utcToLocal, type Moment } from "../dates/calendar";
 import { attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
+import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { AppContext } from "./context";
 import { locateEvent } from "./find-event";
@@ -108,7 +109,7 @@ export async function confirmModify(
   user: User,
   action: PendingAction<ModifyCardPayload>,
   choice: string,
-): Promise<void> {
+): Promise<boolean> {
   const p = action.payload;
   const locale = user.locale;
   const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
@@ -117,11 +118,11 @@ export async function confirmModify(
 
   if (choice === "x") {
     await edit(t("cancelled", locale));
-    return;
+    return false;
   }
   const wholeSeries = choice === "all";
   const o = p.options[wholeSeries ? 0 : Number(choice.slice(1))];
-  if (!o) return;
+  if (!o) return false;
 
   // Что вернуть при отмене (US-61): только изменённые поля
   const beforeOf = (cur: { start?: Moment; end?: Moment; title: string; location?: string; description?: string; reminders?: EventReminders }) => ({
@@ -175,11 +176,11 @@ export async function confirmModify(
   } catch (e) {
     if (e instanceof EventConflict) {
       await edit(t("eventChangedMeanwhile", locale));
-      return;
+      return false;
     }
     if (e instanceof EventGone) {
       await edit(t("eventGone", locale));
-      return;
+      return false;
     }
     throw e;
   }
@@ -197,4 +198,6 @@ export async function confirmModify(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
+  await recordFeature(ctx.db, user.id, "modify", ctx.clock.now());
+  return true;
 }

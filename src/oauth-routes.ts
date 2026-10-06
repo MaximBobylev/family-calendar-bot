@@ -17,7 +17,7 @@ import { rescheduleDigest } from "./jobs/digest";
 import type { AppContext } from "./bot/context";
 import { connectKeyboard } from "./bot/keyboards";
 import { t } from "./bot/messages";
-import { decryptSecret, encryptSecret, pkceChallenge, pkceVerifier, randomToken, sha256Hex, timingSafeEqual } from "./crypto";
+import { aadFor, decryptSecret, encryptSecret, pkceChallenge, pkceVerifier, randomToken, sha256Hex, timingSafeEqual } from "./crypto";
 import { bindOAuthState, consumeOAuthState, linkedElsewhere, peekOAuthState, saveGoogleAccount, telegramChatOf, userLocale } from "./db/accounts";
 import { listCalendars } from "./google/calendar-api";
 import { consentUrl, exchangeCode, revokeStoredToken } from "./google/oauth";
@@ -81,7 +81,7 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
     const verifier = pkceVerifier();
     const bind = randomToken(32);
     const bound = await bindOAuthState(ctx.db, state, ctx.clock.now(), {
-      codeVerifierEnc: await encryptSecret(verifier, ctx.config.tokenEncryptionKey),
+      codeVerifierEnc: await encryptSecret(verifier, ctx.config.tokenKeys, aadFor.oauthState(state)),
       browserBinding: await sha256Hex(bind),
     });
     if (!bound) return page(t("oauthBadLinkPage", "ru"), 400);
@@ -125,9 +125,10 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
     }
 
     try {
-      const verifier = await decryptSecret(consumed.codeVerifierEnc, ctx.config.tokenEncryptionKey);
+      const verifier = await decryptSecret(consumed.codeVerifierEnc, ctx.config.tokenKeys, aadFor.oauthState(state));
       const tokens = await exchangeCode(ctx.config, code, verifier);
-      if (!tokens.refresh_token) throw new Error("no refresh_token in response");
+      const refreshToken = tokens.refresh_token;
+      if (!refreshToken) throw new Error("no refresh_token in response");
       const calendars = await listCalendars(ctx.config.googleApiBase, tokens.access_token);
       const primary = calendars.find((c) => c.primary);
       if (!primary) throw new Error("no primary calendar");
@@ -136,14 +137,14 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
         userId,
         email: primary.id,
         emailHash: await sha256Hex(primary.id.toLowerCase()),
-        credentialsEnc: await encryptSecret(tokens.refresh_token, ctx.config.tokenEncryptionKey),
+        sealCredentials: (accountId) => encryptSecret(refreshToken, ctx.config.tokenKeys, aadFor.account(accountId)),
         scopes: tokens.scope,
         calendars,
         now: ctx.clock.now(),
       });
       // Заменили другой аккаунт — отозвать его токен (US-03), если он не подключён у кого-то ещё; не вышло — не страшно
       if (linked.replaced && !(await linkedElsewhere(ctx.db, linked.replaced.emailHash, userId))) {
-        await revokeStoredToken(ctx.config, linked.replaced.credentialsEnc);
+        await revokeStoredToken(ctx.config, linked.replaced);
       }
       // Утренний дайджест — по поясу из Google (US-70)
       await rescheduleDigest(ctx.db, userId, ctx.clock.now());
