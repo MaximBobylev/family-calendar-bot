@@ -7,6 +7,8 @@
 //     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8,or:google/gemma-4-26b-a4b-it --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
 //     [--concurrency 4] [--delay-ms 8000] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
+//   --set testdata/nlu/intents-r1.yaml — другой набор (R1: дом с участниками и детьми — поручения, «для кого», поиск).
+//   --models none — без LLM: только детерминированные поправки (можно в сервисе test, без секретов).
 //   --dry-run — только посчитать вызовы и расход квоты Workers AI, ничего не вызывая (можно в сервисе test).
 //   --spend-quota — разрешить больше WORKERS_AI_SAFE_CALLS вызовов Workers AI (квота общая с ботом в проде!).
 
@@ -18,8 +20,9 @@ import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from
 import { parseDateFragment } from "../src/dates";
 import { intentFromCalls, parseIntent, type Intent } from "../src/nlu/intents";
 import { safeParse, LlmHttpError } from "../src/nlu/llm";
-import { assignOverride } from "../src/bot/assign/logic";
-import { effectiveIntent } from "../src/nlu/intent-overrides";
+import { assignOverride, findMentioned, matchNamed, parseAssignPhrase, responsibleClause, taskTitle } from "../src/bot/assign/logic";
+import { detailHints } from "../src/nlu/detail-hints";
+import { effectiveIntent, lookupQuery, NEXT_WORD } from "../src/nlu/intent-overrides";
 import { VARIANTS } from "./nlu-variants";
 
 // --- Набор ----------------------------------------------------------------------------------------
@@ -28,20 +31,47 @@ interface Calendar {
   title: string;
   aliases: string[];
 }
+type Expect = string | null | (string | null)[];
 interface Case {
   id: string;
   cat: string;
   text: string;
   intent: string | string[];
-  title?: string | null | (string | null)[];
-  calendar?: string | null | (string | null)[];
+  title?: Expect;
+  calendar?: Expect;
   all_day?: boolean;
+  // R1 (testdata/nlu/intents-r1.yaml): поручения, «для кого / ответственный», поиск, напоминания, срок/начало
+  assignee?: Expect;
+  task?: Expect;
+  due?: Expect;
+  start?: Expect;
+  for_whom?: Expect;
+  responsible?: Expect;
+  query?: Expect;
+  next?: boolean;
+  reminders?: number[];
 }
-const SET = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "nlu", "intents.yaml"), "utf8")) as {
-  defaults: { now: string; tz: string; calendars: Calendar[] };
+/** Состав дома для поручений и US-92 (как loadHome): участники с другими именами, дети; owner — автор фраз. */
+interface Household {
+  members: { name: string; aliases?: string[]; owner?: boolean }[];
+  dependents: { name: string; aliases?: string[] }[];
+}
+// --set testdata/nlu/intents-r1.yaml — другой набор (по умолчанию intents.yaml)
+const SET_PATH = (() => {
+  const i = process.argv.indexOf("--set");
+  return i >= 0 ? process.argv[i + 1]! : join(import.meta.dirname, "..", "testdata", "nlu", "intents.yaml");
+})();
+const SET = parseYaml(readFileSync(SET_PATH, "utf8")) as {
+  defaults: { now: string; tz: string; calendars: Calendar[]; household?: Household };
   cases: Case[];
 };
 const { now, tz, calendars } = SET.defaults;
+const HOME = SET.defaults.household
+  ? {
+      members: SET.defaults.household.members.map((m) => ({ ...m, names: [m.name, ...(m.aliases ?? [])] })),
+      dependents: SET.defaults.household.dependents.map((d) => ({ ...d, names: [d.name, ...(d.aliases ?? [])] })),
+    }
+  : undefined;
 const calendarNames = calendars.flatMap((c) => [c.title, ...c.aliases]);
 
 // --- Цены Workers AI, $ за 1M токенов (developers.cloudflare.com/workers-ai/platform/pricing, 2026-10-05) ---
@@ -111,21 +141,94 @@ interface Outcome {
   allDay?: boolean;
   /** start от LLM содержит всё, что нашёл extract.ts (справочно: даты всё равно берутся из текста). */
   startFull?: boolean;
+  // R1: итог как в карточке бота
+  /** Поручение: имя участника; null — «кто-то»; "?<как сказано>" — не нашёлся; "self" — себе; "ambiguous". */
+  assignee?: string | null;
+  task?: string | null;
+  /** Срок поручения / начало события: "2026-10-09T16:00" или "2026-10-09"; null — нет. */
+  due?: string | null;
+  start?: string | null;
+  recurrence?: boolean;
+  forWhom?: string | null;
+  responsible?: string | null;
+  query?: string | null;
+  next?: boolean;
+  reminders?: number[] | string;
+}
+
+/** Фрагмент даты → «2026-10-09T16:00» / «2026-10-09» (как resolveDue в bot/assign/start.ts); нет/ошибка — null. */
+function resolvePoint(text: string | undefined): string | null {
+  if (!text) return null;
+  const parsed = parseDateFragment({ text, kind: "point", now, tz });
+  if ("error" in parsed) return parsed.error === "in_past" ? "past" : null;
+  const v = "ambiguous" in parsed ? parsed.ambiguous[0]! : parsed;
+  if ("datetime" in v) return v.datetime;
+  if ("interval" in v) return v.interval.start;
+  if ("date" in v) return typeof v.date === "string" ? v.date : v.date.date;
+  if ("range" in v) return v.range.from;
+  return null;
+}
+
+/** Как startAssign: кому (по тексту, иначе от LLM), срок из текста после исполнителя, название, ребёнок. */
+function assignOutcome(text: string, intent: Extract<Intent, { name: "assign_task" }>, out: Outcome): void {
+  const phrase = parseAssignPhrase(text);
+  const who = phrase && "assignee" in phrase ? phrase.assignee : intent.someone ? undefined : intent.assignee;
+  if (!who) out.assignee = null;
+  else if (!HOME) out.assignee = `?${who}`;
+  else {
+    const found = matchNamed(who, HOME.members);
+    out.assignee = found.length === 0 ? `?${who}` : found.length > 1 ? "ambiguous" : found[0]!.owner ? "self" : found[0]!.name;
+  }
+  const body = phrase?.rest ?? text;
+  const spans = extractDateSpans(body, now, tz, "point");
+  out.due = resolvePoint(spans.point ?? intent.when);
+  out.task = taskTitle(intent.task ?? body, [spans.point ?? "", intent.when ?? "", ...(who && intent.task ? [who] : [])]);
+  out.forWhom = (out.task && HOME && findMentioned(out.task, HOME.dependents)?.name) || null;
+}
+
+/** Как routeIntent: поручение по тексту — только если LLM сама сказала assign_task или в доме есть такой участник. */
+function applyAssign(text: string, intent: Intent): Intent | null {
+  const a = assignOverride(text, intent);
+  if (a?.name !== "assign_task" || intent.name === "assign_task") return a;
+  if (!HOME) return a;
+  return a.someone || (a.assignee && matchNamed(a.assignee, HOME.members).length > 0) ? a : null;
 }
 
 function downstream(c: Case, intent: Intent): Outcome {
   // Те же поправки, что в боте (routeIntent): глаголы, «когда …?», «следующая встреча»
   // Как в routeIntent: поручения (US-91) — по тексту раньше остальных поправок
-  const eff: Intent = assignOverride(c.text, intent) ?? effectiveIntent(c.text, intent);
+  const eff: Intent = applyAssign(c.text, intent) ?? effectiveIntent(c.text, intent);
   const out: Outcome = { intent: eff.name, rawIntent: intent.name };
+  if (eff.name === "assign_task") assignOutcome(c.text, eff, out);
+  if (eff.name === "find_event") {
+    out.query = lookupQuery(c.text) ?? eff.event ?? null;
+    out.next = !!(eff.next || NEXT_WORD.test(c.text));
+  }
+  if (eff.name === "modify_event") {
+    const d = detailHints(c.text);
+    if (d.reminders) out.reminders = "error" in d.reminders ? d.reminders.error : d.reminders.overrides.map((r) => r.minutes);
+  }
   if (eff.name === "create_event") {
-    const rec = extractRecurrenceSpan(c.text, now, tz);
-    const spans = extractDateSpans(rec ? rec.rest : c.text, now, tz, "point");
+    // US-92: «…, отводит папа» — ответственный; ребёнок в тексте — «для кого» (как familyHints)
+    // Не в доме — familyHints ничего не делает (как в боте)
+    const clause = HOME ? responsibleClause(c.text) : null;
+    const famText = clause ? c.text.replace(clause.clause, " ") : c.text;
+    if (HOME) {
+      const who = clause ? matchNamed(clause.who, HOME.members) : [];
+      out.responsible = clause ? (who.length === 1 ? who[0]!.name : `?${clause.who}`) : null;
+      out.forWhom = findMentioned(famText, HOME.dependents)?.name ?? null;
+    }
+    const rec = extractRecurrenceSpan(famText, now, tz);
+    const spans = extractDateSpans(rec ? rec.rest : famText, now, tz, "point");
     const startText = rec ? undefined : (spans.point ?? (eff.start || undefined));
     const durationText = spans.duration ?? eff.duration;
+    out.recurrence = !!rec;
+    out.start = rec ? null : resolvePoint(startText);
     out.title = cleanTitle(
       eff.title,
-      [rec?.span, rec ? eff.start : undefined, startText, durationText].filter((x): x is string => !!x),
+      [rec?.span, ...(rec?.remove ?? []), rec ? eff.start : undefined, startText, durationText, ...(clause ? [clause.clause] : [])].filter(
+        (x): x is string => !!x,
+      ),
     );
     // create-logic.ts: диапазон дат без времени («с 5 по 8 декабря») — всегда на весь день, флаг не нужен
     const parsed = startText ? parseDateFragment({ text: startText, kind: "point", now, tz }) : undefined;
@@ -159,6 +262,15 @@ interface Check {
   title?: boolean;
   calendar?: boolean;
   allDay?: boolean;
+  assignee?: boolean;
+  task?: boolean;
+  due?: boolean;
+  start?: boolean;
+  forWhom?: boolean;
+  responsible?: boolean;
+  query?: boolean;
+  next?: boolean;
+  reminders?: boolean;
 }
 function check(c: Case, o: Outcome): Check {
   const intentOk = asList(c.intent).includes(o.intent);
@@ -169,9 +281,22 @@ function check(c: Case, o: Outcome): Check {
   if (fieldsApply && c.calendar !== undefined)
     r.calendar = asList(c.calendar).some((k) => (k === "?" ? !!o.calendar?.startsWith("?") : (k ?? undefined) === o.calendar));
   if (fieldsApply && c.all_day !== undefined && o.intent === "create_event") r.allDay = c.all_day === o.allDay;
+  // R1-поля: только при верном интенте, у которого такое поле есть; "?" — «не нашёлся» (любое значение с «?»)
+  const same = (exp: Expect, got: string | null | undefined, text = false) =>
+    asList(exp).some((k) => (k === "?" ? !!got?.startsWith("?") : k === null ? got == null : text ? norm(k) === norm(got) : k === got));
+  const has = (k: keyof Outcome) => intentOk && k in o;
+  if (c.assignee !== undefined && has("assignee")) r.assignee = same(c.assignee, o.assignee);
+  if (c.task !== undefined && has("task")) r.task = same(c.task, o.task, true);
+  if (c.due !== undefined && has("due")) r.due = same(c.due, o.due);
+  if (c.start !== undefined && has("start")) r.start = same(c.start, o.start);
+  if (c.for_whom !== undefined && has("forWhom")) r.forWhom = same(c.for_whom, o.forWhom);
+  if (c.responsible !== undefined && has("responsible")) r.responsible = same(c.responsible, o.responsible);
+  if (c.query !== undefined && has("query")) r.query = same(c.query, o.query, true);
+  if (c.next !== undefined && has("next")) r.next = c.next === o.next;
+  if (c.reminders !== undefined && intentOk && o.intent === "modify_event") r.reminders = JSON.stringify(c.reminders) === JSON.stringify(o.reminders ?? null);
   return r;
 }
-const passed = (k: Check) => k.intent && k.title !== false && k.calendar !== false && k.allDay !== false;
+const passed = (k: Check) => Object.values(k).every((x) => x !== false);
 
 // --- Прогон ---------------------------------------------------------------------------------------
 
@@ -251,6 +376,8 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
         }
       : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
+  // «none» — без LLM (модель не ответила tool call): что дают одни детерминированные поправки
+  if (model === "none") return grade({ ...base, calls: [] });
   let ms = 0;
   let lastHeaders: Record<string, string> | undefined;
   try {
@@ -364,7 +491,8 @@ function summarize(runs: Run[], showFailures: boolean): string {
       for (const [id, fr] of byCase) {
         const c = cases.get(id)!;
         const total = rs.filter((r) => r.caseId === id).length;
-        const exp = JSON.stringify({ intent: c.intent, title: c.title, calendar: c.calendar, all_day: c.all_day });
+        const { id: _i, cat: _c, text: _t, ...expected } = c;
+        const exp = JSON.stringify(expected);
         failures.push(`- ${id} [${c.cat}] ${fr.length}/${total} «${c.text}»  ожидалось ${exp}`);
         for (const r of fr.slice(0, 2)) {
           const got = r.error ? `ERROR ${r.error}` : `${JSON.stringify(r.outcome)}  ← ${JSON.stringify(r.calls)}`;
@@ -373,7 +501,18 @@ function summarize(runs: Run[], showFailures: boolean): string {
       }
     }
   }
-  return `${lines.join("\n")}${failures.length ? `\n\n## Ошибки по фразам\n${failures.join("\n")}` : ""}`;
+  // По категориям: доля фраз со всеми верными полями (R1-набор считается по областям)
+  const cats = [...new Set(SET.cases.map((c) => c.cat))].filter((cat) => runs.some((r) => cases.get(r.caseId)?.cat === cat));
+  const keys = [...byKey.keys()];
+  const byCat = [`| Категория | ${keys.map((k) => k.split("|")[1]!.replace("@cf/", "")).join(" | ")} |`, `|---|${keys.map(() => "---").join("|")}|`];
+  for (const cat of cats) {
+    const cells = keys.map((k) => {
+      const rs = byKey.get(k)!.filter((r) => cases.get(r.caseId)!.cat === cat);
+      return `${pct(rs.filter((r) => r.check && passed(r.check)).length, rs.length)} (${rs.length})`;
+    });
+    byCat.push(`| ${cat} | ${cells.join(" | ")} |`);
+  }
+  return `${lines.join("\n")}\n\n${byCat.join("\n")}${failures.length ? `\n\n## Ошибки по фразам\n${failures.join("\n")}` : ""}`;
 }
 
 // --- main -----------------------------------------------------------------------------------------
@@ -401,7 +540,7 @@ if (reportFiles.length) {
   console.error(`${jobs.length} вызовов: ${variants.join(",")} × ${models.length} моделей × ${selected.length} фраз × ${n}`);
   // Квота Workers AI Free — 10 000 neurons/сутки на весь аккаунт, общая с ботом в проде (docs/research/llm-intents-eval.md):
   // замер 2026-10-05 выбрал её целиком, и бот до сброса не разбирал команды. Большой прогон — только осознанно.
-  const workersAiCalls = models.filter((m) => !m.startsWith("or:") && !m.startsWith("gg:")).length * variants.length * n * selected.length;
+  const workersAiCalls = models.filter((m) => !m.startsWith("or:") && !m.startsWith("gg:") && m !== "none").length * variants.length * n * selected.length;
   if (workersAiCalls)
     console.error(`  из них Workers AI: ${workersAiCalls} ≈ ${workersAiCalls * NEURONS_PER_CALL} neurons из ${WORKERS_AI_FREE_NEURONS}/сутки`);
   const freeOrCalls = models.filter((m) => m.startsWith("or:") && m.endsWith(":free")).length * variants.length * n * selected.length;
@@ -412,7 +551,8 @@ if (reportFiles.length) {
       `больше ${WORKERS_AI_SAFE_CALLS} вызовов Workers AI съедят квоту прода; уменьшите набор или добавьте --spend-quota (с разрешения владельца)`,
     );
   }
-  if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.LLM_API_KEY) throw new Error("нужны CLOUDFLARE_ACCOUNT_ID и LLM_API_KEY (сервис deploy)");
+  if (models.some((m) => m !== "none") && (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.LLM_API_KEY))
+    throw new Error("нужны CLOUDFLARE_ACCOUNT_ID и LLM_API_KEY (сервис deploy)");
   const runs = await pool(jobs, Number(arg("concurrency") ?? 4), (d) => {
     if (d % 25 === 0 || d === jobs.length) console.error(`  ${d}/${jobs.length}`);
   });

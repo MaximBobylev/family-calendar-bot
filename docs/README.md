@@ -35,6 +35,7 @@
 | [research/product-review-r1.md](research/product-review-r1.md) | Продуктовое ревью R1 перед показом семье: пути пользователя, проблемы, справка и онбординг, метрики пробного запуска |
 | [research/date-parser-baseline.md](research/date-parser-baseline.md) | Замер chrono-node на золотом корпусе дат — почему свой парсер (ADR-0005 п.8) |
 | [research/llm-intents-eval.md](research/llm-intents-eval.md) | Замер разбора интентов: варианты промпта × модели Workers AI, решение и оставшиеся ошибки (2026-10-05) |
+| [research/qa-r1-nlu.md](research/qa-r1-nlu.md) | QA разбора фраз R1 (2026-10-06): 110 фраз (поручения, ответственный, «мои дела», поиск) на Nemotron / Gemini / Gemma с правилами — точность, классы ошибок, исправления по приоритету |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
 | [research/monetization-market.md](research/monetization-market.md) | Обзор рынка: модели монетизации и цены |
 | [research/monetization-evaluation.md](research/monetization-evaluation.md) | Независимая оценка вариантов монетизации |

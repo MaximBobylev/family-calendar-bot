@@ -1,0 +1,164 @@
+# R1-набор для scripts/eval-intents.ts (--set testdata/nlu/intents-r1.yaml): семейный диспетчер — поручения (US-91),
+# ответственный и «для кого» (US-92), поиск (US-21), напоминания у событий (US-41/42), «мои дела», вставленный текст
+# (как пересланное, US-65), несколько команд, болтовня, опечатки и голосовые формы. Переносимые данные (ADR-0006).
+# Формат — как testdata/nlu/intents.yaml, плюс поля итога, как в карточке бота:
+#   assignee    — исполнитель поручения после сопоставления с участниками дома (имя); null — «кто-то»;
+#                 "?" — названный не нашёлся среди участников; "self" — себе (автор — владелец)
+#   task        — название поручения (taskTitle); due — срок «YYYY-MM-DDTHH:MM» или «YYYY-MM-DD», null — без срока
+#   start       — начало события (create), так же; responsible / for_whom — US-92 (участник / ребёнок), null — нет
+#   query       — что ищет find_event (lookupQuery), next — «следующий/ближайший»
+#   reminders   — минуты напоминаний у изменяемого события (detailHints), [] — убрать все
+# Список = допустимые варианты. «Сейчас» — среда 2026-10-07 10:00 МСК. Имена — вымышленные.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  calendars:
+    - { title: "Иван", aliases: [] }
+    - { title: "Семья", aliases: ["общий"] }
+    - { title: "Работа", aliases: [] }
+  household:
+    members:
+      - { name: "Иван", aliases: [], owner: true }
+      - { name: "Дима", aliases: ["муж", "папа"] }
+      - { name: "Аня", aliases: ["мама", "жена"] }
+    dependents:
+      - { name: "Маша" }
+      - { name: "Ваня" }
+      - { name: "Соня" }
+
+cases:
+  # --- поручения: имя, другое имя, падежи, порядок слов -----------------------------------------
+  - { id: as01, cat: assign, text: "Попроси Диму забрать Машу из школы в пятницу в 16", intent: assign_task, assignee: "Дима", due: "2026-10-09T16:00", task: "Забрать Машу из школы", for_whom: "Маша" }
+  - { id: as02, cat: assign, text: "Пусть мама заберёт Ваню из сада завтра в 18", intent: assign_task, assignee: "Аня", due: "2026-10-08T18:00", task: ["Заберёт Ваню из сада", "Забрать Ваню из сада"], for_whom: "Ваня" }
+  - { id: as03, cat: assign, text: "Скажи Ане купить молоко", intent: assign_task, assignee: "Аня", due: null, task: "Купить молоко" }
+  - { id: as04, cat: assign, text: "Напомни мужу в пятницу оплатить интернет", intent: assign_task, assignee: "Дима", due: "2026-10-09", task: "Оплатить интернет" }
+  - { id: as05, cat: assign, text: "Передай папе, чтобы купил корм коту", intent: assign_task, assignee: "Дима", due: null, task: ["Купил корм коту", "Купить корм коту"] }
+  - { id: as06, cat: assign, text: "Поручи Диме вынести мусор сегодня вечером", intent: assign_task, assignee: "Дима", due: "2026-10-07", task: "Вынести мусор" }
+  - { id: as07, cat: assign, text: "Пусть Дима в субботу отвезёт Соню на танцы к 11", intent: assign_task, assignee: "Дима", due: "2026-10-10T11:00", task: ["Отвезёт Соню на танцы", "Отвезти Соню на танцы"], for_whom: "Соня" }
+  - { id: as08, cat: assign, text: "Пусть папа погуляет с собакой сегодня в 21", intent: assign_task, assignee: "Дима", due: "2026-10-07T21:00", task: ["Погуляет с собакой", "Погулять с собакой"] }
+  - { id: as09, cat: assign, text: "Напомни маме про врача в пятницу в 9:30", intent: assign_task, assignee: "Аня", due: "2026-10-09T09:30", task: ["Про врача", "Врач", "Сходить к врачу"] }
+  - { id: as10, cat: assign, text: "Попроси жену в воскресенье в 12 приготовить обед", intent: assign_task, assignee: "Аня", due: "2026-10-11T12:00", task: "Приготовить обед" }
+  - { id: as11, cat: assign, text: "Мужу завтра к 8 отвезти Соню в школу", intent: assign_task, assignee: "Дима", due: "2026-10-08T08:00", task: "Отвезти Соню в школу", for_whom: "Соня" }
+  - { id: as12, cat: assign, text: "Жене напомни про родительское собрание в четверг в 19", intent: assign_task, assignee: "Аня", due: "2026-10-08T19:00", task: ["Про родительское собрание", "Родительское собрание"] }
+  - { id: as13, cat: assign, text: "Нужно, чтобы Дима забрал посылку с почты завтра", intent: assign_task, assignee: "Дима", due: "2026-10-08", task: ["Забрал посылку с почты", "Забрать посылку с почты"] }
+  - { id: as14, cat: assign, text: "Аня, забери Соню с танцев в 19", intent: assign_task, assignee: "Аня", due: "2026-10-07T19:00", task: ["Забери Соню с танцев", "Забрать Соню с танцев"], for_whom: "Соня" }
+  - { id: as15, cat: assign, text: "Дима пусть заберёт машину из сервиса в четверг", intent: assign_task, assignee: "Дима", due: "2026-10-08", task: ["Заберёт машину из сервиса", "Забрать машину из сервиса"] }
+  - { id: as16, cat: assign, text: "Скажи Диме: в пятницу в 18 он забирает Ваню с бассейна", intent: assign_task, assignee: "Дима", due: "2026-10-09T18:00", for_whom: "Ваня" }
+  - { id: as17, cat: assign, text: "Напомни, пожалуйста, Диме забрать костюм из химчистки в субботу", intent: assign_task, assignee: "Дима", due: "2026-10-10", task: "Забрать костюм из химчистки" }
+
+  # --- поручения: уменьшительные, чужие, себе ----------------------------------------------------
+  - { id: an01, cat: assign_names, text: "Попроси Аньку купить хлеб по дороге домой", intent: assign_task, assignee: "Аня", task: "Купить хлеб по дороге домой" }
+  - { id: an02, cat: assign_names, text: "Скажи Димке, что в субботу он везёт детей на дачу", intent: assign_task, assignee: "Дима", due: "2026-10-10" }
+  - { id: an03, cat: assign_names, text: "Попроси Петю забрать ключи завтра", intent: assign_task, assignee: "?" }
+  - { id: an04, cat: assign_names, text: "Напомни Ивану позвонить бабушке", intent: assign_task, assignee: "self" }
+  - { id: an05, cat: assign_names, text: "Напомни супругу оплатить садик до пятницы", intent: assign_task, assignee: ["Дима", "?"], task: "Оплатить садик" }
+  - { id: an06, cat: assign_names, text: "Пусть Анечка купит Маше колготки", intent: assign_task, assignee: "Аня", for_whom: "Маша" }
+
+  # --- «кто-то должен» ---------------------------------------------------------------------------
+  - { id: so01, cat: someone, text: "Кто-нибудь отвезёт Ваню на футбол в субботу?", intent: assign_task, assignee: null, due: "2026-10-10", task: ["Отвезти Ваню на футбол", "Отвезёт Ваню на футбол"], for_whom: "Ваня" }
+  - { id: so02, cat: someone, text: "Кому-нибудь надо забрать Машу с английского в понедельник в 17", intent: assign_task, assignee: null, due: "2026-10-12T17:00", task: "Забрать Машу с английского", for_whom: "Маша" }
+  - { id: so03, cat: someone, text: "Кто-то из нас должен сходить на собрание в школу в понедельник в 19", intent: assign_task, assignee: null, due: "2026-10-12T19:00", task: "Сходить на собрание в школу" }
+  - { id: so04, cat: someone, text: "Пусть кто-нибудь купит подарок Соне до пятницы", intent: assign_task, assignee: null, for_whom: "Соня" }
+  - { id: so05, cat: someone, text: "Кто отвезёт Машу к стоматологу в четверг в 15?", intent: assign_task, assignee: null, due: "2026-10-08T15:00", for_whom: "Маша" }
+  - { id: so06, cat: someone, text: "Кто сможет в пятницу посидеть с детьми вечером?", intent: assign_task, assignee: null }
+
+  # --- себе — не поручение; напоминание у события — не поручение ---------------------------------
+  - { id: me01, cat: self_vs_assign, text: "Напомни мне в пятницу оплатить интернет", intent: create_event, title: "Оплатить интернет", start: "2026-10-09" }
+  - { id: me02, cat: self_vs_assign, text: "Напомни мне завтра в 10 позвонить в школу", intent: create_event, title: "Позвонить в школу", start: "2026-10-08T10:00" }
+  - { id: me03, cat: self_vs_assign, text: "Напомни мужу за час до врача взять полис", intent: assign_task, assignee: "Дима" }
+  - { id: me04, cat: self_vs_assign, text: "Напомни за полчаса до танцев Сони", intent: modify_event, reminders: [30] }
+  - { id: me05, cat: self_vs_assign, text: "Напомни мне за 2 часа до самолёта", intent: modify_event, reminders: [120] }
+  - { id: me06, cat: self_vs_assign, text: "Напомни, когда у меня стоматолог", intent: find_event }
+
+  # --- «мои дела» --------------------------------------------------------------------------------
+  - { id: my01, cat: my_tasks, text: "что на мне завтра", intent: list_assignments }
+  - { id: my02, cat: my_tasks, text: "Мои дела на неделю", intent: list_assignments }
+  - { id: my03, cat: my_tasks, text: "Какие у меня поручения?", intent: list_assignments }
+  - { id: my04, cat: my_tasks, text: "Что мне нужно сделать сегодня?", intent: list_assignments }
+  - { id: my05, cat: my_tasks, text: "Что я должен сделать в субботу?", intent: list_assignments }
+  - { id: my06, cat: my_tasks, text: "Покажи мои задачи", intent: list_assignments }
+  - { id: my07, cat: my_tasks, text: "Что мне поручили?", intent: list_assignments }
+  - { id: my08, cat: my_tasks, text: "Что поручено мне на эту неделю?", intent: list_assignments }
+
+  # --- ответственный и «для кого» при создании (US-92) --------------------------------------------
+  - { id: rf01, cat: responsible, text: "Стоматолог Вани в четверг в 16, отводит папа", intent: create_event, title: "Стоматолог Вани", start: "2026-10-08T16:00", responsible: "Дима", for_whom: "Ваня" }
+  - { id: rf02, cat: responsible, text: "Танцы у Сони в субботу в 11, ведёт мама", intent: create_event, title: "Танцы у Сони", start: "2026-10-10T11:00", responsible: "Аня", for_whom: "Соня" }
+  - { id: rf03, cat: responsible, text: "Плавание Маши по субботам в 10", intent: create_event, title: "Плавание Маши", responsible: null, for_whom: "Маша" }
+  - { id: rf04, cat: responsible, text: "Ваня к логопеду в понедельник в 17, отвозит Дима", intent: create_event, title: ["Ваня к логопеду", "Логопед", "Логопед Вани"], start: "2026-10-12T17:00", responsible: "Дима", for_whom: "Ваня" }
+  - { id: rf05, cat: responsible, text: "В пятницу в 18 концерт у Маши в школе, забирает Аня", intent: create_event, title: ["Концерт у Маши в школе", "Концерт у Маши"], start: "2026-10-09T18:00", responsible: "Аня", for_whom: "Маша" }
+  - { id: rf06, cat: responsible, text: "Для Сони кружок рисования во вторник в 16", intent: create_event, title: ["Кружок рисования", "Кружок рисования для Сони", "Для Сони кружок рисования"], start: "2026-10-13T16:00", for_whom: "Соня" }
+  - { id: rf07, cat: responsible, text: "Папа отведёт Ваню к врачу в пятницу в 10", intent: [create_event, assign_task], responsible: "Дима", assignee: "Дима", for_whom: "Ваня" }
+  - { id: rf08, cat: responsible, text: "Футбол у Вани по вторникам и четвергам в 18, возит папа", intent: create_event, title: "Футбол у Вани", responsible: "Дима", for_whom: "Ваня" }
+  - { id: rf09, cat: responsible, text: "Родительское собрание у Маши в четверг в 19, идёт Аня", intent: create_event, title: "Родительское собрание у Маши", start: "2026-10-08T19:00", responsible: "Аня", for_whom: "Маша" }
+  - { id: rf10, cat: responsible, text: "Завтра в 9 прививка Ване, ведёт мама", intent: create_event, title: ["Прививка Ване", "Прививка"], start: "2026-10-08T09:00", responsible: "Аня", for_whom: "Ваня" }
+  - { id: rf11, cat: responsible, text: "Ответственный Дима: техосмотр в субботу в 10", intent: create_event, title: "Техосмотр", start: "2026-10-10T10:00", responsible: "Дима" }
+  - { id: rf12, cat: responsible, text: "День рождения Сони 3 декабря", intent: create_event, title: "День рождения Сони", all_day: true, start: "2026-12-03", for_whom: "Соня" }
+  - { id: rf13, cat: responsible, text: "Поставь Маше английский в пятницу в 17, отвезёт Аня", intent: create_event, title: ["Английский", "Английский Маше"], start: "2026-10-09T17:00", responsible: "Аня", for_whom: "Маша" }
+
+  # --- поиск (US-21) -----------------------------------------------------------------------------
+  - { id: fd01, cat: find, text: "Когда у Сони танцы?", intent: find_event, query: ["Сони танцы", "Танцы Сони"] }
+  - { id: fd02, cat: find, text: "Следующий созвон с Петей", intent: find_event, next: true, query: "Созвон с Петей" }
+  - { id: fd03, cat: find, text: "Когда Ване к логопеду?", intent: find_event }
+  - { id: fd04, cat: find, text: "Во сколько завтра у Маши английский?", intent: [find_event, list_events] }
+  - { id: fd05, cat: find, text: "Когда ближайшее плавание у Маши?", intent: find_event, next: true }
+  - { id: fd06, cat: find, text: "Что у нас дальше по плану?", intent: [find_event, list_events] }
+  - { id: fd07, cat: find, text: "Когда мы едем на дачу?", intent: find_event }
+  - { id: fd08, cat: find, text: "Когда у Вани следующая тренировка", intent: find_event, next: true }
+  - { id: fd09, cat: find, text: "В какой день родительское собрание?", intent: find_event }
+  - { id: fd10, cat: find, text: "А стоматолог у Вани в какое время?", intent: find_event }
+
+  # --- напоминания и детали у событий (US-41, US-42) ---------------------------------------------
+  - { id: dt01, cat: details, text: "Поставь напоминание за день до родительского собрания", intent: modify_event, reminders: [1440] }
+  - { id: dt02, cat: details, text: "Добавь к стоматологу Вани место: ул. Ленина 5", intent: modify_event }
+  - { id: dt03, cat: details, text: "Убери все напоминания с плавания", intent: modify_event, reminders: [] }
+  - { id: dt04, cat: details, text: "К футболу Вани добавь описание: взять форму и воду", intent: modify_event }
+  - { id: dt05, cat: details, text: "напомни за 10 минут до созвона с петей", intent: modify_event, reminders: [10] }
+  - { id: dt06, cat: details, text: "Напоминай про танцы Сони за час", intent: modify_event, reminders: [60] }
+
+  # --- несколько команд --------------------------------------------------------------------------
+  - { id: mu01, cat: multiple, text: "Удали танцы в субботу и поставь бассейн в воскресенье в 10", intent: [multiple, delete_event] }
+  - { id: mu02, cat: multiple, text: "Попроси Диму забрать Машу и напомни мне купить торт", intent: [multiple, assign_task] }
+  - { id: mu03, cat: multiple, text: "Что у нас в субботу и кто везёт Ваню на футбол?", intent: [multiple, list_events] }
+  - { id: mu04, cat: multiple, text: "Поставь стоматолога Ване в пятницу в 15 и пусть его отведёт папа", intent: [multiple, create_event, assign_task] }
+
+  # --- не про календарь --------------------------------------------------------------------------
+  - { id: un01, cat: unsupported, text: "Ты кто вообще?", intent: unsupported }
+  - { id: un02, cat: unsupported, text: "Посоветуй, куда сходить с детьми в выходные", intent: unsupported }
+  - { id: un03, cat: unsupported, text: "Сколько лет Маше?", intent: unsupported }
+  - { id: un04, cat: unsupported, text: "Ну ты молодец 👍", intent: unsupported }
+  - { id: un05, cat: unsupported, text: "Дима сегодня задерживается на работе", intent: unsupported }
+  - { id: un06, cat: unsupported, text: "Пусть будет так", intent: unsupported }
+  - { id: un07, cat: unsupported, text: "Скажи что-нибудь смешное", intent: unsupported }
+  - { id: un08, cat: unsupported, text: "Купи молока", intent: [unsupported, create_event] }
+
+  # --- опечатки и голосовые формы ----------------------------------------------------------------
+  - { id: ty01, cat: typos_voice, text: "запиши ване стамотолога на четверг в 4 часа дня", intent: create_event, title: ["Стамотолога", "Стоматолога", "Стоматолог", "Стамотолог", "Стоматолог Ване", "Стамотолога Ване"], start: "2026-10-08T16:00", for_whom: "Ваня" }
+  - { id: ty02, cat: typos_voice, text: "эээ поставь пожалуйста на субботу на одиннадцать танцы сони", intent: create_event, title: "Танцы Сони", start: "2026-10-10T11:00", for_whom: "Соня" }
+  - { id: ty03, cat: typos_voice, text: "попроси мужа завтра забрать машу из садика в шесть вечера", intent: assign_task, assignee: "Дима", due: "2026-10-08T18:00", task: "Забрать машу из садика", for_whom: "Маша" }
+  - { id: ty04, cat: typos_voice, text: "короче надо чтобы кто то отвёз ваню в бассейн в субботу утром", intent: assign_task, assignee: null, due: "2026-10-10", for_whom: "Ваня" }
+  - { id: ty05, cat: typos_voice, text: "Скажы Ане купить хлеба", intent: assign_task, assignee: "Аня", task: "Купить хлеба" }
+  - { id: ty06, cat: typos_voice, text: "напомни мужу забрать машу из школы в пять", intent: assign_task, assignee: "Дима", due: "2026-10-07T17:00", task: "Забрать машу из школы", for_whom: "Маша" }
+  - { id: ty07, cat: typos_voice, text: "попроси диму забрат посылку завтра", intent: assign_task, assignee: "Дима", due: "2026-10-08" }
+  - { id: ty08, cat: typos_voice, text: "кагда у сони танцы", intent: find_event }
+  - { id: ty09, cat: typos_voice, text: "что на мне в субботу", intent: list_assignments }
+
+  # --- вставленный текст (как пересланное, US-65) ------------------------------------------------
+  - { id: fw01, cat: pasted, text: "Завтра в 7 у Маши родительское собрание, школа 41", intent: create_event, title: ["Родительское собрание", "У Маши родительское собрание", "Родительское собрание у Маши", "Родительское собрание, школа 41", "У Маши родительское собрание, школа 41"], for_whom: "Маша" }
+  - { id: fw02, cat: pasted, text: "Вы записаны к стоматологу 14.10 в 9:30, ул. Ленина 5, каб. 12", intent: create_event, start: "2026-10-14T09:30" }
+
+  # --- English -----------------------------------------------------------------------------------
+  - { id: en01, cat: english, text: "Ask Dima to pick up Masha from school on Friday at 4pm", intent: assign_task, assignee: "Дима", due: "2026-10-09T16:00", for_whom: "Маша" }
+  - { id: en02, cat: english, text: "Tell Anya to buy milk", intent: assign_task, assignee: "Аня", task: ["Buy milk"] }
+  - { id: en03, cat: english, text: "Remind my husband to pay the internet bill on Friday", intent: assign_task, assignee: "Дима", due: "2026-10-09" }
+  - { id: en04, cat: english, text: "Someone needs to take Vanya to swimming on Saturday", intent: assign_task, assignee: null, due: "2026-10-10", for_whom: "Ваня" }
+  - { id: en05, cat: english, text: "Can someone pick up Sonya at 6pm tomorrow?", intent: assign_task, assignee: null, due: "2026-10-08T18:00", for_whom: "Соня" }
+  - { id: en06, cat: english, text: "What's on me tomorrow?", intent: list_assignments }
+  - { id: en07, cat: english, text: "my tasks", intent: list_assignments }
+  - { id: en08, cat: english, text: "When is Sonya's dance class?", intent: find_event }
+  - { id: en09, cat: english, text: "Next call with Petya", intent: find_event, next: true }
+  - { id: en10, cat: english, text: "Dentist for Vanya on Thursday at 4pm, dad takes him", intent: create_event, title: ["Dentist for Vanya", "Dentist"], start: "2026-10-08T16:00", responsible: "Дима", for_whom: "Ваня" }
+  - { id: en11, cat: english, text: "Remind me to call grandma on Sunday at 12", intent: create_event, title: ["Call grandma"], start: "2026-10-11T12:00" }
+  - { id: en12, cat: english, text: "Remind me 30 minutes before the dentist", intent: modify_event, reminders: [30] }
+  - { id: en13, cat: english, text: "Cancel Masha's dance class on Saturday and add swimming at 10 instead", intent: [multiple, delete_event] }
+  - { id: en14, cat: english, text: "thanks, that's all", intent: unsupported }
+  - { id: en15, cat: english, text: "Have Dima walk the dog tonight at 9", intent: assign_task, assignee: "Дима", due: "2026-10-07T21:00" }
