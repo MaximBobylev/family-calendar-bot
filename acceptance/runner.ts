@@ -6,6 +6,8 @@
 //         docker compose run --rm -e SCENARIO=undo,US-61 acceptance — выборочно (или аргументами:
 //         docker compose run --rm acceptance npx tsx acceptance/runner.ts undo US-61)
 //         … --list (или SCENARIO_LIST=1) — только список id / story / файл, без запуска
+// SCENARIO_DIR=repro — сценарии из acceptance/repro (воспроизведения багов QA, по умолчанию не запускаются);
+// DUMP_TELEGRAM=1 — после каждого сценария напечатать все сообщения бота (исследовательское тестирование).
 // Фильтр — через запятую или пробел; сценарий выбран, если подходит хоть одно слово: US-xx — по story,
 // «10-undo» / «10-undo.yaml» — по файлу, иначе — подстрока id. Фильтр ничего не выбрал — ошибка.
 
@@ -964,6 +966,19 @@ function checkCall(where: string, call: TelegramCall, exp: TelegramExpectation) 
   }
 }
 
+/** Все вызовы Telegram сценария по порядку: метод, чат, текст, кнопки (DUMP_TELEGRAM). */
+async function dumpTelegram(): Promise<void> {
+  for (const c of await allTelegramCalls()) {
+    if (c.method === "getFile" || c.method === "sendChatAction") continue;
+    const b = c.body as TelegramCall["body"] & { show_alert?: boolean; url?: string };
+    const buttons = (b.reply_markup?.inline_keyboard ?? []).flat().map((x) => x.text);
+    const extra = c.method === "answerInlineQuery" ? JSON.stringify((b.results ?? []).map((r) => [r.title, r.input_message_content?.message_text])) : "";
+    console.log(
+      `    · ${c.method} ${b.chat_id ?? b.message_id ?? ""}${c.messageId ? ` #${c.messageId}` : ""} ${JSON.stringify(b.text ?? "")}${buttons.length ? ` ${JSON.stringify(buttons)}` : ""}${b.url ? ` url=${b.url}` : ""} ${extra}`,
+    );
+  }
+}
+
 // --- Main ----------------------------------------------------------------------
 
 /** Сценарий подходит под слово фильтра: US-xx — story, имя файла (с .yaml или без) — файл, иначе подстрока id. */
@@ -973,7 +988,7 @@ function matches(s: Scenario & { file: string }, word: string): boolean {
   return s.id.includes(word);
 }
 
-const dir = join(import.meta.dirname, "scenarios");
+const dir = join(import.meta.dirname, process.env.SCENARIO_DIR ?? "scenarios");
 const all = readdirSync(dir)
   .filter((f) => f.endsWith(".yaml"))
   .sort()
@@ -1000,6 +1015,7 @@ for (const s of scenarios) {
     failed++;
     console.log(`  ✗ ${s.id}  (${s.story}, ${s.file})\n      ${String(e instanceof Error ? e.message : e).replaceAll("\n", "\n      ")}`);
   }
+  if (process.env.DUMP_TELEGRAM) await dumpTelegram();
 }
 console.log(`\n${scenarios.length - failed} / ${scenarios.length} scenarios passed`);
 process.exitCode = failed ? 1 : 0;

@@ -1,0 +1,246 @@
+# ПАДАЮЩИЕ воспроизведения багов QA R1 (docs/research/qa-r1-family.md). Описывают ОЖИДАЕМОЕ поведение — сейчас красные.
+# Обычный прогон их не берёт (раннер читает только acceptance/scenarios). Запуск:
+#   DEV_PORT=8797 docker compose run --rm -T -e SCENARIO_DIR=repro acceptance            — все
+#   … -e SCENARIO_DIR=repro -e SCENARIO=zz-repro-notify acceptance                         — выборочно (подстрока id)
+#   … -e DUMP_TELEGRAM=1                                                                  — плюс все сообщения бота
+# Починили баг — перенести сценарий в acceptance/scenarios/NN-*.yaml со своим story и удалить отсюда.
+#
+# Дом «Бобылевы» («сейчас» — ср 7 октября 2026, 10:00 МСК = 07:00Z): Иван 1001 (владелец, Google, «муж, папа»),
+# Аня 2001 (без Google, не в allowlist, «жена, мама»), Дима 1002 (свой Google, пояс Asia/Yekaterinburg, UTC+5,
+# в Google ему расшарена «Семья»). Дети — Маша, Ваня. Общий календарь — «Семья» (личный «Иван» из общих убран).
+# Семейный чат -500 привязан к дому.
+
+- id: zz-repro-notify-member-without-google-and-group
+  story: US-72
+  title: "QA-01: изменение в общем календаре дома не доходит до участника без Google и в семейный чат"
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              shared: true
+              events:
+                - { id: swim, summary: "Плавание Вани", start: { dateTime: "2026-10-10T10:00:00+03:00" }, end: { dateTime: "2026-10-10T11:00:00+03:00" } }
+                - { id: din, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Asia/Yekaterinburg }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: owner, timeZone: Europe/Moscow, shared: true }
+      - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+      - press: { button: "✅ Иван", from: 1001 }
+      - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
+      - telegram: { from: 1001, text: "/home kid Маша" }
+      - telegram: { from: 1001, text: "/home kid Ваня" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена, мама" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home link" }
+      - hourly: true
+      - tick: true
+      - llm:
+          "Перенеси ужин у бабушки на 20": { tool: modify_event, args: { event: "ужин у бабушки" } }
+          "Кто-то должен отвезти Ваню на плавание в субботу": { tool: assign_task, args: { when: "в субботу", task: "отвезти Ваню на плавание" } }
+          "Пусть Аня завтра в 17 заберёт посылку": { tool: assign_task, args: { assignee: "Аня", when: "завтра в 17", task: "забрать посылку" } }
+          "Напомни Диме забрать посылку в 17": { tool: assign_task, args: { assignee: "Диме", when: "в 17", task: "забрать посылку" } }
+          "Кто-то должен купить хлеб": { tool: assign_task, args: { task: "купить хлеб" } }
+          "что у нас завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Кружок в пятницу в 17": { tool: create_event, args: { start: "в пятницу в 17", title: "Кружок" } }
+          "Напомни мне завтра купить хлеб": { tool: assign_task, args: { assignee: "мне", when: "завтра", task: "купить хлеб" } }
+      - expect_telegram_count: 12
+    # Иван переносит ужин в личном чате: Дима (свой Google с «Семьёй») узнаёт, а Аня (видит «Семью» через дом) и семейный чат — нет
+    - telegram: { from: 1001, text: "Перенеси ужин у бабушки на 20" }
+    - press: { button: "Подтвердить", from: 1001, first_name: "Иван" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Перенести?"] }
+        - { chat_id: -500, text_contains: ["🔁 Перенесено: «Ужин у бабушки»"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Ужин у бабушки»"] }
+        - { chat_id: 2001, text_contains: ["🔁 Перенесено: «Ужин у бабушки»"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Изменено"] }
+
+- id: zz-repro-notify-external-to-member-and-group
+  story: US-72
+  title: "QA-01b: внешнее изменение в Google — тоже только владельцам Google, без Ани и семейного чата"
+  steps:
+    - *home
+    - google_external: { calendar: family@group.calendar.google.com, move: { id: swim, start: { dateTime: "2026-10-10T12:00:00+03:00" }, end: { dateTime: "2026-10-10T13:00:00+03:00" } } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+        - { chat_id: 2001, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+
+- id: zz-repro-tg-reminder-member-without-google
+  story: US-71
+  title: "QA-02: участник без Google включает «Напоминать в Telegram за 10 мин» — напоминаний нет"
+  steps:
+    - *home
+    - telegram: { from: 2001, text: "/settings" }
+    - press: { button: "📣 Уведомления", from: 2001 }
+    - press: { button: "за 10 мин", from: 2001 }
+    - expect_telegram_count: 3
+    # Ужин у бабушки — чт 19:00 МСК; за 10 мин = 15:50Z
+    - clock: "2026-10-08T15:50:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["⏰ Через 10 мин: <b>Ужин у бабушки</b>"] }
+
+- id: zz-repro-assignment-event-label-stale-after-move
+  story: US-91
+  title: "QA-03: событие поручения перенесли — срок новый, а строка «📅 Событие» со старым временем"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Кто-то должен отвезти Ваню на плавание в субботу" }
+    - press: { button: "Поручить", from: 1001 }
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram_count: 8
+    - google_external: { calendar: family@group.calendar.google.com, move: { id: swim, start: { dateTime: "2026-10-10T12:00:00+03:00" }, end: { dateTime: "2026-10-10T13:00:00+03:00" } } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["в 12:00", "📅 Событие: Плавание Вани, сб, 10 октября 12:00"], text_not_contains: ["10 октября 10:00"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["в 12:00", "📅 Событие: Плавание Вани, сб, 10 октября 12:00"], text_not_contains: ["10 октября 10:00"] }
+        - { method: editMessageText, chat_id: 1002 }
+        - { chat_id: 2001, text_contains: ["🕒 Время изменилось"] }
+
+- id: zz-repro-assignment-event-label-other-timezone
+  story: US-91
+  title: "QA-04: у Димы (UTC+5) в одном сообщении срок «в 12:00», а событие «10:00» — время события в поясе автора"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Кто-то должен отвезти Ваню на плавание в субботу" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Поручить?"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Предложено всем"] }
+        - { chat_id: 2001, text_contains: ["сб, 10 октября в 10:00", "📅 Событие: Плавание Вани, сб, 10 октября 10:00"] }
+        - { chat_id: 1002, text_contains: ["сб, 10 октября в 12:00", "📅 Событие: Плавание Вани, сб, 10 октября 12:00"] }
+
+- id: zz-repro-assignment-event-label-relative-frozen
+  story: US-91
+  title: "QA-05: «📅 Событие: …, завтра в 17:00» не пересчитывается — на следующий день рядом со сроком «сегодня»"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Пусть Аня завтра в 17 заберёт посылку" }
+    - press: { button: "Поручить + в календарь", from: 1001 }
+    - expect_telegram_count: 4
+    - clock: "2026-10-08T06:00:00Z"
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["сегодня в 17:00"], text_not_contains: ["завтра"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать посылку — сегодня в 17:00"], text_not_contains: ["завтра"] }
+        - { chat_id: 1001, text_contains: ["👍 Аня взял(а)"] }
+
+- id: zz-repro-removed-assignee-keeps-assignment
+  story: US-91
+  title: "QA-06: убранному из дома участнику по-прежнему приходят напоминания, автору — «⏳ — ещё не подтвердил(а)»"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Напомни Диме забрать посылку в 17" }
+    - press: { button: "Поручить", from: 1001 }
+    - telegram: { from: 1001, text: "/home" }
+    - press: { button: "✖ Дима", from: 1001 }
+    - expect_telegram_count: 7
+    # Ожидаем: поручение отменено при удалении (автору — понятное сообщение), исполнителю больше ничего не приходит
+    - clock: "2026-10-07T12:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: zz-repro-deleted-assignee-becomes-someone
+  story: US-91
+  title: "QA-07: исполнитель удалил данные (/disconnect) — поручение превращается в «кто-то должен»: «⏳ Пока никто не взял»"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Пусть Аня завтра в 17 заберёт посылку" }
+    - press: { button: "Поручить", from: 1001 }
+    - telegram: { from: 2001, text: "/disconnect" }
+    - press: { button: "Отключить и удалить", from: 2001 }
+    - expect_telegram_count: 5
+    - clock: "2026-10-08T12:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: zz-repro-leave-notice-in-leaver-locale
+  story: US-90
+  title: "QA-10: владелец получает «… left …» по-английски, потому что так настроен ушедший участник"
+  steps:
+    - *home
+    - telegram: { from: 2001, text: "/settings" }
+    - press: { button: "🗣 English", from: 2001 }
+    - telegram: { from: 2001, language: en, text: "/leave" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Настройки"] }
+        - { method: editMessageText, chat_id: 2001 }
+        - { chat_id: 2001, text_contains: ["You left"] }
+        - { chat_id: 1001, text_contains: ["Аня", "вышел(-ла) из дома"] }
+
+- id: zz-repro-author-takes-own-someone-in-group-no-done
+  story: US-91
+  title: "QA-11: автор сам взял своё «кто-то должен» в семейном чате — кнопки «Сделано» нет нигде"
+  steps:
+    - *home
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "@cab_test_bot Кто-то должен купить хлеб" }
+    - press: { button: "Поручить", from: 1001, chat: -500 }
+    - expect_telegram_count: 4
+    - press: { button: "Беру", from: 1001, chat: -500 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Иван взял(а)"] }
+        - { method: editMessageText, chat_id: 2001 }
+        - { method: editMessageText, chat_id: 1002 }
+        - { chat_id: 1001, text_contains: ["Купить хлеб"], buttons: ["Сделано"] }
+
+- id: zz-repro-stale-card-after-unshare-double-message
+  story: US-90
+  title: "QA-12: владелец убрал «Семью» из общих — по старой карточке Аня получает два противоречащих ответа"
+  steps:
+    - *home
+    - llm:
+        "Кружок в пятницу в 17": { tool: create_event, args: { start: "в пятницу в 17", title: "Кружок" } }
+    - telegram: { from: 2001, text: "Кружок в пятницу в 17" }
+    - telegram: { from: 1001, text: "/home" }
+    - press: { button: "📅 Календари дома", from: 1001 }
+    - press: { button: "✅ Семья", from: 1001 }
+    - expect_telegram_count: 4
+    - press: { button: "Создать", from: 2001, chat: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["нет общих календарей"], text_not_contains: ["что-то пошло не так"] }
+
+- id: zz-repro-member-connects-google-loses-house-calendars
+  story: US-90
+  title: "QA-08: участник подключил свой Google — в личном чате пропали общие календари дома"
+  steps:
+    - *home
+    - google_account: { email: anya@gmail.com, calendars: [{ id: anya@gmail.com, summary: "Аня", accessRole: owner, primary: true, timeZone: Europe/Moscow }] }
+    - telegram: { from: 2001, text: "/connect" }
+    - oauth: { consent: anya@gmail.com, from: 2001 }
+    - expect_telegram_count: 2
+    - telegram: { from: 2001, text: "что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Ужин у бабушки"] }
+
+- id: zz-repro-remind-me-misrouted-to-assignment
+  story: US-91
+  title: "QA-13: «Напомни мне …» при ответе LLM assign_task(assignee: «мне») — «Не нашёл «мне» среди участников дома»"
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Напомни мне завтра купить хлеб" }
+    - expect_telegram:
+        - { chat_id: 1001, text_not_contains: ["Не нашёл «мне»"] }
