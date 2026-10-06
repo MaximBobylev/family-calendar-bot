@@ -1,8 +1,10 @@
 // Голосовое → текст (US-10): проверка длины и размера, лимит STT, скачивание, цепочка STT, журнал (US-13),
-// поправки известных ошибок Whisper и ответ «Услышал: …».
+// поправки известных ошибок Whisper и ответ «Услышал: …». Повтор апдейта после сбоя (tech-debt #5) берёт текст из inbox:
+// STT не вызывается снова, «🎙 …» не отправляется дважды.
 
 import { recordFeature } from "../../db/features";
 import { recordUsage } from "../../db/usage";
+import { markHeardSent, saveTranscript } from "../../inbox";
 import type { User } from "../../db/users";
 import { sttCostMicroUsd } from "../../limits";
 import { fixTranscript, isEmptySpeech, SttChainError, transcribeChain, type Transcript } from "../../stt/whisper";
@@ -20,6 +22,12 @@ const MAX_VOICE_BYTES = 2 * 1024 * 1024;
 export async function recognizeVoice(ctx: AppContext, user: User, message: TgMessage): Promise<string | null> {
   const chatId = message.chat.id;
   const voice = (message.voice ?? message.audio)!;
+  // Повтор после сбоя: распознано прошлой попыткой — без лимита, скачивания и STT (tech-debt #5)
+  const done = ctx.progress?.transcript;
+  if (done) {
+    if (!ctx.progress?.heardSent) await sendHeard(ctx, user, chatId, done);
+    return done;
+  }
   // Длинное — отказ без скачивания и без затрат на STT
   if (voice.duration > MAX_VOICE_SEC || (voice.file_size ?? 0) > MAX_VOICE_BYTES) {
     await ctx.telegram.sendMessage(chatId, t("voiceTooLong", user.locale));
@@ -75,8 +83,14 @@ export async function recognizeVoice(ctx: AppContext, user: User, message: TgMes
   }
   // Известные ошибки Whisper («от Мини» → «отмени»); показываем уже исправленное — то, что бот понял
   const heard = fixTranscript(transcript.text);
-  // Показываем, что услышали, — до долгой обработки (US-10)
-  await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(heard) }), undefined, { html: true });
-  await recordFeature(ctx.db, user.id, "voice", ctx.clock.now());
+  if (ctx.progress) await saveTranscript(ctx.db, ctx.progress.updateId, heard);
+  await sendHeard(ctx, user, chatId, heard);
   return heard;
+}
+
+/** Показываем, что услышали, — до долгой обработки (US-10); отметка в inbox — чтобы повтор не прислал второй раз. */
+async function sendHeard(ctx: AppContext, user: User, chatId: number, heard: string): Promise<void> {
+  await ctx.telegram.sendMessage(chatId, t("heard", user.locale, { text: escapeHtml(heard) }), undefined, { html: true });
+  if (ctx.progress) await markHeardSent(ctx.db, ctx.progress.updateId);
+  await recordFeature(ctx.db, user.id, "voice", ctx.clock.now());
 }

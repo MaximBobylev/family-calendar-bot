@@ -125,8 +125,10 @@ export async function runCommand(
   if (voice) {
     const current = { ...voice, transcript: text, at: nowMs };
     await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: current }, nowMs);
-    // Повтор той же фразы — Whisper, скорее всего, снова ошибся
-    if (prevVoice && nowMs - prevVoice.at < REPEAT_WINDOW_MS && similarTranscripts(prevVoice.transcript, text)) {
+    // Повтор той же фразы — Whisper, скорее всего, снова ошибся. То же голосовое (повтор апдейта после сбоя,
+    // tech-debt #5) — не повтор фразы
+    const repeated = prevVoice && prevVoice.fileId !== voice.fileId && nowMs - prevVoice.at < REPEAT_WINDOW_MS;
+    if (repeated && similarTranscripts(prevVoice.transcript, text)) {
       if (await escalateVoice(ctx, user, chatId, conversationId, current)) return;
     }
   }

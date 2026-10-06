@@ -1,10 +1,16 @@
-// Access token Google из refresh token. Живёт ~1 час; пока получаем на каждую обработку апдейта.
+// Access token Google из refresh token. Живёт ~1 час; кешируется на аккаунт в D1 (calendar/google-provider.ts, tech-debt #13).
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
 import { GoogleAuthError } from "./errors";
 
-export async function refreshAccessToken(config: Config, refreshToken: string): Promise<string> {
+export interface AccessToken {
+  accessToken: string;
+  /** Через сколько секунд истечёт (expires_in из ответа Google). */
+  expiresInSec?: number;
+}
+
+export async function refreshAccessToken(config: Config, refreshToken: string): Promise<AccessToken> {
   const res = await fetchWithTimeout(
     `${config.googleOAuthBase}/token`,
     {
@@ -23,5 +29,6 @@ export async function refreshAccessToken(config: Config, refreshToken: string): 
     const body = await res.text();
     throw new GoogleAuthError(`google token refresh failed: ${res.status} ${body}`, body.includes("invalid_grant"));
   }
-  return ((await res.json()) as { access_token: string }).access_token;
+  const json = (await res.json()) as { access_token: string; expires_in?: number };
+  return { accessToken: json.access_token, ...(typeof json.expires_in === "number" ? { expiresInSec: json.expires_in } : {}) };
 }

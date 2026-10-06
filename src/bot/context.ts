@@ -2,6 +2,7 @@
 
 import type { Clock } from "../clock";
 import type { Config } from "../config";
+import type { UpdateProgress } from "../inbox";
 import { TelegramApi } from "../telegram/api";
 
 export interface AppContext {
@@ -9,6 +10,8 @@ export interface AppContext {
   clock: Clock;
   db: D1Database;
   telegram: TelegramApi;
+  /** Только при обработке апдейта из inbox: что сделано прошлыми попытками (tech-debt #5). */
+  progress?: UpdateProgress;
 }
 
 export function createContext(env: Env, config: Config, clock: Clock): AppContext {

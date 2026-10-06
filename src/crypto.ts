@@ -1,6 +1,7 @@
 // Шифрование секретов в D1 (refresh token Google, PKCE verifier): AES-GCM, ключ — секрет TOKEN_ENCRYPTION_KEY
 // (base64, 32 байта). tech-debt #8 — версия формата и ротация ключей:
-//   v1:     "v1:" + base64(iv[12] || ciphertext), AAD = контекст записи («account:<id>», «oauth_state:<state>») —
+//   v1:     "v1:" + base64(iv[12] || ciphertext), AAD = контекст записи («account:<id>», «access:<id>»,
+//           «oauth_state:<state>») —
 //           шифротекст не подставить в чужую строку БД;
 //   legacy: base64(iv[12] || ciphertext) без AAD — записи до v1, только расшифровка (перешифруются при переподключении).
 // Ротация: новый ключ — в TOKEN_ENCRYPTION_KEY, прежние — в TOKEN_ENCRYPTION_KEYS_OLD (через запятую): шифрует
@@ -58,8 +59,12 @@ export function keyRing(current: string, old: string | undefined): KeyRing {
   return [current, ...rest];
 }
 
-/** AAD для refresh token аккаунта и для PKCE verifier OAuth-ссылки. */
-export const aadFor = { account: (accountId: string) => `account:${accountId}`, oauthState: (state: string) => `oauth_state:${state}` };
+/** AAD для refresh token аккаунта, его кешированного access token (tech-debt #13) и PKCE verifier OAuth-ссылки. */
+export const aadFor = {
+  account: (accountId: string) => `account:${accountId}`,
+  access: (accountId: string) => `access:${accountId}`,
+  oauthState: (state: string) => `oauth_state:${state}`,
+};
 
 export async function sha256Hex(text: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));

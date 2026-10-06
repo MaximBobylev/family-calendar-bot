@@ -73,7 +73,7 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
 
   const tz = user.home_tz;
   const today = utcToLocal(job.fire_at, tz).day;
-  const provider = new GoogleCalendarProvider(ctx.config, ctx.db, user.id);
+  const provider = new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock);
   let list: EventList;
   let calendars: CalendarInfo[];
   try {

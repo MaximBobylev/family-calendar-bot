@@ -1,0 +1,135 @@
+# Надёжность обработки (ADR-0005). «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+# tech-debt #13: access token Google кешируется (refresh — раз в ~55 мин, а не на каждую команду); 401 на токен
+#   из кеша — обновить и повторить; временный 5xx на чтении — один повтор.
+# tech-debt #5: повтор апдейта после сбоя (ретрай очереди) не вызывает STT/LLM снова и не шлёт «🎙 …» дважды.
+
+- id: google-token-refreshed-once-for-two-commands
+  story: ADR-0005
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Покажи завтра и удали планёрку": { tools: [{ tool: list_events, args: { range: "завтра" } }, { tool: delete_event, args: { event: "планёрка" } }] }
+    # Подключение — обмен кода, не refresh
+    - expect_token_refreshes: 0
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+    - clock: "2026-10-07T07:01:00Z"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка"] }
+    - expect_token_refreshes: 1
+    # Токен живёт час: за 10 мин до срока ещё берём из кеша, меньше чем за 5 — обновляем заранее
+    - clock: "2026-10-07T07:50:00Z"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка"] }
+    - expect_token_refreshes: 1
+    - clock: "2026-10-07T07:56:00Z"
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка"] }
+    - expect_token_refreshes: 2
+
+- id: google-401-on-cached-token-refreshes-and-retries
+  story: ADR-0005
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка"] }
+    # Google перестал принимать токен из кеша раньше срока — обновить один раз и повторить запрос
+    - google_expire_access: ivan@gmail.com
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"], text_not_contains: ["не отвечает"] }
+    - expect_token_refreshes: 2
+
+- id: google-revoked-with-cached-token-asks-to-reconnect
+  story: US-02
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка"] }
+    # Токен ещё в кеше, но доступ отозван: 401 → обновление → invalid_grant → «подключите заново»
+    - google_revoke: ivan@gmail.com
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - text_contains: ["отозван"]
+          buttons: ["Подключить Google Календарь"]
+
+- id: google-transient-5xx-on-read-retried
+  story: US-14
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            # Первый events.list — 503, повтор проходит: пользователь сбоя не видит
+            list_error_times: 1
+            events:
+              - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+    - llm: { "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } } }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"], text_not_contains: ["не загрузился", "не отвечает"] }
+
+- id: voice-retry-after-failure-reuses-transcript-and-intent
+  story: ADR-0005
+  steps:
+    - *setup
+    # «🎙 …» ушло, ответ на команду — нет (Telegram 500): обработка упала, очередь повторит апдейт
+    - telegram_fails: { text_contains: "по одной команде" }
+    - voice: { from: 1001, transcript: "Покажи завтра и удали планёрку", expect_failure: true }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Покажи завтра и удали планёрку</i>"] }
+    - queue_retry: true
+    # Повтор: STT и LLM не вызываются, «🎙» второй раз не приходит
+    - expect_telegram:
+        - { text_contains: ["Давайте по одной команде за раз"] }
+    - expect_provider_calls: { stt-openai: 1, stt: 0, llm: 1 }
+
+- id: voice-heard-send-fails-then-retry-sends-it-once
+  story: ADR-0005
+  steps:
+    - *setup
+    - telegram_fails: { text_contains: "🎙" }
+    - voice: { from: 1001, transcript: "Что у меня завтра?", expect_failure: true }
+    - expect_no_telegram: true
+    - queue_retry: true
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Что у меня завтра?</i>"] }
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+    - expect_provider_calls: { stt-openai: 1, stt: 0, llm: 1 }
+
+- id: text-retry-after-failure-does-not-call-llm-again
+  story: ADR-0005
+  steps:
+    - *setup
+    - telegram_fails: { text_contains: "по одной команде" }
+    - telegram: { from: 1001, text: "Покажи завтра и удали планёрку", expect_failure: true }
+    - expect_no_telegram: true
+    - queue_retry: true
+    - expect_telegram:
+        - { text_contains: ["Давайте по одной команде за раз"] }
+    - expect_llm_requests: 1

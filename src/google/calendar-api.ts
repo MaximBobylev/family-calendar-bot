@@ -2,7 +2,20 @@
 // За интерфейсом CalendarProvider (ADR-0003): calendar/google-provider.ts.
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
+import { retryDelayMs } from "../net/retry";
 import { GoogleApiError } from "./errors";
+
+/** GET (чтение идемпотентно) с одним коротким повтором на 5xx/429 в пределах бюджета времени (tech-debt #13). */
+async function getWithRetry(url: URL, accessToken: string): Promise<Response> {
+  const init = { headers: { authorization: `Bearer ${accessToken}` } };
+  const started = performance.now();
+  const res = await fetchWithTimeout(url, init, TIMEOUTS.google);
+  const delay = retryDelayMs(res.status, performance.now() - started, res.headers.get("retry-after"));
+  if (delay === null) return res;
+  await res.body?.cancel();
+  await new Promise((r) => setTimeout(r, delay));
+  return fetchWithTimeout(url, init, TIMEOUTS.google);
+}
 
 export interface GoogleCalendarListEntry {
   id: string;
@@ -19,7 +32,7 @@ export async function listCalendars(apiBase: string, accessToken: string): Promi
     const url = new URL(`${apiBase}/calendar/v3/users/me/calendarList`);
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
+    const res = await getWithRetry(url, accessToken);
     if (!res.ok) throw new GoogleApiError(`calendarList failed: ${res.status} ${await res.text()}`, res.status);
     const page = (await res.json()) as { items?: GoogleCalendarListEntry[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
@@ -66,7 +79,7 @@ export async function listEvents(
     url.searchParams.set("timeZone", timeZone);
     url.searchParams.set("maxResults", "250");
     if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
+    const res = await getWithRetry(url, accessToken);
     if (!res.ok) throw new GoogleApiError(`events.list failed: ${res.status} ${await res.text()}`, res.status);
     const page = (await res.json()) as { items?: GoogleEvent[]; nextPageToken?: string };
     items.push(...(page.items ?? []));
@@ -110,7 +123,7 @@ async function writeEvent(
 export async function getEvent(apiBase: string, accessToken: string, calendarId: string, eventId: string, timeZone: string): Promise<GoogleEvent | null> {
   const url = new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
   url.searchParams.set("timeZone", timeZone);
-  const res = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${accessToken}` } }, TIMEOUTS.google);
+  const res = await getWithRetry(url, accessToken);
   if (res.status === 404 || res.status === 410) return null;
   if (!res.ok) throw new GoogleApiError(`events.get failed: ${res.status} ${await res.text()}`, res.status);
   return (await res.json()) as GoogleEvent;

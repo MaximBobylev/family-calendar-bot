@@ -6,3 +6,6 @@ coverage/
 reports/
 .env
 .claude/settings.local.json
+
+# Временные git worktree агентов (Claude Code) — не часть проекта
+.claude/worktrees/

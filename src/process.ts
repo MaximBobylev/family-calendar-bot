@@ -1,4 +1,5 @@
 // Обработка апдейта из inbox — общая для consumer'а очереди и /__test/drain.
+// Сделанное прошлыми попытками (tech-debt #5) — в ctx.progress: шаги STT/«🎙»/LLM его читают и пополняют.
 
 import { handleUpdate } from "./bot/handle-update";
 import type { AppContext } from "./bot/context";
@@ -8,7 +9,7 @@ export async function processInboxUpdate(ctx: AppContext, updateId: number): Pro
   const claim = await claimUpdate(ctx.db, updateId, ctx.clock.now());
   if (claim.status !== "claimed") return claim.status;
   try {
-    await handleUpdate(ctx, claim.update);
+    await handleUpdate({ ...ctx, progress: claim.progress }, claim.update);
     await completeUpdate(ctx.db, updateId, ctx.clock.now());
     return "processed";
   } catch (e) {

@@ -23,7 +23,7 @@ export async function setDigest(ctx: AppContext, user: User, time: string | null
   };
 }
 
-export const calendarsOf = (ctx: AppContext, user: User) => new GoogleCalendarProvider(ctx.config, ctx.db, user.id).calendars();
+export const calendarsOf = (ctx: AppContext, user: User) => new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock).calendars();
 
 export async function showSettings(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const s = mainScreen(ctx, user, await calendarsOf(ctx, user));

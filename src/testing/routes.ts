@@ -2,7 +2,8 @@
 //   POST /__test/clock  {"now": "2026-10-07T07:00:00Z"} — установить «сейчас»
 //   POST /__test/tick   — выполнить планировщик до текущего «сейчас» (задачи — сразу, без очереди)
 //   POST /__test/hourly — часовые работы cron: ретеншн и страховка дайджестов
-//   POST /__test/drain  — синхронно обработать все апдейты из inbox
+//   POST /__test/drain  — синхронно обработать все апдейты из inbox; упавшие — 500 со списком {failed: [update_id]}
+//   POST /__test/retry  — повторить упавшие апдейты (status 'failed'), как это сделал бы ретрай очереди (tech-debt #5)
 //   POST /__test/reset  — очистить состояние
 
 import type { AppContext } from "../bot/context";
@@ -65,10 +66,14 @@ export async function handleTestRoute(ctx: AppContext, request: Request, path: s
     case "/__test/cleanup":
       await cleanup(ctx.db, ctx.clock.now());
       return Response.json({ ok: true });
-    case "/__test/drain": {
-      const ids = await pendingUpdateIds(ctx.db);
-      for (const id of ids) await processInboxUpdate(ctx, id);
-      return Response.json({ ok: true, processed: ids.length });
+    case "/__test/drain":
+    case "/__test/retry": {
+      const ids = await pendingUpdateIds(ctx.db, path === "/__test/drain" ? "pending" : "failed");
+      const failed: { updateId: number; error: string }[] = [];
+      for (const id of ids) {
+        await processInboxUpdate(ctx, id).catch((e) => failed.push({ updateId: id, error: String(e) }));
+      }
+      return Response.json({ ok: !failed.length, processed: ids.length, failed }, { status: failed.length ? 500 : 200 });
     }
     case "/__test/reset":
       await ctx.db.batch(TABLES.map((tbl) => ctx.db.prepare(`DELETE FROM ${tbl}`)));

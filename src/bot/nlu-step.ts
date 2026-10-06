@@ -1,8 +1,10 @@
 // Шаг NLU: текст команды → интент через цепочку LLM (ADR-0002), с лимитом и записью в журнал (US-13).
 // Поправки интента по тексту (nlu/intent-overrides.ts) применяет routeIntent — они общие и для голоса.
+// Разобранный интент сохраняется в inbox: повтор апдейта после сбоя LLM снова не зовёт (tech-debt #5).
 
 import { calendarNamesOf } from "../db/accounts";
 import { recordUsage } from "../db/usage";
+import { saveIntent } from "../inbox";
 import type { User } from "../db/users";
 import { llmCostMicroUsd } from "../limits";
 import { type Intent, LlmChainError, parseIntentChain, type ParsedIntent } from "../nlu/intents";
@@ -12,6 +14,9 @@ import { t } from "./messages";
 
 /** Интент от LLM. null — уже ответили пользователю (лимит исчерпан, LLM недоступна). */
 export async function parseCommandIntent(ctx: AppContext, user: User, chatId: number, text: string): Promise<Intent | null> {
+  // Повтор после сбоя: этот текст уже разобран прошлой попыткой — ни лимита, ни вызова, ни записи в журнал
+  const done = ctx.progress?.nlu;
+  if (done && done.text === text) return done.intent as Intent;
   const calendars = await calendarNamesOf(ctx.db, user.id);
   if (!(await withinLimit(ctx, user, "llm", chatId))) return null;
   let parsed: ParsedIntent;
@@ -55,5 +60,6 @@ export async function parseCommandIntent(ctx: AppContext, user: User, chatId: nu
     await ctx.telegram.sendMessage(chatId, t("llmUnavailable", user.locale));
     return null;
   }
+  if (ctx.progress) await saveIntent(ctx.db, ctx.progress.updateId, { text, intent: parsed.intent });
   return parsed.intent;
 }

@@ -8,7 +8,8 @@
 Telegram → POST /telegram/webhook (src/index.ts)
   → bot/gate.ts (посторонние, группы — ответ сразу)
   → inbox.ts: запись в D1 (дедуп по update_id) → 200
-  → waitUntil: process.ts → bot/handle-update.ts        (очередь INBOX — страховка через 60 с)
+  → waitUntil: process.ts → bot/handle-update.ts        (очередь INBOX — страховка через 60 с и ретраи с backoff)
+       повтор после сбоя: ctx.progress из inbox (текст голосового, «🎙» отправлено, интент) — STT/LLM не повторяются
        handleUpdate (доступ, регистрация, «Подключить»)
          → bot/input/message.ts:handleCommand — текст / голос (input/voice.ts → stt/whisper.ts) / пересланное (forwarded.ts)
          → bot/dialog.ts:runCommand — /connect, /settings, ответы на вопросы (dialog_state), отмена карточек, «отмени последнее»,
@@ -16,12 +17,13 @@ Telegram → POST /telegram/webhook (src/index.ts)
          → bot/nlu-step.ts — nlu/intents.ts (LLM, nlu/llm.ts), лимит (input/limit.ts), журнал
          → bot/route-intent.ts:routeIntent — nlu/intent-overrides.ts → bot/{read-events,event-lookup,create-event,modify-event,delete-event}.ts
          → bot/callbacks.ts:handleCallback — нажатия кнопок: настройки, карточки pending_actions (CALENDAR_CARDS: kind → обработчик)
-       → calendar/google-provider.ts → google/calendar-api.ts → Google
+       → calendar/google-provider.ts → google/calendar-api.ts → Google   (access token — кеш в D1, 401 → обновить и повторить;
+                                                                          GET — один повтор на 5xx/429, net/retry.ts)
        → telegram/api.ts → Telegram
 cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в час — cleanup, ensureDigests
 ```
 
-В TEST_MODE обработку запускает раннер через `/__test/drain`, часы — `/__test/clock` (src/testing/routes.ts).
+В TEST_MODE обработку запускает раннер через `/__test/drain` (упавшие апдейты — 500 со списком), ретрай очереди — `/__test/retry`, часы — `/__test/clock` (src/testing/routes.ts).
 
 ## Где искать фичу
 
@@ -46,8 +48,8 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | Файл | Назначение |
 |---|---|
 | `index.ts` | Точка входа Worker: `fetch` (webhook, OAuth, админка, страницы, `/__test/*`), `queue` (inbox и задачи), `scheduled` (cron) |
-| `process.ts` | Обработка апдейта из inbox — общая для очереди, `waitUntil` и `/__test/drain` |
-| `inbox.ts` | Inbox в D1: дедупликация, атомарный захват (pending → processing → done) |
+| `process.ts` | Обработка апдейта из inbox — общая для очереди, `waitUntil` и `/__test/drain`; кладёт `progress` в контекст |
+| `inbox.ts` | Inbox в D1: дедупликация, атомарный захват (pending → processing → done), сделанные шаги для повтора (`UpdateProgress`: `saveTranscript`, `markHeardSent`, `saveIntent`; tech-debt #5) |
 | `scheduler.ts` | Планировщик `scheduled_jobs`: tick раздаёт в очередь, повторы с backoff, `cleanup` (ретеншн) |
 | `config.ts` | Конфиг из Env: URL внешних API, цепочки провайдеров, `USAGE_LIMITS`, `COST_ESTIMATES` |
 | `clock.ts` | Внедряемые часы; в TEST_MODE «сейчас» хранится в D1 |
@@ -111,20 +113,21 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | `dates/calendar.ts`, `timezone.ts`, `daily.ts` | Календарная арифметика и пояса; ввод пояса; «ЧЧ:ММ каждый день» |
 | **calendar/** | Доменная модель календаря (ADR-0003) |
 | `calendar/model.ts` | `CalendarEvent`, `CalendarProvider`, провайдер-нейтральные ошибки |
-| `calendar/google-provider.ts` | Адаптер Google: календари из D1, события из API, идемпотентное создание |
+| `calendar/google-provider.ts` | Адаптер Google: календари из D1 (один запрос на экземпляр), события из API, идемпотентное создание; access token — кеш в D1, 401 → обновить и повторить (tech-debt #13) |
 | `calendar/google-errors.ts` | Ошибки Google → ошибки модели |
 | `calendar/match.ts` | Сопоставление описания с названиями (падежи) |
 | `calendar/sync.ts` | Синхронизация списка календарей при переподключении |
 | **google/** | HTTP к Google |
-| `google/calendar-api.ts`, `auth.ts`, `oauth.ts`, `errors.ts` | Calendar API; access token; OAuth-ссылка, обмен кода, отзыв; ошибки |
+| `google/calendar-api.ts`, `auth.ts`, `oauth.ts`, `errors.ts` | Calendar API (GET — с одним повтором); access token; OAuth-ссылка, обмен кода, отзыв; ошибки |
+| `google/token-cache.ts` | Срок кеша access token: годен до 5 мин до истечения (чистый, `test/google-reliability.test.ts`) |
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts` |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts` |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 утренний дайджест |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
-| **net/** | `fetch.ts` — fetch с таймаутом |
+| **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
 | **testing/** | `routes.ts` — `/__test/{clock,tick,hourly,drain,reset}` (только TEST_MODE и не https) |
 
 ## Вне src/

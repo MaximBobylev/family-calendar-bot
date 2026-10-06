@@ -49,6 +49,14 @@ type Step =
   /** Открыть callback, придержанный шагом oauth с hold_callback (по email согласия), в браузере browser. */
   | { oauth_callback: { of: string; browser?: string; without_bind_cookie?: boolean; expect_status: number; page_contains?: string[] } }
   | { google_revoke: string }
+  /** Выданные аккаунту access token Google перестают приниматься (401) — как истёкший раньше срока или отозванный. */
+  | { google_expire_access: string }
+  /** Сколько раз бот обновлял access token (POST /token, grant_type=refresh_token) с начала сценария. */
+  | { expect_token_refreshes: number }
+  /** Ближайшие times (1) вызовов Telegram method (sendMessage) с этим текстом отвечают ошибкой status (500). */
+  | { telegram_fails: { text_contains: string; method?: string; status?: number; times?: number } }
+  /** Ретрай очереди: повторить упавшие апдейты (tech-debt #5); expect_failure — снова упадёт. */
+  | { queue_retry: true | { expect_failure?: boolean } }
   /** Отзывы токена ботом (US-03): сколько было и какой токен отозван последним. */
   | { expect_token_revocations: { count: number; last?: string } }
   /** Эндпоинт отзыва токена у Google отвечает ошибкой. */
@@ -71,6 +79,8 @@ type Step =
         reply_to_question?: boolean;
         /** Пересланное голосовое (forward_origin) — не команда пользователя (US-10). */
         forwarded?: boolean;
+        /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
+        expect_failure?: boolean;
         heard?: { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number };
       };
     }
@@ -135,6 +145,8 @@ interface TelegramInput {
   username?: string;
   /** Пересланное сообщение (forward_origin от другого пользователя) — не команда (US-10). */
   forwarded?: boolean;
+  /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
+  expect_failure?: boolean;
 }
 
 interface ExpectedEvent {
@@ -353,8 +365,16 @@ async function runScenario(s: Scenario): Promise<void> {
     const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
     const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
     if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
-    const drain = await post(`${SUT}/__test/drain`, {});
-    if (!drain.ok) throw new AssertionError(`${where}: drain → ${drain.status} ${await drain.text()}`);
+    await drainInbox("drain", where, t.expect_failure);
+  };
+
+  /** Обработать inbox (drain) или повторить упавшие (retry); expectFailure — обработка должна упасть. */
+  const drainInbox = async (kind: "drain" | "retry", where: string, expectFailure = false) => {
+    const res = await post(`${SUT}/__test/${kind}`, {});
+    const body = await res.text();
+    if (expectFailure ? res.status !== 500 : !res.ok) {
+      throw new AssertionError(`${where}: ${kind} → ${res.status}${expectFailure ? ", expected the update to fail" : ""} ${body}`);
+    }
   };
 
   // Ответы на нажатия (answerCallbackQuery) проверяются отдельным шагом, в expect_telegram их нет
@@ -487,6 +507,7 @@ async function runScenario(s: Scenario): Promise<void> {
           voice: { file_id: fileId, duration: v.duration ?? 3 },
           ...(replyTo ? { reply_to: replyTo } : {}),
           ...(v.forwarded ? { forwarded: true } : {}),
+          ...(v.expect_failure ? { expect_failure: true } : {}),
         },
         where,
       );
@@ -635,6 +656,16 @@ async function runScenario(s: Scenario): Promise<void> {
         if ((got[provider] ?? 0) !== n)
           throw new AssertionError(`${where}: ${provider} called ${got[provider] ?? 0} time(s), expected ${n}; all: ${JSON.stringify(got)}`);
       }
+    } else if ("google_expire_access" in step) {
+      await post(`${FAKES}/__fake/google/expire-access`, { email: step.google_expire_access });
+    } else if ("expect_token_refreshes" in step) {
+      const list = (await (await fetch(`${FAKES}/__fake/google/token-requests`)).json()) as { grant_type?: string }[];
+      const n = list.filter((r) => r.grant_type === "refresh_token").length;
+      if (n !== step.expect_token_refreshes) throw new AssertionError(`${where}: ${n} access token refresh(es), expected ${step.expect_token_refreshes}`);
+    } else if ("telegram_fails" in step) {
+      await post(`${FAKES}/__fake/telegram/fail`, step.telegram_fails);
+    } else if ("queue_retry" in step) {
+      await drainInbox("retry", where, step.queue_retry !== true && !!step.queue_retry.expect_failure);
     } else if ("expect_no_telegram" in step) {
       const calls = await newCalls();
       if (calls.length) throw new AssertionError(`${where}: expected no Telegram calls, got ${JSON.stringify(calls.map((c) => [c.method, c.body.text]))}`);

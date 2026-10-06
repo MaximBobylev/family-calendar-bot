@@ -3,7 +3,8 @@
 //   /telegram/bot<token>/<method>   — фейк Telegram Bot API: запоминает вызовы, отвечает успехом
 //   /google-oauth/token             — обмен кода на токены: код выдан /__fake/google/authorize, одноразовый;
 //                                     был code_challenge — нужен верный code_verifier (PKCE S256), иначе invalid_grant
-//   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>")
+//   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>", после refresh — "at-<email>~<n>";
+//                                     отозванный доступ и «просроченные» expire-access токены — 401)
 //   /llm/v1/chat/completions        — фейк LLM: ответ берётся из фикстур по тексту пользователя
 //   /llm-backup/v1/chat/completions — запасной провайдер LLM: те же фикстуры (цепочка провайдеров)
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
@@ -15,7 +16,8 @@
 //   GET  /__fake/telegram/calls     — все вызовы Telegram с последнего сброса
 //   POST /__fake/google/accounts    — завести Google-аккаунт: {email, calendars: [...]}
 //   POST /__fake/google/authorize   — «согласие на экране Google»: {email, code_challenge?, code_challenge_method?} → {code}
-//   GET  /__fake/google/token-requests — все запросы обмена кода (для проверки параметров)
+//   GET  /__fake/google/token-requests — все запросы к /token: обмен кода и refresh (grant_type) — для проверки параметров
+//   POST /__fake/google/expire-access — {email}: выданные аккаунту access token больше не принимаются (401), refresh — да
 //   POST /__fake/google/revoke      — отозвать доступ аккаунта: {email}
 //   POST /__fake/llm/fixtures       — {"<текст>": {tool, args} | {tools: [...]} | {error: status}}
 //   GET  /__fake/llm/requests       — все запросы к LLM
@@ -25,7 +27,11 @@
 //   GET  /__fake/google/deletes     — журнал DELETE событий: {calendar, id, sendUpdates}
 //   POST /__fake/google/touch       — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
-//   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой
+//   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой;
+//   list_error_times: <n> — первые n запросов events.list отвечают 503 (проверка повтора GET)
+//   POST /__fake/telegram/fail      — {text_contains, method?, status?, times?}: ближайшие times (1) вызовов method
+//                                     (sendMessage), чей текст содержит text_contains, отвечают ошибкой status (500)
+//                                     и не записываются в calls — сообщение не доставлено
 //   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
 //   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
 //   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai | google-write, status}: провайдер отвечает
@@ -65,6 +71,8 @@ interface GoogleCalendar {
   events?: GoogleEvent[];
   /** events.list этого календаря отвечает этой ошибкой (удалён, нет доступа, 5xx). */
   list_error?: number;
+  /** Столько ближайших events.list отвечают 503 — временный сбой. */
+  list_error_times?: number;
 }
 
 type LlmFixture =
@@ -75,7 +83,12 @@ const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "test-client-secret";
 
 let telegramCalls: TelegramCall[] = [];
 let nextMessageId = 1;
-let googleAccounts = new Map<string, { calendars: GoogleCalendar[]; revoked?: boolean }>();
+/** accessValidFrom — access token с номером меньше не принимаются (expire-access). */
+let googleAccounts = new Map<string, { calendars: GoogleCalendar[]; revoked?: boolean; accessValidFrom?: number }>();
+/** Номер последнего выданного по refresh access token (at-<email>~<n>). */
+let accessSeq = 0;
+/** Сбои Telegram, заказанные раннером (POST /__fake/telegram/fail). */
+let telegramFailures: { method: string; text: string; status: number; times: number }[] = [];
 let tokenRequests: Record<string, string>[] = [];
 /** Выданные коды авторизации: кому и с каким code_challenge (PKCE). */
 let authCodes = new Map<string, { email: string; challenge?: string; method?: string; used: boolean }>();
@@ -136,9 +149,12 @@ async function readForm(req: IncomingMessage): Promise<Record<string, string>> {
   return Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString("utf8")));
 }
 
+/** Аккаунт по access token; отозванный доступ и «просроченный» токен — undefined (401), как у Google. */
 function googleAccountByToken(req: IncomingMessage) {
-  const token = /^Bearer at-(.+)$/.exec(req.headers.authorization ?? "")?.[1];
-  return token ? googleAccounts.get(token) : undefined;
+  const m = /^Bearer at-([^~]+)(?:~(\d+))?$/.exec(req.headers.authorization ?? "");
+  const account = m ? googleAccounts.get(m[1]!) : undefined;
+  if (!account || account.revoked) return undefined;
+  return Number(m![2] ?? 0) < (account.accessValidFrom ?? 0) ? undefined : account;
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -195,6 +211,8 @@ const server = createServer(async (req, res) => {
       deletes = [];
       revocations = [];
       revokeFailStatus = 0;
+      accessSeq = 0;
+      telegramFailures = [];
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
@@ -212,6 +230,17 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/__fake/google/token-requests") return send(res, 200, tokenRequests);
     if (url.pathname === "/__fake/google/revocations") return send(res, 200, revocations);
+    if (url.pathname === "/__fake/google/expire-access" && req.method === "POST") {
+      const { email } = (await readJson(req)) as { email: string };
+      const acc = googleAccounts.get(email);
+      if (acc) acc.accessValidFrom = accessSeq + 1;
+      return send(res, 200, { ok: !!acc });
+    }
+    if (url.pathname === "/__fake/telegram/fail" && req.method === "POST") {
+      const b = (await readJson(req)) as { text_contains: string; method?: string; status?: number; times?: number };
+      telegramFailures.push({ method: b.method ?? "sendMessage", text: b.text_contains, status: b.status ?? 500, times: b.times ?? 1 });
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/__fake/google/revoke-fails" && req.method === "POST") {
       revokeFailStatus = Number((await readJson(req)).status ?? 0);
       return send(res, 200, { ok: true });
@@ -366,7 +395,7 @@ const server = createServer(async (req, res) => {
         const email = /^rt-(.+)$/.exec(form.refresh_token ?? "")?.[1];
         const acc = email ? googleAccounts.get(email) : undefined;
         if (!acc || acc.revoked) return send(res, 400, { error: "invalid_grant", error_description: "Token has been expired or revoked." });
-        return send(res, 200, { access_token: `at-${email}`, expires_in: 3599, token_type: "Bearer" });
+        return send(res, 200, { access_token: `at-${email}~${++accessSeq}`, expires_in: 3599, token_type: "Bearer" });
       }
       const issued = authCodes.get(form.code ?? "");
       if (form.grant_type !== "authorization_code" || !issued || issued.used || !googleAccounts.has(issued.email)) {
@@ -401,7 +430,7 @@ const server = createServer(async (req, res) => {
         revocations.push({ token, status: revokeFailStatus });
         return send(res, revokeFailStatus, { error: "backend_error" });
       }
-      const acc = googleAccounts.get(/^(?:rt|at)-(.+)$/.exec(token)?.[1] ?? "");
+      const acc = googleAccounts.get(/^(?:rt|at)-([^~]+)/.exec(token)?.[1] ?? "");
       const status = acc && !acc.revoked ? 200 : 400;
       revocations.push({ token, status });
       if (!acc || acc.revoked) return send(res, 400, { error: "invalid_token", error_description: "Token expired or revoked" });
@@ -413,7 +442,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/google/calendar/v3/users/me/calendarList") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
-      return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, list_error: _l, ...c }) => c) });
+      return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, list_error: _l, list_error_times: _t, ...c }) => c) });
     }
     const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
     if (evOne && req.method === "DELETE") {
@@ -479,6 +508,10 @@ const server = createServer(async (req, res) => {
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (cal.list_error) return send(res, cal.list_error, { error: { code: cal.list_error, message: "fake calendar error" } });
+      if (cal.list_error_times) {
+        cal.list_error_times--;
+        return send(res, 503, { error: { code: 503, message: "fake transient error" } });
+      }
       const tz = url.searchParams.get("timeZone") ?? cal.timeZone ?? "UTC";
       const min = Date.parse(url.searchParams.get("timeMin") ?? "1970-01-01T00:00:00Z");
       const max = Date.parse(url.searchParams.get("timeMax") ?? "2100-01-01T00:00:00Z");
@@ -495,6 +528,11 @@ const server = createServer(async (req, res) => {
     const tg = /^\/telegram\/bot([^/]+)\/(\w+)$/.exec(url.pathname);
     if (tg) {
       const body = await readJson(req);
+      const failure = telegramFailures.find((f) => f.times > 0 && f.method === tg[2] && String(body.text ?? "").includes(f.text));
+      if (failure) {
+        failure.times--;
+        return send(res, failure.status, { ok: false, error_code: failure.status, description: "fake telegram failure" });
+      }
       const result = telegramResult(tg[2]!, body);
       const messageId = (result as { message_id?: number }).message_id;
       telegramCalls.push({ token: tg[1]!, method: tg[2]!, body, ...(messageId ? { messageId } : {}) });

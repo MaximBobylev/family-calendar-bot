@@ -15,7 +15,7 @@ import { t } from "./messages";
  */
 export async function withCalendar(ctx: AppContext, user: User, chatId: number, action: (provider: GoogleCalendarProvider) => Promise<void>): Promise<boolean> {
   try {
-    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id));
+    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock));
     return true;
   } catch (e) {
     console.error("calendar action failed", e instanceof Error ? e.message : e);

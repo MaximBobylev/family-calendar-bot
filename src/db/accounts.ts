@@ -122,7 +122,12 @@ export async function saveGoogleAccount(
     );
     await db.batch([
       db
-        .prepare("UPDATE provider_accounts SET credentials_enc = ?, granted_scopes = ?, email_hash = ? WHERE id = ?")
+        // Новый refresh token — прежний кешированный access token сбрасываем (tech-debt #13)
+        .prepare(
+          `UPDATE provider_accounts
+           SET credentials_enc = ?, granted_scopes = ?, email_hash = ?, access_token_enc = NULL, access_expires_at = NULL
+           WHERE id = ?`,
+        )
         .bind(credentialsEnc, args.scopes, args.emailHash, accountId),
       // Исчезнувшие календари — вместе с их алиасами (ON DELETE CASCADE)
       db
@@ -176,6 +181,27 @@ export async function saveGoogleAccount(
     relinked: false,
     ...(existing ? { replaced: { accountId: existing.id, credentialsEnc: existing.credentials_enc, emailHash: existing.email_hash } } : {}),
   };
+}
+
+/** Секреты аккаунта Google для вызовов API: refresh token и кешированный access token (tech-debt #13), всё зашифровано. */
+export interface GoogleTokens {
+  accountId: string;
+  credentialsEnc: string;
+  accessTokenEnc: string | null;
+  accessExpiresAt: number | null;
+}
+
+export async function googleTokens(db: D1Database, userId: string): Promise<GoogleTokens | null> {
+  const row = await db
+    .prepare("SELECT id, credentials_enc, access_token_enc, access_expires_at FROM provider_accounts WHERE user_id = ? AND provider = 'google'")
+    .bind(userId)
+    .first<{ id: string; credentials_enc: string; access_token_enc: string | null; access_expires_at: number | null }>();
+  return row ? { accountId: row.id, credentialsEnc: row.credentials_enc, accessTokenEnc: row.access_token_enc, accessExpiresAt: row.access_expires_at } : null;
+}
+
+/** Запомнить свежий access token аккаунта (зашифрован, AAD «access:<id>»). Аккаунт удалён тем временем — ничего. */
+export async function saveAccessToken(db: D1Database, accountId: string, accessTokenEnc: string, expiresAt: number): Promise<void> {
+  await db.prepare("UPDATE provider_accounts SET access_token_enc = ?, access_expires_at = ? WHERE id = ?").bind(accessTokenEnc, expiresAt, accountId).run();
 }
 
 export async function googleCredentials(db: D1Database, userId: string): Promise<StoredCredentials | null> {
