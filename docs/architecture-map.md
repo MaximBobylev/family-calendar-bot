@@ -27,12 +27,13 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 
 | Нужно | Смотреть |
 |---|---|
+| Разрешение черновика создания, расчёт изменения (чистые, с юнит-тестами) | `src/bot/create-logic.ts` (`test/create-logic.test.ts`), `src/bot/modify-logic.ts` |
 | Новый интент / поле интента | `src/nlu/intents.ts` (схемы tools, промпт), `docs/intents.md`, `testdata/nlu/intents.yaml`; маршрут — `routeIntent` в `src/bot/route-intent.ts` |
 | Разбор дат, длительностей, повторений | `src/dates/*` + `testdata/dates/*.yaml` (правила — `docs/date-rules.md`) |
 | Даты из всего сообщения, название без дат | `src/dates/extract.ts` + `testdata/extract/*.yaml` |
-| Тексты ответов бота | `src/bot/messages.ts` (RU/EN), форматирование — `src/bot/format.ts`, `format-events.ts` |
+| Тексты ответов бота | `src/bot/messages/*.ts` — словарь RU/EN по областям (новый текст — в файл своей области), `t()` и `MessageKey` — `src/bot/messages.ts`; форматирование — `src/bot/format.ts`, `format-events.ts` |
 | Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`) |
-| Настройки пользователя | `src/bot/settings.ts`, `src/db/settings.ts` |
+| Настройки пользователя | `src/bot/settings/*` (экраны, кнопки, ввод текстом, подписи), `src/db/settings.ts` |
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
 | Внешние URL, лимиты, цены | `src/config.ts` |
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
@@ -68,17 +69,26 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | `bot/with-typing.ts` | `withTyping`: «печатает…» на время обработки |
 | `bot/context.ts` | `AppContext`: конфиг, часы, D1, Telegram |
 | `bot/gate.ts` | Ранний фильтр в webhook (allowlist, только личные чаты) |
-| `bot/create-event.ts` | US-30/31/32: создание, варианты дат, «во сколько?», пересечения, серии |
-| `bot/modify-event.ts` | US-40/41/42/43: перенос, переименование, место, описание, напоминания, «эту/всю серию» |
+| `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
+| `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
+| `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
+| `bot/modify-event.ts` | US-40/41/42/43: сценарий изменения — проверки, карточка, подтверждение «эту/всю серию», отмена |
+| `bot/modify-logic.ts` | Чистый `computeChange`: перенос, длительность, переименование, место, описание, напоминания; тип карточки |
+| `bot/modify-view.ts` | Карточка «Было → Стало», кнопки, итог изменения |
 | `bot/delete-event.ts` | US-50: удаление, чужая встреча → отклонить, серии |
 | `bot/find-event.ts` | Поиск события по описанию для изменения/удаления; «её», «вторую», «следующую» |
 | `bot/event-lookup.ts` | US-21: «следующая встреча», «когда встреча с Петей?» |
 | `bot/read-events.ts` | US-20: расписание за период |
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
-| `bot/messages.ts` | Все тексты бота RU/EN |
+| `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
-| `bot/settings.ts` | `/settings`: меню кнопками, пояс, алиасы, дайджест |
+| `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык) |
+| `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
+| `bot/settings/screens.ts` | Экраны меню (текст + кнопки), пресеты значений |
+| `bot/settings/common.ts` | Показ меню, список календарей, смена сводки, «Подключить» (`sendReconnect`) |
+| `bot/settings/labels.ts` | Подписи: длительность, напоминания («за 1 ч», «накануне в 9:00») |
 | `bot/undo.ts` | US-61: отмена последнего действия |
 | `bot/disconnect.ts` | US-03: `/disconnect` — отзыв токена и удаление данных |
 | `bot/forwarded.ts` | US-10: пересланное — не команда, карточка «Выполнить как команду?» |

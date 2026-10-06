@@ -15,7 +15,7 @@ import { FORWARD_CARD, confirmForwarded, type ForwardCardPayload } from "./forwa
 import { parseCallbackData } from "./keyboards";
 import { t } from "./messages";
 import { MODIFY_CARD, confirmModify, proposeChange } from "./modify-event";
-import { handleSettingsCallback, parseSettingsCallback } from "./settings";
+import { handleSettingsCallback, parseSettingsCallback } from "./settings/callbacks";
 import { UNDO_CARD, performUndo } from "./undo";
 import { withCalendar } from "./with-calendar";
 import { withTyping } from "./with-typing";

@@ -125,7 +125,7 @@ function downstream(c: Case, intent: Intent): Outcome {
       eff.title,
       [rec?.span, rec ? eff.start : undefined, startText, durationText].filter((x): x is string => !!x),
     );
-    // create-event.ts: диапазон дат без времени («с 5 по 8 декабря») — всегда на весь день, флаг не нужен
+    // create-logic.ts: диапазон дат без времени («с 5 по 8 декабря») — всегда на весь день, флаг не нужен
     const parsed = startText ? parseDateFragment({ text: startText, kind: "point", now, tz }) : undefined;
     const values = !parsed || "error" in parsed ? [] : "ambiguous" in parsed ? parsed.ambiguous : [parsed];
     const dateRange = values.some((v) => "range" in v && !v.range.from.includes("T"));

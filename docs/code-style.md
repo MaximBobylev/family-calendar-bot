@@ -12,7 +12,7 @@
 | `docker compose run --rm test npm run -s format` | отформатировать (правит файлы) |
 | `docker compose run --rm test npm run -s format:check` | проверить формат, ничего не меняя |
 | `docker compose run --rm test npm run -s check` | typecheck + `biome ci` (линтер и формат) — то, что гоняется перед деплоем |
-| `docker compose run --rm test npx biome check --write src/bot/settings.ts` | формат + безопасные автоисправления для конкретных файлов |
+| `docker compose run --rm test npx biome check --write src/bot/settings/screens.ts` | формат + безопасные автоисправления для конкретных файлов |
 
 `scripts/deploy.ts` перед выкладкой запускает typecheck, `biome ci` и тесты.
 
@@ -71,9 +71,9 @@ SQL — строкой в `db.prepare(...)`, только prepared statements.
 Это структурные изменения, не косметика, — отдельными задачами:
 
 1. ✅ *сделано 2026-10-05* — **`src/bot/handle-update.ts` разделён** (690 → 61 строка): `input/{message,voice,limit}.ts` → `dialog.ts` → `nlu-step.ts` → `route-intent.ts`; `callbacks.ts`, `voice-rehear.ts`, `with-calendar.ts`, `with-typing.ts`. Не сделано: `to-command` как чистая функция с YAML-кейсами (сейчас `routeIntent` сразу вызывает обработчики). *tech-debt #9.*
-2. **Логика отдельно от рендера** в `create-event.ts`, `modify-event.ts`, `settings.ts` (≈430/300/410 строк): `*-logic.ts` (findCandidates, computeChange, resolveDraft) и `*-view.ts`. *tech-debt #10.*
+2. ◐ *2026-10-05* — **Логика отдельно от рендера**: `create-event.ts` (434 → 172 строки) → `create-logic.ts` (resolveDraft, серии, календарь; юнит-тесты `test/create-logic.test.ts`) + `create-view.ts`; `modify-event.ts` (377 → 200) → `modify-logic.ts` (computeChange) + `modify-view.ts`; `settings.ts` (409) → `settings/{screens,callbacks,input,common,labels}.ts`; словарь `messages.ts` (407 → 32) → `messages/*.ts` по областям. Не сделано: `findCandidates` в `find-event.ts`; юнит-тесты `computeChange` (тип запроса живёт в `find-event.ts`, который тянет типы Workers). *tech-debt #10.*
 3. **Реестр карточек** `kind → {guard, handler}` с версией payload вместо `JSON.parse as` и `action as Parameters<typeof confirmX>[3]`. ◐ Первый шаг: таблица `CALENDAR_CARDS` (kind → обработчик) в `bot/callbacks.ts`; касты и проверки payload остались. *tech-debt #15.*
-4. **Сырой SQL только в `src/db/*`**: сейчас запросы есть в `scheduler.ts`, `inbox.ts`, `jobs/digest.ts`, `calendar/google-provider.ts`, `bot/settings.ts`, `bot/read-events.ts` (названия календарей из `handle-update.ts` перенесены в `db/accounts.ts:calendarNamesOf`). *tech-debt «Низкий», архитектура #20.*
-5. **Общие константы времени** (`MINUTE_MS`, `HOUR_MS`, `DAY_MS`, `DAY_MIN`): сейчас локальные копии в `dates/calendar.ts`, `scheduler.ts`, `limits.ts`, `bot/find-event.ts`, `bot/settings.ts`. Нужен модуль без зависимостей (`src/time.ts`), импортируемый и из `src/dates` (он портируемый — только константы).
+4. **Сырой SQL только в `src/db/*`**: сейчас запросы есть в `scheduler.ts`, `inbox.ts`, `jobs/digest.ts`, `calendar/google-provider.ts`, `bot/settings/common.ts`, `bot/read-events.ts` (названия календарей из `handle-update.ts` перенесены в `db/accounts.ts:calendarNamesOf`). *tech-debt «Низкий», архитектура #20.*
+5. **Общие константы времени** (`MINUTE_MS`, `HOUR_MS`, `DAY_MS`, `DAY_MIN`): сейчас локальные копии в `dates/calendar.ts`, `scheduler.ts`, `limits.ts`, `bot/find-event.ts`, `bot/settings/labels.ts`. Нужен модуль без зависимостей (`src/time.ts`), импортируемый и из `src/dates` (он портируемый — только константы).
 6. **`CalendarEvent` как union `Timed | AllDay`** — уберёт большинство `!` и позволит включить `noNonNullAssertion`. *tech-debt «Низкий».*
 7. **Ширина строки**: после пунктов 1–3 можно опустить до 120–140 — длинные строки в основном в сценариях `bot/*`.

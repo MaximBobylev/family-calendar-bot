@@ -1,130 +1,24 @@
-// US-40 / US-41 / US-43: перенос и изменение события.
-// Поиск события по описанию → расчёт изменений (детерминированно, по фрагментам из текста) →
-// карточка «Было → Стало» → подтверждение. Повторяющиеся — «только эту / все».
+// US-40 / US-41 / US-43: перенос и изменение события — сценарий (I/O).
+// Поиск события → расчёт изменений (modify-logic.ts) → карточка «Было → Стало» (modify-view.ts) → подтверждение.
+// Повторяющиеся — «только эту / все».
 
 import { findCalendarByName } from "../calendar/match";
-import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventRef, type EventReminders } from "../calendar/model";
-import { parseDateFragment } from "../dates";
-import { addMinutes, formatMoment, minutesBetween, parseLocal, utcToLocal, type Moment } from "../dates/calendar";
-import { durationToMinutes } from "../dates/duration";
-import { fragmentParts } from "../dates/point";
-import { tokenize } from "../dates/tokenize";
+import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventReminders } from "../calendar/model";
+import { addMinutes, minutesBetween, utcToLocal, type Moment } from "../dates/calendar";
 import { attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
-import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
-import { locateEvent, type EventRequest } from "./find-event";
-import { escapeHtml, spanLabel } from "./format";
-import { callbackData } from "./keyboards";
+import { locateEvent } from "./find-event";
+import { escapeHtml } from "./format";
 import { attachUndoMessage, recordUndo, type UndoRecord } from "./undo";
 import { t } from "./messages";
-import { beforeLabel } from "./settings";
+import { computeChange, DEFAULT_REMINDERS, type ModifyCardPayload, type ModifyRequest } from "./modify-logic";
+import { modifiedDetails, modifyCard } from "./modify-view";
 
 export const MODIFY_CARD = "modify";
-export type ModifyRequest = EventRequest;
-
-/** Вариант изменения — хранится в карточке. */
-interface Change {
-  start?: Moment;
-  end?: Moment;
-  title?: string;
-  /** "" — убрать. */
-  location?: string;
-  /** "" — убрать. */
-  description?: string;
-  reminders?: EventReminders;
-}
-
-/** Нет напоминаний у события в Google — значит, как в календаре. */
-const DEFAULT_REMINDERS: EventReminders = { useDefault: true, overrides: [] };
-/** Сколько описания показываем в карточке. */
-const MAX_SHOWN_DESCRIPTION = 200;
-
-interface ModifyCardPayload {
-  chatId: number;
-  tz: string;
-  ref: EventRef;
-  seriesId?: string;
-  etag?: string;
-  title: string;
-  oldLocation?: string;
-  oldDescription?: string;
-  oldReminders?: EventReminders;
-  oldStart: Moment;
-  oldEnd: Moment;
-  notify: boolean;
-  options: Change[];
-  /** Кнопки «только эту / все» вместо «подтвердить». */
-  askScope: boolean;
-}
 
 const plus = addMinutes;
 const diff = minutesBetween;
-
-// --- Расчёт изменений ---------------------------------------------------------
-
-type ChangeResult = { options: Change[] } | { error: "nothingToChange" | "notUnderstood" | "inPast" | "allDayTime" };
-
-function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, tz: string): ChangeResult {
-  const s = req.spans;
-  // «Добавь описание» дописывает к существующему, «измени описание» — заменяет (US-41)
-  const description =
-    req.newDescription !== undefined && req.appendDescription && e.description && req.newDescription
-      ? `${e.description}\n${req.newDescription}`
-      : req.newDescription;
-  const base: Change = {
-    ...(req.newTitle ? { title: req.newTitle } : {}),
-    ...(req.newLocation !== undefined ? { location: req.newLocation } : {}),
-    ...(description !== undefined ? { description } : {}),
-    ...(req.reminders ? { reminders: req.reminders } : {}),
-  };
-  const wantsTime = !!(s.shift || s.target || s.duration);
-  if (!wantsTime) return Object.keys(base).length ? { options: [base] } : { error: "nothingToChange" };
-  if (e.allDay) return { error: "allDayTime" };
-
-  const start = e.start!;
-  const end = e.end!;
-  const length = diff(end, start);
-  const options: Change[] = [];
-
-  if (s.shift) {
-    const parsed = parseDateFragment({ text: s.shift, kind: "shift", now: formatMoment(nowLocal), tz });
-    const minutes = "shift" in parsed ? durationToMinutes(parsed.shift) : null;
-    if (minutes === null) return { error: "notUnderstood" };
-    options.push({ ...base, start: plus(start, minutes), end: plus(end, minutes) });
-  } else if (s.target) {
-    const parts = fragmentParts(tokenize(s.target));
-    if (!parts) return { error: "notUnderstood" };
-    // Только время («на 11») — тот же день события; только дата («на пятницу») — то же время
-    const now = parts.hasDate ? formatMoment(nowLocal) : formatMoment({ day: start.day, minutes: 0 });
-    const parsed = parseDateFragment({ text: s.target, kind: "point", now, tz });
-    if ("error" in parsed) return { error: parsed.error === "in_past" ? "inPast" : "notUnderstood" };
-    for (const v of "ambiguous" in parsed ? parsed.ambiguous : [parsed]) {
-      if ("datetime" in v) {
-        const ns = parseLocal(v.datetime);
-        options.push({ ...base, start: ns, end: plus(ns, length) });
-      } else if ("interval" in v) {
-        options.push({ ...base, start: parseLocal(v.interval.start), end: parseLocal(v.interval.end) });
-      } else if ("date" in v) {
-        const day = parseLocal(`${typeof v.date === "string" ? v.date : v.date.date}T00:00`).day;
-        const ns = { day, minutes: start.minutes };
-        options.push({ ...base, start: ns, end: plus(ns, length) });
-      }
-    }
-    if (!options.length) return { error: "notUnderstood" };
-  } else {
-    options.push({ ...base, start, end });
-  }
-
-  if (s.duration) {
-    const parsed = parseDateFragment({ text: s.duration, kind: "duration", now: formatMoment(nowLocal), tz });
-    const minutes = "duration" in parsed && parsed.duration !== "all_day" ? durationToMinutes(parsed.duration) : null;
-    if (!minutes) return { error: "notUnderstood" };
-    for (const o of options) o.end = plus(o.start!, minutes);
-  }
-  if (options.every((o) => o.start && diff(o.start, nowLocal) <= 0)) return { error: "inPast" };
-  return { options: options.filter((o) => !o.start || diff(o.start, nowLocal) > 0) };
-}
 
 // --- Сценарий ---------------------------------------------------------------
 
@@ -202,42 +96,8 @@ export async function proposeChange(
   }
 
   const id = await createPendingAction(ctx.db, { conversationId, userId: user.id, kind: MODIFY_CARD, payload, now: ctx.clock.now() });
-  const o = res.options[0]!;
-  const lines = [`${t(o.start ? "modifyMoveConfirm" : "modifyConfirm", locale)}`, "", `<b>${escapeHtml(e.title)}</b>`];
-  if (res.options.length === 1 && o.start) {
-    lines.push(
-      `${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, today, locale)}`,
-      `${t("now", locale)}: ${spanLabel(o.start, o.end!, today, locale)}`,
-    );
-  }
-  if (o.title) lines.push(`${t("newTitle", locale)}: <b>${escapeHtml(o.title)}</b>`);
-  lines.push(...detailLines(o, payload, locale));
-  if (e.recurring && !payload.askScope && req.scope !== "all") lines.push(t("onlyThisOccurrence", locale));
-  if (payload.notify) lines.push("", t("attendeesNotified", locale));
-
-  let buttons: InlineKeyboardButton[][];
-  if (res.options.length > 1) {
-    buttons = [
-      ...res.options.map((x, i) => [{ text: spanLabel(x.start!, x.end!, today, locale), callback_data: callbackData(id, `c${i}`) }]),
-      [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
-    ];
-  } else if (payload.askScope) {
-    buttons = [
-      [
-        { text: t("onlyThis", locale), callback_data: callbackData(id, "c0") },
-        { text: t("wholeSeries", locale), callback_data: callbackData(id, "all") },
-      ],
-      [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
-    ];
-  } else {
-    buttons = [
-      [
-        { text: t("confirmButton", locale), callback_data: callbackData(id, req.scope === "all" ? "all" : "c0") },
-        { text: t("cancelButton", locale), callback_data: callbackData(id, "x") },
-      ],
-    ];
-  }
-  const sent = await ctx.telegram.sendMessage(chatId, lines.join("\n"), { inline_keyboard: buttons }, { html: true });
+  const { text, buttons } = modifyCard(e, res.options, payload, req.scope, id, today, locale);
+  const sent = await ctx.telegram.sendMessage(chatId, text, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
@@ -324,12 +184,7 @@ export async function confirmModify(
     throw e;
   }
 
-  const details = [`<b>${escapeHtml(o.title ?? p.title)}</b>`];
-  if (o.start) details.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
-  if (o.location) details.push(`📍 ${escapeHtml(o.location)}`);
-  if (o.description) details.push(`📝 ${escapeHtml(clip(o.description))}`);
-  if (o.reminders) details.push(`🔔 ${remindersText(o.reminders, locale)}`);
-  if (wholeSeries) details.push(t("wholeSeriesChanged", locale));
+  const details = modifiedDetails(o, p, wholeSeries, today, locale);
   const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
   if (action.messageId) {
     await ctx.telegram.editMessageText(
@@ -342,36 +197,4 @@ export async function confirmModify(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
-}
-
-// --- Детали в карточке ---------------------------------------------------------
-
-const clip = (s: string) => (s.length > MAX_SHOWN_DESCRIPTION ? `${s.slice(0, MAX_SHOWN_DESCRIPTION)}…` : s);
-
-/** «за 1 ч, за 1 дн. (на почту)», «без напоминаний», «как в календаре». */
-function remindersText(r: EventReminders, locale: string): string {
-  if (r.useDefault) return t("remindersCalendarDefault", locale);
-  if (r.overrides.length === 0) return t("remindersNone", locale);
-  return [...r.overrides]
-    .sort((a, b) => a.minutes - b.minutes)
-    .map((x) => `${beforeLabel(x.minutes, locale)}${x.method === "email" ? ` ${t("reminderByEmail", locale)}` : ""}`)
-    .join(", ");
-}
-
-/** Строки «Было → Стало» по изменённым деталям: место, описание, напоминания (US-41, US-42). */
-function detailLines(o: Change, p: ModifyCardPayload, locale: string): string[] {
-  const lines: string[] = [];
-  const none = "—";
-  const wasNow = (was: string | undefined, now: string) => (was ? `${was} → ${now}` : now);
-  if (o.location !== undefined) {
-    lines.push(`📍 ${t("placeLabel", locale)}: ${wasNow(p.oldLocation && escapeHtml(p.oldLocation), o.location ? escapeHtml(o.location) : none)}`);
-  }
-  if (o.description !== undefined) {
-    const was = p.oldDescription ? `«${escapeHtml(clip(p.oldDescription))}»` : undefined;
-    lines.push(`📝 ${t("descriptionLabel", locale)}: ${wasNow(was, o.description ? `«${escapeHtml(clip(o.description))}»` : none)}`);
-  }
-  if (o.reminders) {
-    lines.push(`🔔 ${t("remindersLabel", locale)}: ${remindersText(p.oldReminders ?? DEFAULT_REMINDERS, locale)} → ${remindersText(o.reminders, locale)}`);
-  }
-  return lines;
 }
