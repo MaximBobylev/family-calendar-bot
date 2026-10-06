@@ -9,10 +9,13 @@ Telegram → POST /telegram/webhook (src/index.ts)
   → bot/gate.ts (посторонние, группы — ответ сразу)
   → inbox.ts: запись в D1 (дедуп по update_id) → 200
   → waitUntil: process.ts → bot/handle-update.ts        (очередь INBOX — страховка через 60 с)
-       handleUpdate → handleCommand → runCommand: /команды, ответы на вопросы (dialog_state), пересланное
-                   → recognizeVoice (stt/whisper.ts)  → nlu/intents.ts (LLM, nlu/llm.ts)
-                   → routeIntent: nlu/intent-overrides.ts → bot/{read-events,event-lookup,create-event,modify-event,delete-event,undo}.ts
-                   → handleCallback: нажатия кнопок карточек (pending_actions)
+       handleUpdate (доступ, регистрация, «Подключить»)
+         → bot/input/message.ts:handleCommand — текст / голос (input/voice.ts → stt/whisper.ts) / пересланное (forwarded.ts)
+         → bot/dialog.ts:runCommand — /connect, /settings, ответы на вопросы (dialog_state), отмена карточек, «отмени последнее»,
+                                     поводы переслушать (voice-rehear.ts)
+         → bot/nlu-step.ts — nlu/intents.ts (LLM, nlu/llm.ts), лимит (input/limit.ts), журнал
+         → bot/route-intent.ts:routeIntent — nlu/intent-overrides.ts → bot/{read-events,event-lookup,create-event,modify-event,delete-event}.ts
+         → bot/callbacks.ts:handleCallback — нажатия кнопок: настройки, карточки pending_actions (CALENDAR_CARDS: kind → обработчик)
        → calendar/google-provider.ts → google/calendar-api.ts → Google
        → telegram/api.ts → Telegram
 cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в час — cleanup, ensureDigests
@@ -24,11 +27,11 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 
 | Нужно | Смотреть |
 |---|---|
-| Новый интент / поле интента | `src/nlu/intents.ts` (схемы tools, промпт), `docs/intents.md`, `testdata/nlu/intents.yaml`; маршрут — `routeIntent` в `src/bot/handle-update.ts` |
+| Новый интент / поле интента | `src/nlu/intents.ts` (схемы tools, промпт), `docs/intents.md`, `testdata/nlu/intents.yaml`; маршрут — `routeIntent` в `src/bot/route-intent.ts` |
 | Разбор дат, длительностей, повторений | `src/dates/*` + `testdata/dates/*.yaml` (правила — `docs/date-rules.md`) |
 | Даты из всего сообщения, название без дат | `src/dates/extract.ts` + `testdata/extract/*.yaml` |
 | Тексты ответов бота | `src/bot/messages.ts` (RU/EN), форматирование — `src/bot/format.ts`, `format-events.ts` |
-| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `handleCallback` |
+| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`) |
 | Настройки пользователя | `src/bot/settings.ts`, `src/db/settings.ts` |
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
 | Внешние URL, лимиты, цены | `src/config.ts` |
@@ -52,7 +55,17 @@ cron (каждую минуту) → scheduler.ts:tick → очередь → ru
 | `oauth-routes.ts` | `/oauth/google/*`: промежуточная страница, PKCE, привязка к браузеру, callback |
 | `pages.ts` | Публичные страницы (homepage, privacy, terms) — заглушки до R3 |
 | **bot/** | Сценарии и рендер ответов |
-| `bot/handle-update.ts` | Роутер апдейта: команды, голос, интенты, нажатия кнопок (≈690 строк — кандидат на разделение, tech-debt #9) |
+| `bot/handle-update.ts` | Вход апдейта: правки/боты мимо, доступ, регистрация, `/disconnect`, без календаря — «Подключить»; дальше — сообщение или нажатие |
+| `bot/input/message.ts` | Приём сообщения: текст, голосовое, пересланное (→ карточка), прочее — «пока не умею» |
+| `bot/input/voice.ts` | `recognizeVoice`: голосовое → текст (длина/размер, STT-цепочка, журнал, поправки Whisper, «Услышал: …») |
+| `bot/input/limit.ts` | `withinLimit`: лимит LLM/STT на пользователя перед внешним вызовом (tech-debt #4) |
+| `bot/dialog.ts` | Слой до LLM: `/connect`, `/settings`, ответ на вопрос о названии, `awaiting` (время, ввод настроек), отмена карточек, «отмени последнее», поводы переслушать |
+| `bot/nlu-step.ts` | Текст → интент через цепочку LLM, лимит, запись в журнал |
+| `bot/route-intent.ts` | `routeIntent`: интент (с поправками по тексту) → обработчик фичи; даты и «что менять» — из текста |
+| `bot/callbacks.ts` | `handleCallback`: кнопки настроек и карточек; `CALENDAR_CARDS` — kind → обработчик |
+| `bot/voice-rehear.ts` | `escalateVoice`: переслушать голосовое мультимодальной моделью, затем `routeIntent` |
+| `bot/with-calendar.ts` | `withCalendar`: провайдер календаря и ошибки → понятный текст (US-14, US-02) |
+| `bot/with-typing.ts` | `withTyping`: «печатает…» на время обработки |
 | `bot/context.ts` | `AppContext`: конфиг, часы, D1, Telegram |
 | `bot/gate.ts` | Ранний фильтр в webhook (allowlist, только личные чаты) |
 | `bot/create-event.ts` | US-30/31/32: создание, варианты дат, «во сколько?», пересечения, серии |

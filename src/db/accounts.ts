@@ -199,6 +199,22 @@ export async function hasGoogleAccount(db: D1Database, userId: string): Promise<
   return row !== null;
 }
 
+/** Названия календарей пользователя и их алиасы (US-06) — подсказка LLM и мультимодальной модели. */
+export async function calendarNamesOf(db: D1Database, userId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT c.title AS name
+       FROM calendars c
+       JOIN provider_accounts a ON a.id = c.account_id
+       WHERE a.user_id = ?1
+       UNION
+       SELECT alias FROM calendar_aliases WHERE user_id = ?1`,
+    )
+    .bind(userId)
+    .all<{ name: string }>();
+  return results.map((r) => r.name);
+}
+
 export async function telegramChatOf(db: D1Database, userId: string): Promise<string | null> {
   const row = await db
     .prepare("SELECT external_id FROM channel_identities WHERE user_id = ? AND channel = 'telegram'")

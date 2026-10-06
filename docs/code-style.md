@@ -70,10 +70,10 @@ SQL — строкой в `db.prepare(...)`, только prepared statements.
 
 Это структурные изменения, не косметика, — отдельными задачами:
 
-1. **Разделить `src/bot/handle-update.ts`** (≈690 строк на 2026-10-05): router → normalize-input → dialog → `to-command` (чистая функция с YAML-кейсами) → dispatch. *tech-debt #9.*
+1. ✅ *сделано 2026-10-05* — **`src/bot/handle-update.ts` разделён** (690 → 61 строка): `input/{message,voice,limit}.ts` → `dialog.ts` → `nlu-step.ts` → `route-intent.ts`; `callbacks.ts`, `voice-rehear.ts`, `with-calendar.ts`, `with-typing.ts`. Не сделано: `to-command` как чистая функция с YAML-кейсами (сейчас `routeIntent` сразу вызывает обработчики). *tech-debt #9.*
 2. **Логика отдельно от рендера** в `create-event.ts`, `modify-event.ts`, `settings.ts` (≈430/300/410 строк): `*-logic.ts` (findCandidates, computeChange, resolveDraft) и `*-view.ts`. *tech-debt #10.*
-3. **Реестр карточек** `kind → {guard, handler}` с версией payload вместо `JSON.parse as` и `action as Parameters<typeof confirmX>[3]` в `handleCallback`. *tech-debt #15.*
-4. **Сырой SQL только в `src/db/*`**: сейчас запросы есть в `scheduler.ts`, `inbox.ts`, `jobs/digest.ts`, `calendar/google-provider.ts`, `bot/settings.ts`, `bot/read-events.ts`, `bot/handle-update.ts`. *tech-debt «Низкий», архитектура #20.*
+3. **Реестр карточек** `kind → {guard, handler}` с версией payload вместо `JSON.parse as` и `action as Parameters<typeof confirmX>[3]`. ◐ Первый шаг: таблица `CALENDAR_CARDS` (kind → обработчик) в `bot/callbacks.ts`; касты и проверки payload остались. *tech-debt #15.*
+4. **Сырой SQL только в `src/db/*`**: сейчас запросы есть в `scheduler.ts`, `inbox.ts`, `jobs/digest.ts`, `calendar/google-provider.ts`, `bot/settings.ts`, `bot/read-events.ts` (названия календарей из `handle-update.ts` перенесены в `db/accounts.ts:calendarNamesOf`). *tech-debt «Низкий», архитектура #20.*
 5. **Общие константы времени** (`MINUTE_MS`, `HOUR_MS`, `DAY_MS`, `DAY_MIN`): сейчас локальные копии в `dates/calendar.ts`, `scheduler.ts`, `limits.ts`, `bot/find-event.ts`, `bot/settings.ts`. Нужен модуль без зависимостей (`src/time.ts`), импортируемый и из `src/dates` (он портируемый — только константы).
 6. **`CalendarEvent` как union `Timed | AllDay`** — уберёт большинство `!` и позволит включить `noNonNullAssertion`. *tech-debt «Низкий».*
 7. **Ширина строки**: после пунктов 1–3 можно опустить до 120–140 — длинные строки в основном в сценариях `bot/*`.
