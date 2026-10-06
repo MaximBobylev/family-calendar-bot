@@ -113,6 +113,10 @@ async function answerHomeQuestion(ctx: AppContext, user: User, chatId: number, t
   const target = awaiting.userId ?? user.id;
   // Другого участника называет только владелец
   if (target !== user.id && membership.role !== "owner") return false;
+  if (await nameTaken(ctx, membership.household.id, parsed.name, target)) {
+    await ctx.telegram.sendMessage(chatId, t("homeNameTaken", user.locale, { name: parsed.name }));
+    return true;
+  }
   if (!(await setMemberNameOf(ctx.db, membership.household.id, target, parsed.name, parsed.aliases))) return false;
   await ctx.telegram.sendMessage(chatId, t("homeNameSet", user.locale, { name: parsed.name, aliases: aliasesSuffix(parsed.aliases, user.locale) }));
   return true;
@@ -142,6 +146,7 @@ async function runHouseholdCommand(ctx: AppContext, user: User, chatId: number, 
       return;
     case "name":
       if (!membership) await send(t("homeNotInHousehold", locale));
+      else if (await nameTaken(ctx, membership.household.id, cmd.name, user.id)) await send(t("homeNameTaken", locale, { name: cmd.name }));
       else {
         await setMemberNameOf(ctx.db, membership.household.id, user.id, cmd.name, cmd.aliases);
         await send(t("homeNameSet", locale, { name: cmd.name, aliases: aliasesSuffix(cmd.aliases, locale) }));
@@ -215,6 +220,11 @@ export async function sendInvite(
 export async function addKid(ctx: AppContext, user: User, chatId: number, household: Household, name: string, aliases: string[]): Promise<void> {
   const kids = await dependentsOf(ctx.db, household.id);
   const exists = kids.some((k) => k.name.toLowerCase() === name.toLowerCase());
+  // Имя взрослого участника — «Ане» потом не отличить (QA-16)
+  if (await nameTaken(ctx, household.id, name)) {
+    await ctx.telegram.sendMessage(chatId, t("homeNameTaken", user.locale, { name }));
+    return;
+  }
   if (!exists && kids.length >= HOUSEHOLD_MAX_DEPENDENTS) {
     await ctx.telegram.sendMessage(chatId, t("homeKidsFull", user.locale, { max: String(HOUSEHOLD_MAX_DEPENDENTS) }));
     return;
@@ -239,6 +249,15 @@ export async function leaveHousehold(ctx: AppContext, user: User, chatId: number
   await removeMember(ctx.db, household.id, user.id);
   await say(t("homeLeft", user.locale, { name: household.name }));
   await notifyOwner(ctx, household, "homeMemberLeft", membership.displayName);
+}
+
+/** Имя уже носит другой взрослый участник или ребёнок дома (QA-16): тогда «Ане» не понять, кому. */
+async function nameTaken(ctx: AppContext, householdId: string, name: string, exceptUserId?: string): Promise<boolean> {
+  const n = name.toLowerCase();
+  const [members, kids] = await Promise.all([membersOf(ctx.db, householdId), dependentsOf(ctx.db, householdId)]);
+  return (
+    members.some((m) => m.userId !== exceptUserId && m.displayName.toLowerCase() === n) || (!!exceptUserId && kids.some((k) => k.name.toLowerCase() === n))
+  );
 }
 
 /** Владельцу — на его языке (QA-10): «новый участник» / «больше не в доме». */

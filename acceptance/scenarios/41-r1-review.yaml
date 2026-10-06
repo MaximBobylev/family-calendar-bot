@@ -221,3 +221,14 @@
           text_contains: ["Об изменениях", "общие календари дома"]
           text_not_contains: ["Календарь по умолчанию", "как в Google"]
           buttons: ["🌍 Пояс", "☀️ Сводка", "🗣 English", "📣 Уведомления", "🔗 Подключить свой Google"]
+
+- id: household-duplicate-names-guard
+  story: US-90
+  steps:
+    - *home
+    # Ребёнок с именем взрослой — потом «Ане» не отличить (QA-16)
+    - telegram: { from: 1001, text: "/home kid Аня" }
+    - telegram: { from: 2001, text: "/home name Маша" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Имя «Аня» в доме уже есть"] }
+        - { chat_id: 2001, text_contains: ["Имя «Маша» в доме уже есть"] }

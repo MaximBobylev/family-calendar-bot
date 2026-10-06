@@ -86,6 +86,10 @@ export const householdMessages = {
     ru: "🏠 Дом «{name}» готов. Три шага, чтобы заработало:\n\n1. Как вас называть? Напишите: «{first}, муж, папа» — тогда семья сможет сказать «напомни мужу». Или нажмите кнопку ниже.\n2. ➕ Пригласите жену или мужа — ссылка на 48 часов, Google не нужен.\n3. 👶 Добавьте детей — «Маша, Машенька», чтобы писать «для Маши».\n\nЕсть семейный чат в Telegram? Добавьте меня туда и напишите /home link.",
     en: "🏠 Household “{name}” is ready. Three steps to get going:\n\n1. How should the family call you? Type: “{first}, husband, dad” — then they can say “remind my husband”. Or tap a button below.\n2. ➕ Invite your partner — a 48-hour link, no Google needed.\n3. 👶 Add children — “Mary, Molly” — to say “for Mary”.\n\nHave a family group chat in Telegram? Add me there and type /home link.",
   },
+  homeNameTaken: {
+    ru: "Имя «{name}» в доме уже есть — потом не понять, о ком речь. Уточните: «{name} маленькая», «{name} Петровна».",
+    en: "“{name}” is already taken in this household — it would be ambiguous. Please make it distinct.",
+  },
   homeAliasLearned: { ru: "Запомнил: «{alias}» — это {name}.", en: "Got it: “{alias}” is {name}." },
   homeLeaveButton: { ru: "Выйти из дома", en: "Leave the household" },
   homeDissolveButton: { ru: "Распустить дом", en: "Dissolve the household" },
