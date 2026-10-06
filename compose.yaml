@@ -26,7 +26,8 @@ services:
       CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: "false"
     command: ["sh", "-c", "npx wrangler d1 migrations apply DB --local --env dev && npx wrangler dev --env dev --ip 0.0.0.0 --port 8787"]
     ports:
-      - "8787:8787"
+      # Порт хоста настраивается — параллельные стенды в git worktree (CLAUDE.md): DEV_PORT=8788 docker compose up …
+      - "${DEV_PORT:-8787}:8787"
     depends_on: [fakes]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8787/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

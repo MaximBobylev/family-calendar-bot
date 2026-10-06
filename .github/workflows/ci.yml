@@ -1,0 +1,38 @@
+# Проверки на каждый push и PR — то же, что `/check` локально (CLAUDE.md): typecheck + Biome, юнит-тесты,
+# все приёмочные сценарии на фейках (ADR-0006). Секреты не нужны: .env в контейнеры не попадает.
+# Деплой — вручную владельцем (`docker compose run --rm deploy`), не из CI.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dev image
+        run: docker compose build
+
+      - name: Check (typecheck + Biome)
+        run: docker compose run --rm -T test npm run -s check
+
+      - name: Unit tests
+        run: docker compose run --rm -T test
+
+      - name: Acceptance (fakes)
+        run: |
+          docker compose up -d dev fakes
+          docker compose run --rm -T acceptance
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 300 dev fakes
