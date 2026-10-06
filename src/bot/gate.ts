@@ -6,6 +6,7 @@ import { isMemberByTelegramId } from "../db/households";
 import type { TgMessage, TgUpdate } from "../telegram/types";
 import type { AppContext } from "./context";
 import { isAddressedToBot, parseHomeStart } from "./household/logic";
+import { answerGuestPress, replyGuestStart } from "./inline/guest";
 import { t } from "./messages";
 
 export type Gate = "process" | "ignore" | "not_allowed";
@@ -35,11 +36,15 @@ export async function gateUpdate(ctx: AppContext, update: TgUpdate): Promise<Gat
 export async function replyToOutsider(ctx: AppContext, update: TgUpdate, gate: Gate): Promise<void> {
   const message = update.message;
   if (!message) {
-    if (update.callback_query) await ctx.telegram.answerCallbackQuery(update.callback_query.id);
+    // «📅 Добавить себе» под inline-карточкой (US-95) — постороннему ссылки без OAuth через личный чат
+    if (update.callback_query && !(gate === "not_allowed" && (await answerGuestPress(ctx, update.callback_query)))) {
+      await ctx.telegram.answerCallbackQuery(update.callback_query.id);
+    }
     return;
   }
   const lang = message.from?.language_code ?? "ru";
   try {
+    if (gate === "not_allowed" && (await replyGuestStart(ctx, message))) return;
     if (gate === "not_allowed") await ctx.telegram.sendMessage(message.chat.id, t("notAllowed", lang));
   } catch (e) {
     console.warn("outsider reply failed", e instanceof Error ? e.message : e);

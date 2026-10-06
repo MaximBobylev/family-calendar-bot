@@ -91,8 +91,33 @@ export class TelegramApi {
     return bestEffort(this.call<true>("sendChatAction", { chat_id: chatId, action }), "sendChatAction");
   }
 
-  /** На повторе из очереди query уже «too old» — это не ошибка сценария. */
-  answerCallbackQuery(callbackQueryId: string, text?: string) {
-    return bestEffort(this.call<true>("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}) }), "answerCallbackQuery");
+  /** На повторе из очереди query уже «too old» — это не ошибка сценария. url — только t.me/<бот>?start=… (US-95). */
+  answerCallbackQuery(callbackQueryId: string, text?: string, opts: { url?: string } = {}) {
+    return bestEffort(
+      this.call<true>("answerCallbackQuery", { callback_query_id: callbackQueryId, ...(text ? { text } : {}), ...(opts.url ? { url: opts.url } : {}) }),
+      "answerCallbackQuery",
+    );
+  }
+
+  /** Ответ на inline-запрос (US-95); пустой results — «нечего предложить». */
+  answerInlineQuery(inlineQueryId: string, results: unknown[], opts: { cacheTime?: number } = {}) {
+    return bestEffort(
+      this.call<true>("answerInlineQuery", { inline_query_id: inlineQueryId, results, cache_time: opts.cacheTime ?? 10, is_personal: true }),
+      "answerInlineQuery",
+    );
+  }
+
+  /** Правка сообщения, отправленного через inline (счётчик на карточке, US-95) — best-effort. */
+  editInlineMessageText(inlineMessageId: string, text: string, replyMarkup?: ReplyMarkup) {
+    return bestEffort(
+      this.call<unknown>("editMessageText", {
+        inline_message_id: inlineMessageId,
+        text,
+        parse_mode: "HTML",
+        link_preview_options: { is_disabled: true },
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      }),
+      "editInlineMessageText",
+    );
   }
 }

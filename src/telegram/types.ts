@@ -31,7 +31,18 @@ export interface TgCallbackQuery {
   id: string;
   from: TgUser;
   message?: TgMessage;
+  /** Нажатие под inline-сообщением (US-95): message нет, чат неизвестен. */
+  inline_message_id?: string;
   data?: string;
+}
+
+/** Inline-запрос «@бот завтра 19:00 футбол» (US-95). */
+export interface TgInlineQuery {
+  id: string;
+  from: TgUser;
+  query: string;
+  offset: string;
+  chat_type?: string;
 }
 
 export interface TgUpdate {
@@ -39,6 +50,7 @@ export interface TgUpdate {
   message?: TgMessage;
   edited_message?: TgMessage;
   callback_query?: TgCallbackQuery;
+  inline_query?: TgInlineQuery;
 }
 
 export interface InlineKeyboardButton {

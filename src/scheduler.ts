@@ -123,5 +123,8 @@ export async function cleanup(db: D1Database, now: number): Promise<void> {
     db.prepare("DELETE FROM dialog_state WHERE updated_at < ?").bind(now - 30 * DAY_MS),
     db.prepare("DELETE FROM scheduled_jobs WHERE status IN ('done', 'cancelled') AND fire_at < ?").bind(now - 7 * DAY_MS),
     db.prepare("DELETE FROM scheduled_jobs WHERE status = 'failed' AND fire_at < ?").bind(now - 30 * DAY_MS),
+    // Inline-карточки (US-95): срок токена — неделя после события; отметки «добавил» — 60 дней
+    db.prepare("DELETE FROM inline_events WHERE expires_at < ?").bind(now),
+    db.prepare("DELETE FROM inline_adds WHERE created_at < ?").bind(now - 60 * DAY_MS),
   ]);
 }

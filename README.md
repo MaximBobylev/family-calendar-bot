@@ -27,6 +27,7 @@ docker compose up dev                             # wrangler dev (окружен
 ## Эксплуатация
 
 - Деплой: `docker compose run --rm deploy` (проверки, миграции, код, секреты из `.env`, webhook). Боевые секреты видит только сервис `deploy`.
+- Inline-карточки «📅 Добавить себе» (US-95): один раз включить inline-режим в @BotFather — `/setinline` → бот → подсказка, например «завтра 19:00 футбол». Без этого Telegram не присылает `inline_query` (webhook на них подписывает деплой).
 - Статистика: `https://<воркер>/admin` — логин/пароль `ADMIN_USER` / `ADMIN_PASSWORD` из `.env`.
 - Проверка интентов на реальной модели: `docker compose run --rm deploy npx tsx scripts/probe-intents.ts "фраза" …`.
   Живые пробы и замеры (`scripts/probe-*.ts`, `scripts/eval-intents.ts`) тратят квоты прода (Workers AI Free — 10 000 neurons/сутки); у замера сначала `--dry-run`.

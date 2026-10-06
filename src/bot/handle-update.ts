@@ -16,6 +16,8 @@ import { handleGroupCallback, handleGroupMessage } from "./household/group";
 import { isAddressedToBot, parseHomeStart } from "./household/logic";
 import { handleHouseholdCallback, isHouseholdCallback } from "./household/menu";
 import { householdScope } from "./household/scope";
+import { parseAddStart } from "./inline/logic";
+import { handleAddStart, handleInlinePress, isInlinePress } from "./inline/press";
 import { handleCommand } from "./input/message";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
@@ -48,6 +50,16 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
   }
 
   const user: User = { ...(await ensureTelegramUser(ctx.db, from.id, ctx.clock.now())).user, tgName: telegramName(from) };
+  // «📅 Добавить себе» под inline-карточкой и продолжение по её ссылке в личном чате (US-95)
+  if (isInlinePress(update.callback_query)) {
+    await handleInlinePress(ctx, user, update.callback_query!);
+    return;
+  }
+  const addToken = message && !isGroup ? parseAddStart(message.text) : null;
+  if (message && addToken) {
+    await handleAddStart(ctx, user, message.chat.id, addToken);
+    return;
+  }
   if (isGroup) {
     if (update.callback_query) await handleGroupCallback(ctx, user, update.callback_query);
     else if (message) await handleGroupMessage(ctx, user, message);
