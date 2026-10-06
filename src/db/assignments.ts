@@ -187,7 +187,7 @@ export async function assignmentForTextAnswer(
          AND (x.assignee_user_id = ?2 OR (x.assignee_user_id IS NULL AND m.user_id = ?2 AND m.answer IS NULL) OR m.role = 'group')
          AND (?3 IS NULL OR m.message_id = ?3)
          AND (?3 IS NOT NULL OR m.role = 'offer')
-       ORDER BY coalesce(x.updated_at, x.created_at) DESC
+       ORDER BY m.rowid DESC
        LIMIT 1`,
     )
     .bind(a.chatId, a.userId, a.replyTo ?? null)

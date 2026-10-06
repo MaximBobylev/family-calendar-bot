@@ -7,7 +7,7 @@ import { localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
 import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
 import { type Feature, recordFeature } from "../db/features";
-import type { User } from "../db/users";
+import { findUserById, type User } from "../db/users";
 import type { AppContext } from "./context";
 import {
   type CalendarResolution,
@@ -97,7 +97,8 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
   // Ответственный и «для кого» (US-92) — строками под телом карточки
   const fam = familyCardLines(a.draft.family, locale);
-  const sent = await ctx.telegram.sendMessage(chatId, `${text}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
+  const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
+  const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -184,7 +185,14 @@ export async function confirmCreate(
   if (action.messageId) {
     const by = await creatorNote(ctx, action.userId, "homeCreatedByDone", locale);
     const fam = familyCardLines(action.payload.family, locale);
-    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}${fam}${by}`, { inline_keyboard: [row] }, { html: true });
+    const tz = await homeTzNote(ctx, o, locale);
+    await ctx.telegram.editMessageText(
+      chatId,
+      action.messageId,
+      `${t("created", locale)}\n\n${body}${tz}${fam}${by}`,
+      { inline_keyboard: [row] },
+      { html: true },
+    );
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
@@ -204,4 +212,17 @@ export async function confirmCreate(
     await attachMessage(ctx.db, qId, q.message_id);
   }
   return true;
+}
+
+/**
+ * Календари дома, а пояс автора не совпадает с поясом дома (владельца) — [решение 2026-10-06, QA-09]: время считаем в поясе
+ * автора (как он сказал), а в карточке показываем, сколько это по поясу дома: «🌍 17:00 по Asia/Yekaterinburg = 15:00 по
+ * Europe/Moscow». Иначе — пусто.
+ */
+async function homeTzNote(ctx: AppContext, o: CreateOption, locale: string): Promise<string> {
+  if (!ctx.calendarScope || o.allDay || !o.start || o.series) return "";
+  const owner = await findUserById(ctx.db, ctx.calendarScope.ownerUserId);
+  if (!owner || owner.home_tz === o.tz) return "";
+  const home = utcToLocal(localToUtc(o.start, o.tz), owner.home_tz);
+  return `\n${t("createHomeTzNote", locale, { time: hhmm(o.start.minutes), tz: o.tz, homeTime: hhmm(home.minutes), homeTz: owner.home_tz })}`;
 }

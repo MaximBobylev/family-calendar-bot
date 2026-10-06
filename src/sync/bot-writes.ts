@@ -39,7 +39,7 @@ export function botWriteListener(ctx: AppContext, user: User, chatId: number): W
           eventId: w.eventId,
           after: w.event ? snapshotOf(w.event) : null,
           ...(w.op === "create" ? { hint: "created" as const } : w.op === "update" && w.timeChanged ? { hint: "moved" as const } : {}),
-          origin: { chatId: String(chatId), ...(authorName ? { authorName } : {}) },
+          origin: { chatId: String(chatId), authorUserId: user.id, ...(authorName ? { authorName } : {}) },
         },
       ],
       { notify: true, extra: [journal] },

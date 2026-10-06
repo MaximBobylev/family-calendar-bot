@@ -29,12 +29,16 @@ export interface Change {
   before: Snapshot | null;
   after: Snapshot | null;
   /** Сделано ботом: из какого чата (туда не шлём) и кто. Нет — внешнее изменение (во все чаты). */
-  origin?: { chatId: string; authorName?: string };
+  origin?: { chatId: string; authorName?: string; authorUserId?: string };
 }
 
-/** Получатели: чаты календаря с включёнными уведомлениями, календарь в них на запись, кроме чата-источника. */
+/**
+ * Получатели: чаты календаря с включёнными уведомлениями, календарь в них на запись, кроме чата-источника и личного чата
+ * автора правки (сделал в семейном чате — себе эхо не нужно, ревью R1 #18).
+ */
 export function recipientsOf(chats: CalendarChat[], change: Pick<Change, "origin">): CalendarChat[] {
-  return chats.filter((c) => c.writable && !c.settings.changeNotifyOff && c.chatId !== change.origin?.chatId);
+  const o = change.origin;
+  return chats.filter((c) => c.writable && !c.settings.changeNotifyOff && c.chatId !== o?.chatId && !(o?.authorUserId && c.userId === o.authorUserId));
 }
 
 function noticeFor(change: Change, chat: CalendarChat): Notice | null {

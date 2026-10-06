@@ -63,7 +63,7 @@ export const householdMessages = {
   },
   homeRemoveYes: { ru: "Да, убрать", en: "Yes, remove" },
   homeAskNameOf: {
-    ru: "Как называть {name}? Напишите имя и другие имена через запятую: «Аня, жена, мама».",
+    ru: "Как называть участника «{name}»? Напишите имя и другие имена через запятую: «Аня, жена, мама».",
     en: "How should the household call {name}? Type the name and other names separated by commas.",
   },
   homeAskKid: {

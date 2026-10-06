@@ -3,6 +3,10 @@
 import type { Messages } from "./types";
 
 export const createMessages = {
+  createHomeTzNote: {
+    ru: "🌍 {time} по {tz} = {homeTime} по поясу дома ({homeTz})",
+    en: "🌍 {time} in {tz} = {homeTime} in the household's time zone ({homeTz})",
+  },
   calendarNotFound: {
     ru: "Не нашёл календарь «{name}». Ваши календари: {list}.",
     en: "I couldn't find the calendar “{name}”. Your calendars: {list}.",
