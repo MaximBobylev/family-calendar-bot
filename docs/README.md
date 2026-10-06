@@ -20,6 +20,7 @@
 | [intents.md](intents.md) | Каталог интентов: что бот умеет, какие параметры извлекает |
 | [date-rules.md](date-rules.md) | Правила разбора дат и времени, неоднозначные случаи |
 | [stretch-goals.md](stretch-goals.md) | Будущие фичи и их влияние на архитектуру |
+| [research/google-push.md](research/google-push.md) | Push и синхронизация Google Calendar: требования к адресу канала, срок, syncToken/410, эхо — и как сделано (ADR-0005 §2, US-72) |
 | [research/voice-recording-script.md](research/voice-recording-script.md) | Что и как наговорить для замера мультимодального разбора голоса (20 голосовых на человека) |
 | [research/voice-synth-eval.md](research/voice-synth-eval.md) | Замер на синтетическом шумном наборе (edge-tts + ffmpeg): Whisper + Nemotron против Gemini 3.5 Flash-Lite одним вызовом |
 | [tracks/multimodal-voice.md](tracks/multimodal-voice.md) | Трек: голосовая команда одним мультимодальным вызовом (Gemini и др.) — оценка, дизайн, план замера |
