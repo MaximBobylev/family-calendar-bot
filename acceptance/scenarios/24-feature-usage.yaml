@@ -34,9 +34,10 @@
         basic_auth: "admin:test-admin-password"
         text_contains:
           - "Функции (US-64"
-          - "<td>list</td><td>1</td><td>2</td>"
-          - "<td>create</td><td>1</td><td>1</td>"
-          - "<td>recurring</td><td>1</td><td>1</td>"
-          - "<td>undo</td><td>1</td><td>1</td>"
+          # Подпись по-русски и ключ (админка, итерация 3)
+          - "<td>Расписание (US-20)</td><td><code>list</code></td><td>1</td><td>2</td>"
+          - "<td>Создание события (US-30)</td><td><code>create</code></td><td>1</td><td>1</td>"
+          - "<td>Серия (US-32)</td><td><code>recurring</code></td><td>1</td><td>1</td>"
+          - "<td>Отмена последнего (US-61)</td><td><code>undo</code></td><td>1</td><td>1</td>"
           - "2026-10-07 07:00 UTC"
-        text_not_contains: ["<td>delete</td>", "<td>voice</td>"]
+        text_not_contains: ["<code>delete</code>", "<code>voice</code>"]

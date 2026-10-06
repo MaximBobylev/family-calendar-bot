@@ -32,6 +32,11 @@ interface SyncDbRow {
   channel_token: string | null;
   channel_resource_id: string | null;
   channel_expires_at: number | null;
+  /** Здоровье синка для админки (миграция 0016): ok | unavailable | error, класс ошибки, пересинхронизация после 410. */
+  last_outcome?: string | null;
+  last_error_at?: number | null;
+  last_error?: string | null;
+  last_resync_at?: number | null;
 }
 
 const toSyncRow = (r: SyncDbRow): SyncRow => ({
