@@ -58,3 +58,11 @@ cases:
   - { kind: point, text: "Call Anna first thing tomorrow", expect: { point: "first thing tomorrow" } }
   - { kind: range, text: "Что у меня в конце месяца?", expect: { range: "в конце месяца" } }
   - { kind: range, text: "Что у меня завтра во второй половине дня?", expect: { range: "завтра во второй половине дня" } }
+  # Решения 2026-10-05, второй круг (п. 14–18)
+  - { kind: point, text: "Забрать посылку завтра в 2 ночи", expect: { point: "завтра в 2 ночи" } }
+  - { kind: point, text: "Созвон с Олегом на этой неделе", expect: { point: "на этой неделе" } }
+  - { kind: point, text: "Съездить на дачу в выходные", expect: { point: "в выходные" } }
+  - { kind: point, text: "Купить хлеба к вечеру", expect: { point: "к вечеру" } }
+  - { kind: point, text: "Send the report by Friday", expect: { point: "by Friday" } }
+  - { kind: point, text: "Сдать отчёт к 18", expect: { point: "к 18" } }
+  - { kind: point, text: "Забрать детей к шести вечера", expect: { point: "к шести вечера" } }

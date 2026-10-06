@@ -23,6 +23,7 @@
           "Поставь встречу в пятницу в 3": { tool: create_event, args: { start: "в пятницу в 3" } }
           "Поставь встречу на среду в 12": { tool: create_event, args: { start: "на среду в 12" } }
           "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } }
+          "Встреча с Машей в выходные": { tool: create_event, args: { start: "в выходные", title: "Встреча с Машей" } }
           "Завтра день рождения мамы": { tool: create_event, args: { start: "завтра", title: "День рождения мамы", all_day: true } }
           "Отпуск с 10 по 20 ноября": { tool: create_event, args: { start: "с 10 по 20 ноября", title: "Отпуск", all_day: true } }
           "Поставь встречу с Машей в пятницу": { tool: create_event, args: { start: "в пятницу", title: "Встреча с Машей" } }
@@ -317,3 +318,15 @@
     - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
     - expect_telegram:
         - { text_contains: ["Нет календаря, куда можно записать"], text_not_contains: ["«»"] }
+
+- id: create-on-weekend-asks-time-then-day
+  story: US-30
+  steps:
+    - *setup
+    # «в выходные» при создании — суббота или воскресенье кнопками, без «весь день» (решение 2026-10-05)
+    - telegram: { from: 1001, text: "Встреча с Машей в выходные" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    - telegram: { from: 1001, text: "в 12" }
+    - expect_telegram:
+        - { text_contains: ["Когда именно?", "<b>Встреча с Машей</b>"], buttons: ["сб, 10 октября, 12:00–13:00", "вс, 11 октября, 12:00–13:00", "Отмена"] }

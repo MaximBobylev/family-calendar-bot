@@ -73,7 +73,8 @@ class Unparseable extends Error {
 // --- Чтение времени --------------------------------------------------------
 
 const word = (tok: Token | undefined) => (tok?.t === "word" ? tok.w : undefined);
-const HOUR_WORDS = new Set(["часов", "часа", "час", "ч", "o'clock", "oclock"]);
+// «к 6 часам» — дательный после «к» (решение 2026-10-05 №5)
+const HOUR_WORDS = new Set(["часов", "часа", "час", "часам", "ч", "o'clock", "oclock"]);
 
 function checkTime(t: TimeAst): TimeAst {
   if (t.h > 24 || t.m > 59 || t.h < 0) throw new Unparseable("invalid_time");
@@ -249,6 +250,8 @@ function nearest(wd: Weekday, today: Day): Day {
 
 // --- Грамматика ------------------------------------------------------------
 
+/** «к двум», «к трём», «к четырём» — дательный, которого нет среди родительных NUMBER_WORDS. */
+const BY_DATIVE_HOURS = new Map([["двум", 2], ["трем", 3], ["четырем", 4]]);
 const APPROX_WORDS = new Set(["где-то", "примерно", "приблизительно", "approximately", "roughly"]);
 const THIS_WORDS = new Set([
   "эту", "этот", "это", "эта", "this", "эти", "этих",
@@ -372,9 +375,28 @@ function parseAst(tokens: Token[]): Ast {
       continue;
     }
 
-    // «к пятнице», «к 5 ноября» — дата без времени станет 09:00 того дня (решение 2026-10-05).
-    // «к 18», «к обеду», «к концу недели» — сроки (R1): дальше не разберутся
-    if (w === "к") { ast.byDate = true; i++; continue; }
+    // «к пятнице», «к 5 ноября», «by Friday» — дата без времени станет 09:00 того дня (решения 2026-10-05).
+    // «к 18», «к шести вечера», «by 6pm» — этот час по правилам «в 18»; «к вечеру» = «ближе к вечеру».
+    // «к обеду», «к концу недели», «by end of day» — сроки (R1): дальше не разберутся
+    if (w === "к" || w === "by") {
+      ast.byDate = true;
+      if (w === "к" && w1 === "вечеру") { ast.part = "late_afternoon"; i += 2; continue; }
+      const t = tokens[i + 1];
+      if (!readAbs(tokens, i + 1)) {
+        // «к шести», «к двум», «к часу» — числительное в дательном (у 5–20 совпадает с родительным)
+        const h = BY_DATIVE_HOURS.get(word(t) ?? "") ?? (t?.t === "num" && t.form === "gen" && t.v <= 12 ? t.v : undefined);
+        if (h !== undefined) {
+          const tail = readMeridiemTail(tokens, i + 2);
+          setTime({ h, m: 0, ...(tail.mer ? { mer: tail.mer } : {}) });
+          i += 2 + tail.n;
+          continue;
+        }
+        // «к 18», «к 18:00» — как «в 18»
+        if (t?.t === "clock" || (t?.t === "num" && (t.form === "digit" || t.form === "card"))) timeContext = true;
+      }
+      i++;
+      continue;
+    }
 
     // Части суток из нескольких слов: «ближе к вечеру», «под вечер» (16–20), «в первой половине дня»
     if (w === "ближе" && w1 === "к" && word(tokens[i + 2]) === "вечеру") { ast.part = "late_afternoon"; i += 3; continue; }
@@ -559,7 +581,8 @@ function parseAst(tokens: Token[]): Ast {
     const isNext = w !== undefined && NEXT_WORDS.has(w);
     if ((isThis || isNext) && w1) {
       const which = isNext ? "next" : "this";
-      if (/^(неделе|неделю|неделя|week)$/.test(w1)) { ast.week = which; i += 2; continue; }
+      // «на эту неделю», «this week» при создании — как «на неделе» (решение 2026-10-05 №2)
+      if (/^(неделе|неделю|неделя|week)$/.test(w1)) { ast.week = which; ast.vagueWeek = which === "this"; i += 2; continue; }
       if (/^(выходные|выходных|weekend)$/.test(w1)) { ast.period = { k: "weekend", which }; i += 2; continue; }
       if (/^(месяце|месяц|month)$/.test(w1)) { ast.period = { k: "month", which }; i += 2; continue; }
       if (EN_DAY_PARTS.has(w1) && isThis) { setDate({ k: "rel", days: 0 }); ast.part = DAY_PART_WORDS.get(w1)!; i += 2; continue; }
@@ -568,7 +591,7 @@ function parseAst(tokens: Token[]): Ast {
     }
     if (w && (THIS_PREP.has(w) || NEXT_PREP.has(w))) {
       const which = THIS_PREP.has(w) ? "this" : "next";
-      if (w1 === "неделе") { ast.week = which; i += 2; continue; }
+      if (w1 === "неделе") { ast.week = which; ast.vagueWeek = which === "this"; i += 2; continue; }
       if (w1 === "месяце") { ast.period = { k: "month", which }; i += 2; continue; }
     }
 
@@ -710,6 +733,31 @@ export function midWeekDay(today: Day): Day {
 /** Ночь после названного дня: «завтра ночью» = 00–06 послезавтра; без часа или с часом из «ночью». */
 const nightAfter = (ast: Ast) => ast.part === "night" && !ast.time?.mer && !ast.time?.special;
 
+/** Час «ночи» 1–5 при названном дне — в ночь после этого дня (00–06 следующей даты). */
+const afterNamedDay = (t: TimeAst | undefined, rh: ResolvedHour) => t?.mer === "night" && rh.dayOffset === 0 && rh.hour < 6;
+
+/** Дни ближайших выходных, начиная с сегодня: в субботу — сегодня и завтра, в воскресенье — только сегодня. */
+function weekendDays(today: Day): Day[] {
+  const wd = weekday(today);
+  const sat = wd === 6 ? today - 1 : today + (5 - wd);
+  return [sat, sat + 1].filter((d) => d >= today);
+}
+
+/** Несколько трактовок → варианты по порядку; неразобранные и прошедшие отбрасываются. */
+function anyOf(asts: Ast[], now: Moment, tz: string): ParseResult {
+  const results = asts.map((a): ParseResult => {
+    try {
+      return resolvePoint(a, now, tz);
+    } catch (e) {
+      if (e instanceof Unparseable) return { error: e.reason };
+      throw e;
+    }
+  });
+  const values = results.flatMap((r) => ("error" in r ? [] : "ambiguous" in r ? r.ambiguous : [r]));
+  if (values.length === 0) return results.find((r) => "error" in r) ?? { error: "unparseable" };
+  return values.length === 1 ? values[0]! : { ambiguous: values };
+}
+
 function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
   let ast = input;
   if (ast.relMinutes !== undefined) {
@@ -726,25 +774,18 @@ function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
   // «в 9-15»: сначала 9:15, затем интервал 9–15
   if (ast.altTime && ast.interval) {
     const { altTime, interval: _interval, ...rest } = ast;
-    const flat = (r: ParseResult): ParseValue[] => ("error" in r ? [] : "ambiguous" in r ? r.ambiguous : [r]);
-    const tryPoint = (a: Ast): ParseResult => {
-      try {
-        return resolvePoint(a, now, tz);
-      } catch (e) {
-        if (e instanceof Unparseable) return { error: e.reason };
-        throw e;
-      }
-    };
-    const asTime = tryPoint({ ...rest, time: altTime });
-    const asInterval = tryPoint({ ...ast, altTime: undefined });
-    const values = [...flat(asTime), ...flat(asInterval)];
-    if (values.length === 0) return "error" in asTime ? asTime : asInterval;
-    return values.length === 1 ? values[0]! : { ambiguous: values };
+    return anyOf([{ ...rest, time: altTime }, { ...ast, altTime: undefined }], now, tz);
   }
 
   // Период при создании события — не дата: переспросить. «к следующей неделе» — срок (R1)
   if (ast.period?.k === "segment") throw new Unparseable();
   if (ast.byDate && !ast.date && (ast.period || ast.week)) throw new Unparseable();
+
+  // «в выходные» при создании — варианты: суббота, затем воскресенье (оставшиеся дни ближайших выходных)
+  if (ast.period?.k === "weekend" && ast.period.which === "this" && !ast.date) {
+    const { period: _period, ...rest } = ast;
+    return anyOf(weekendDays(now.day).map((day) => ({ ...rest, date: { k: "rel", days: day - now.day } })), now, tz);
+  }
 
   if (ast.vagueWeek && !ast.date && !ast.period) {
     const { week: _week, vagueWeek: _vague, ...rest } = ast;
@@ -762,7 +803,10 @@ function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
   }
 
   if (ast.interval) {
-    const s = resolveHour(ast.interval.start.mer || !ast.interval.end.mer ? ast.interval.start : { ...ast.interval.start, mer: ast.interval.end.mer });
+    const startT = ast.interval.start.mer || !ast.interval.end.mer ? ast.interval.start : { ...ast.interval.start, mer: ast.interval.end.mer };
+    let s = resolveHour(startT);
+    // «завтра с 1 до 3 ночи» — ночь после названного дня, как «завтра в 1 ночи»
+    if (ast.date && afterNamedDay(startT, s)) s = { ...s, dayOffset: 1 };
     const e = resolveHour(ast.interval.end);
     const day = ast.date ? resolveDays(ast.date, now, s, ast.interval.start.m)[0]! : now.day;
     const start = at(day + s.dayOffset, s.hour * 60 + ast.interval.start.m);
@@ -786,6 +830,8 @@ function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
   const night = nightAfter(ast);
   // «завтра ночью в 2» — час после полуночи относится к следующему дню
   if (rh && night && ast.date && rh.hour < 12 && rh.dayOffset === 0) rh = { ...rh, dayOffset: 1 };
+  // «завтра в 2 ночи» = «завтра ночью в 2» (решение 2026-10-05 №1); без дня — правило часа
+  if (rh && ast.date && afterNamedDay(time, rh)) rh = { ...rh, dayOffset: 1 };
 
   // Только время, без дня
   if (!ast.date) {
@@ -907,6 +953,8 @@ export function parsePointOrRange(tokens: Token[], kind: "point" | "range", now:
     if (!ast.date && !ast.time && !ast.part && !ast.period && !ast.week && !ast.interval && !ast.dateRange && ast.relMinutes === undefined) {
       throw new Unparseable();
     }
+    // «к следующей неделе», «by the end of the week» — сроки (R1), и для чтения тоже
+    if (ast.byDate && !ast.date && (ast.period || ast.week)) throw new Unparseable();
     if (kind === "range" && !ast.time && !ast.interval && ast.relMinutes === undefined) return resolveRange(ast, now);
 
     if (!ast.tz || ast.tz === tz) return resolvePoint(ast, now, tz);

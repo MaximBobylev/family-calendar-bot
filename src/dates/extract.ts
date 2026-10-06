@@ -81,7 +81,7 @@ const ALL_DAY_PATTERNS = [
   /отпуск/i,
   /праздник/i,
   /командировк/i,
-  /выходн(ой|ые)/i,
+  /выходной/i,
   /весь день/i,
   /birthday/i,
   /anniversary/i,
