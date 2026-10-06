@@ -88,6 +88,21 @@ describe("assignOverride", () => {
     expect(assignOverride("Кто-то должен отвезти Ваню", { name: "create_event", start: "" })).toEqual({ name: "assign_task", someone: true });
     expect(assignOverride("Завтра в 15 стоматолог", { name: "create_event", start: "Завтра в 15" })).toBeNull();
   });
+  it("поручение без исполнителя и без «кто …?» — дело себе (регрессия c18)", () => {
+    expect(
+      assignOverride("Забрать детей из садика сегодня в шесть вечера", {
+        name: "assign_task",
+        when: "сегодня в шесть вечера",
+        task: "Забрать детей из садика",
+      }),
+    ).toEqual({ name: "create_event", start: "сегодня в шесть вечера", title: "Забрать детей из садика" });
+    // Вопрос к семье — по-прежнему «кто-то должен» (решает LLM)
+    expect(assignOverride("Кто отвезёт Ваню на плавание в субботу?", { name: "assign_task", someone: true, task: "отвезти Ваню на плавание" })).toEqual({
+      name: "assign_task",
+      someone: true,
+      task: "отвезти Ваню на плавание",
+    });
+  });
   it("мои дела", () => {
     expect(isMyTasksQuestion("мои дела")).toBe(true);
     expect(isMyTasksQuestion("Что на мне завтра?")).toBe(true);

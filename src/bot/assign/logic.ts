@@ -220,6 +220,9 @@ const SELF_REMIND_QUESTION = /^,?\s*(?:когда|что|где|во\s+скол�
 const CREATE_VERB = /^(?:эээ\s+)?(?:поставь|запиши|добавь|создай|запланируй|внеси|schedule|add|create|book|put)(?:те)?(?!\p{L})\s*(?:мне\s+|пожалуйста\s+)*/iu;
 
 /** Напоминание себе → событие: название — что сделать (от LLM или из текста), даты вычистит роутер. */
+/** «Кто отвезёт …?», «who can pick up …?» — вопрос к семье, а не дело себе. */
+const WHO_QUESTION = /(?<![\p{L}])(кто|who)(?![\p{L}])/iu;
+
 function selfReminder(text: string, intent: Intent): Intent {
   const llm = intent.name === "assign_task" ? intent : undefined;
   const title =
@@ -272,6 +275,9 @@ export function assignOverride(text: string, intent: Intent): Intent | null {
       return detail ? { name: "modify_event" } : selfReminder(text, intent);
     // 4. Напоминание у события («напомни за полчаса до танцев Сони», класс D): исполнителя в тексте нет — изменение
     if (detail && !phrase) return { name: "modify_event" };
+    // 5. Поручение без исполнителя и без «кто …?» — дело себе, обычное событие («Забрать детей из садика сегодня в 6»).
+    // «Кто отвезёт Ваню?» — «кто-то должен» (решает LLM); явное «кто-то должен» уже в phrase.
+    if (!llmAssign.assignee && !phrase && !WHO_QUESTION.test(s)) return selfReminder(text, intent);
     return intent;
   }
   // «Напомни мужу за час до врача взять полис» — поручение, если «муж» есть в доме (проверит assignmentApplies);
