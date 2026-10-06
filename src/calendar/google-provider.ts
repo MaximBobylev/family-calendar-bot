@@ -114,6 +114,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
     private readonly onlyCalendarIds?: readonly string[],
     /** Слушатель записей (src/sync/bot-writes.ts); его ошибки не ломают действие пользователя. */
     private readonly onWrite?: WriteListener,
+    /** Календарь по умолчанию вместо основного календаря владельца — основной общий календарь дома (ревью R1, блокер 2). */
+    private readonly defaultOverride?: string,
   ) {}
 
   private async written(w: BotWrite): Promise<void> {
@@ -155,7 +157,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
         providerCalendarId: r.provider_calendar_id,
         title: r.title,
         writable: r.writable === 1,
-        isDefault: r.is_default === 1,
+        isDefault: this.defaultOverride ? r.id === this.defaultOverride : r.is_default === 1,
         aliases: (JSON.parse(r.aliases ?? "[]") as string[]).sort(),
       }));
   }

@@ -6,7 +6,7 @@ import { hasGoogleAccount } from "../db/accounts";
 import { membershipOf } from "../db/households";
 import { ensureTelegramUser, type User } from "../db/users";
 import type { TgUpdate } from "../telegram/types";
-import { handleAssignCallback } from "./assign/answers";
+import { handleAssignCallback, handleTextAnswer } from "./assign/answers";
 import { isAssignCallback } from "./assign/view";
 import { handleCallback } from "./callbacks";
 import type { AppContext } from "./context";
@@ -14,10 +14,11 @@ import { isDisconnectCommand, proposeDisconnect } from "./disconnect";
 import { telegramName } from "./format";
 import { hasAccess } from "./gate";
 import { handleHouseholdText, joinByInvite } from "./household/commands";
-import { handleGroupCallback, handleGroupMessage } from "./household/group";
+import { greetGroup, handleGroupCallback, handleGroupMessage } from "./household/group";
 import { isAddressedToBot, parseHomeStart } from "./household/logic";
 import { handleHouseholdCallback, isHouseholdCallback } from "./household/menu";
-import { householdScope } from "./household/scope";
+import { privateScope } from "./household/scope";
+import { isHelpRequest, sendHelp, sendStart } from "./help";
 import { parseAddStart } from "./inline/logic";
 import { handleAddStart, handleInlinePress, isInlinePress } from "./inline/press";
 import { handleCommand } from "./input/message";
@@ -27,6 +28,11 @@ import { t } from "./messages";
 export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<void> {
   // Отредактированные сообщения игнорируем (US-10)
   if (update.edited_message) return;
+  // Бота добавили в группу — приветствие с привязкой к дому (ревью R1 #13)
+  if (update.my_chat_member) {
+    await greetGroup(ctx, update.my_chat_member);
+    return;
+  }
 
   const message = update.message;
   const from = message?.from ?? update.callback_query?.from;
@@ -73,10 +79,12 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     return;
   }
 
-  // Участник дома без своего Google — общие календари дома через аккаунт владельца (US-90)
+  // Чьи календари в личном чате (US-90, QA-08): участник дома — общие календари дома через Google владельца, если их нет
+  // в его собственном Google
   const hasGoogle = await hasGoogleAccount(ctx.db, user.id);
-  const membership = hasGoogle ? null : await membershipOf(ctx.db, user.id);
-  const scoped: AppContext = membership ? { ...ctx, calendarScope: await householdScope(ctx.db, membership.household) } : ctx;
+  const membership = await membershipOf(ctx.db, user.id);
+  const scope = await privateScope(ctx, user.id);
+  const scoped: AppContext = scope ? { ...ctx, calendarScope: scope } : ctx;
 
   if (update.callback_query) {
     if (isHouseholdCallback(update.callback_query.data)) await handleHouseholdCallback(ctx, user, update.callback_query);
@@ -91,22 +99,24 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
     await proposeDisconnect(ctx, user, message.chat.id);
     return;
   }
-  // /home, /leave, «создай дом …», ответ на «как вас называть» — и без Google (US-90)
+  // Справка и приветствие — без LLM, по состоянию (ревью R1 §4)
+  if (isHelpRequest(message.text)) {
+    await sendHelp(ctx, user, message.chat.id);
+    return;
+  }
+  if (isStart) {
+    await sendStart(ctx, user, message.chat.id, hasGoogle, membership);
+    return;
+  }
+  // /home, /leave, «создай дом …», ответы на вопросы дома («как вас называть») — и без Google (US-90)
   if (await handleHouseholdText(ctx, user, message, from)) return;
 
   // Без привязанного календаря и дома интент не распознаём — только предлагаем подключить (US-01)
   if (!hasGoogle && !membership) {
-    const text = isStart ? `${t("welcome", user.locale)}\n\n${t("connectPrompt", user.locale)}` : t("connectPrompt", user.locale);
-    await ctx.telegram.sendMessage(message.chat.id, text, await connectKeyboard(ctx, user.id, user.locale, user.tgName));
+    await ctx.telegram.sendMessage(message.chat.id, t("connectPrompt", user.locale), await connectKeyboard(ctx, user.id, user.locale, user.tgName));
     return;
   }
-
-  if (isStart) {
-    await ctx.telegram.sendMessage(
-      message.chat.id,
-      membership ? t("homeWelcomeMember", user.locale, { name: membership.household.name }) : t("welcome", user.locale),
-    );
-    return;
-  }
+  // «Беру» / «Не могу» / «Сделано» словом — ответ на поручение (ревью R1 #7)
+  if (message.text && membership && (await handleTextAnswer(ctx, user, message.chat.id, message.text, message.reply_to_message?.message_id))) return;
   await handleCommand(scoped, user, message);
 }

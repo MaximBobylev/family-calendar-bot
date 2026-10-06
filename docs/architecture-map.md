@@ -43,6 +43,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Новый интент / поле интента | `src/nlu/intents.ts` (схемы tools, промпт), `docs/intents.md`, `testdata/nlu/intents.yaml`; маршрут — `routeIntent` в `src/bot/route-intent.ts` |
 | Разбор дат, длительностей, повторений | `src/dates/*` + `testdata/dates/*.yaml` (правила — `docs/date-rules.md`) |
 | Даты из всего сообщения, название без дат | `src/dates/extract.ts` + `testdata/extract/*.yaml` |
+| Справка `/help`, приветствие `/start` | `src/bot/help.ts`, тексты — `src/bot/messages/help.ts`; меню команд — `scripts/deploy.ts` (`setMyCommands`) |
 | Тексты ответов бота | `src/bot/messages/*.ts` — словарь RU/EN по областям (новый текст — в файл своей области), `t()` и `MessageKey` — `src/bot/messages.ts`; форматирование — `src/bot/format.ts`, `format-events.ts` |
 | Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/db/card-status.ts` (статусы, повтор), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`, `RETRYABLE`) |
 | Учёт функций (US-64) | `src/db/features.ts` (`Feature`, `recordFeature` — вызывать после успешного действия), сводка — `/admin/usage` |
@@ -52,13 +53,13 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
 | Админка | `src/admin/*`, `docs/admin-console.md`; дома — `views/households.ts`, синхронизация / уведомления / напоминания — `views/sync.ts`, контент → событие и inline — `views/usage.ts`; подписи функций US-64 — `src/admin/labels.ts` (`test/admin-r1.test.ts`) |
 | Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), здоровье синхронизации и порог `sync_stale` — `src/ops/sync-health.ts` (чистый, `test/admin-r1.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
-| Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, расписание напоминаний — `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
+| Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, роли `roleAlias`, расписание напоминаний и эскалации — `planAssignmentJobs` в `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
 | Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
 | Inline-карточка «📅 Добавить себе» (US-95) | `src/bot/inline/*`: разбор запроса, текст карточки, шаблон Google Calendar, `.ics` — `logic.ts` (чистый, `test/inline-logic.test.ts`); inline-запрос — `query.ts` (из webhook, без inbox); нажатие и `/start add_<токен>` — `press.ts` (зарегистрированные) и `guest.ts` (посторонние — из `gate.ts`, `/ics/<токен>`); SQL — `src/db/inline.ts` |
 | Синхронизация Google, push, опрос, каналы | `src/sync/engine.ts` (задачи `cal_sync`/`cal_push`/`watch_renew`, `applyEntries`), `src/sync/push.ts`, SQL — `src/db/sync.ts`; требования Google — `docs/research/google-push.md` |
-| Уведомления об изменениях (US-72), напоминания в Telegram (US-71) | «что изменилось», окно, тихие часы, пачка, тексты — `src/sync/logic.ts` (чистый, `test/sync-logic.test.ts`); рассылка — `src/sync/notify.ts`; «календарь → чаты» — `db/sync.ts:chatsForCalendar`; напоминания — `src/sync/reminders.ts` |
+| Уведомления об изменениях (US-72), напоминания в Telegram (US-71) | «что изменилось», окно, тихие часы, пачка, тексты — `src/sync/logic.ts` (чистый, `test/sync-logic.test.ts`); рассылка — `src/sync/notify.ts`; «календарь → чаты» (личные чаты с календарём, участники дома без него в своём Google, групповые чаты дома) — `db/sync.ts:chatsForCalendar`; напоминания — `src/sync/reminders.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
 ## src/
@@ -91,20 +92,20 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/with-typing.ts` | `withTyping`: «печатает…» на время обработки |
 | `bot/context.ts` | `AppContext`: конфиг, часы, D1, Telegram; `calendarScope` — календари дома вместо своих (US-90, US-94) |
 | `bot/gate.ts` | Ранний фильтр в webhook: `hasAccess` (allowlist, участник дома, `/start home_…`), в группах — только обращённое к боту |
-| `bot/household/logic.ts` | US-90/94, чистый: разбор `/home …`, «Создай дом», имя и другие имена, код приглашения, `isAddressedToBot`, `stripBotMention`, календари дома по умолчанию |
-| `bot/household/commands.ts` | Команды дома в личном чате: создать, пригласить, вступить по ссылке (`joinByInvite`), имя, дети, `/leave` |
-| `bot/household/menu.ts` | Экран `/home` и кнопки `hm:*` (пригласить, календари дома, убрать участника/ребёнка, выйти, распустить); `dissolveWithNotice` |
-| `bot/household/group.ts` | Групповой чат: `/home link`/`unlink`, команды участников по календарям дома, нажатия карточек любым участником (от имени автора) |
+| `bot/household/logic.ts` | US-90/94, чистый: разбор `/home …`, «Создай дом», имя и другие имена (`looksLikeNames`), код приглашения, `isAddressedToBot`, `stripBotMention`, календари дома по умолчанию (только «семейные») |
+| `bot/household/commands.ts` | Команды дома в личном чате: создать, пригласить, вступить по ссылке (`joinByInvite`, язык из Telegram), имя, дети, `/leave`; ответы на вопросы дома (`awaiting`: home_name / home_kid / home_create) |
+| `bot/household/menu.ts` | Экран `/home` и кнопки `hm:*` (пригласить, календари дома и ⭐ основной, имена, убрать участника с подтверждением, дети, сводка «Завтра», чек-лист «Что дальше», выйти, распустить); `dissolveWithNotice` |
+| `bot/household/group.ts` | Групповой чат: `/home link`/`unlink`, приветствие при добавлении (`greetGroup`, `my_chat_member`, кнопка `hg:link`), `/help`, команды участников по календарям дома, «Беру» ответом, нажатия карточек любым участником (от имени автора) |
 | `bot/inline/logic.ts` | US-95, чистый: inline-запрос → событие(я), текст карточки, заголовок результата, ссылка-шаблон Google Calendar, `.ics`, `ia:<токен>` и `/start add_<токен>` |
 | `bot/inline/query.ts` | Inline-запрос: доступ, разбор, токены в D1, `answerInlineQuery` (прямо из webhook, без inbox) |
 | `bot/inline/press.ts` | «📅 Добавить себе» от пользователя бота: с Google — карточка создания в личном чате, без — ссылки; чат не начат — deep link |
 | `bot/inline/guest.ts` | Токен (HMAC), кнопка, счётчик «Добавили себе», ссылки без OAuth; посторонние — нажатие и `/start add_<токен>` из `gate.ts`; `GET /ics/<токен>` |
-| `bot/household/scope.ts` | Чьи календари в разговоре (`CalendarScope`), «👤 Добавляет: …», запись автора в `event_meta` |
+| `bot/household/scope.ts` | Чьи календари в разговоре (`CalendarScope` с основным общим календарём), `privateScope` (участник — общие календари дома, если их нет в его Google, QA-08), «👤 Добавляет: …», запись автора в `event_meta` |
 | `bot/assign/logic.ts` | US-91/92, чистый: «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела», «…, отводит папа»; имена с падежами (`sameName`), ребёнок в скобках (`familyTitle`), расписание напоминаний (`planAssignmentJobs`); `assignOverride` — до `effectiveIntent` |
-| `bot/assign/start.ts` | Карточка поручения автору (кому, срок, событие — найти или «+ в календарь»), `confirmAssign` |
-| `bot/assign/answers.ts` | Кнопки `as:<id>:…` (Беру / Не могу / Сделано / отмена / Сделаю сам / Предложить другому), «мои дела», `shiftAssignmentsForEvent` / `cancelAssignmentsForEvent` (перенос и удаление события — через бота; `…ForProviderEvent` — из синка Google, `sync/engine.ts:applyEntries`) |
+| `bot/assign/start.ts` | Карточка поручения автору (кому, срок, событие — найти или «+ в календарь» в основной общий), «Кому поручить?» (`ASSIGN_WHO_CARD`, роль запоминается), `confirmAssign` |
+| `bot/assign/answers.ts` | Кнопки `as:<id>:…` и ответ словом (`actOnAssignment`, `handleTextAnswer`: Беру / Не могу / Сделано / отмена / Сделаю я / Предложить другому), «мои дела», «что я поручил» (`listAssignedByMe`), уход участника (`releaseMemberAssignments`), роспуск (`cancelHouseholdAssignments`), `shiftAssignmentsForEvent` / `cancelAssignmentsForEvent` (перенос и удаление события — через бота; `…ForProviderEvent` — из синка Google, `sync/engine.ts:applyEntries`) |
 | `bot/assign/notify.ts`, `view.ts` | Сообщения поручения по статусу и их обновление у всех получателей; подписи срока, кнопки |
-| `bot/assign/family.ts` | Дом с участниками и детьми (`loadHome`), подсказки «отводит / для кого» при создании, метки в списках (`familyLabeler`) |
+| `bot/assign/family.ts` | Дом с участниками и детьми (`loadHome`), подсказки «отводит / для кого» при создании, метки в списках (`familyLabeler`), личное «Отводите вы» ответственному (`notifyResponsible`) |
 | `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
 | `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
@@ -118,7 +119,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `help` (справка и /start), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
@@ -130,6 +131,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/forwarded.ts` | US-10: пересланное — не команда, карточка «Выполнить как команду?» / «📅 Создать событие из этого» (US-65); `forwardOrigin` — автор и дата |
 | `bot/ingest.ts` | US-65/66/67: событие из чужого контента — черновик из пересланного или фото → карточка создания; `.ics` → карточка `ics` (`confirmIcs`); вложения — `handleAttachment` |
 | `bot/ingest-logic.ts` | Чистая логика для ingest: дата по предложениям (`foreignDateSpans`), место (`guessPlace`), название без LLM, описание-источник |
+| `bot/help.ts` | Ревью R1 §4: `/help` и «что ты умеешь» без LLM (личка и группа), `/start` по состоянию (новый, с Google без дома, владелец, участник) |
 | `bot/typing.ts` | «печатает…» каждые 4 с до ответа |
 | **nlu/** | Понимание текста |
 | `nlu/intents.ts` | Реестр интентов: `SYSTEM_PROMPT`, `TOOLS`, разбор ответа LLM |

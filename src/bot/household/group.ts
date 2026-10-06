@@ -4,8 +4,10 @@
 import { hasGoogleAccount } from "../../db/accounts";
 import { ensureConversation } from "../../db/conversations";
 import { cardOwner, type Household, householdOfConversation, linkConversation, type Membership, membershipOf } from "../../db/households";
-import { findUserById, type User } from "../../db/users";
-import type { TgCallbackQuery, TgMessage } from "../../telegram/types";
+import { ensureTelegramUser, findUserById, type User } from "../../db/users";
+import type { TgCallbackQuery, TgChatMemberUpdated, TgMessage } from "../../telegram/types";
+import { handleTextAnswer } from "../assign/answers";
+import { isHelpRequest, sendGroupHelp } from "../help";
 import { handleCallback } from "../callbacks";
 import type { AppContext } from "../context";
 import { handleCommand } from "../input/message";
@@ -33,15 +35,13 @@ export async function handleGroupMessage(ctx: AppContext, user: User, message: T
   const cmd = text ? parseHouseholdCommand(text) : null;
   const [home, membership] = await Promise.all([householdOfConversation(ctx.db, conversationId), membershipOf(ctx.db, user.id)]);
 
+  // Справка в группе — без LLM и до привязки (ревью R1 §4.2)
+  if (isHelpRequest(text)) {
+    await sendGroupHelp(ctx, user, chatId);
+    return;
+  }
   if (cmd?.kind === "link") {
-    if (!membership || !(await canManageLink(ctx, membership, user.id))) {
-      await ctx.telegram.sendMessage(chatId, t("groupLinkNeedsHome", locale));
-    } else if (home && home.id !== membership.household.id) {
-      await ctx.telegram.sendMessage(chatId, t("groupLinkedElsewhere", locale, { name: home.name }));
-    } else {
-      await linkConversation(ctx.db, conversationId, membership.household.id);
-      await ctx.telegram.sendMessage(chatId, t("groupLinked", locale, { name: membership.household.name, bot: ctx.config.telegramBotUsername }));
-    }
+    await linkChat(ctx, user, chatId, conversationId, home, membership);
     return;
   }
   if (!home) {
@@ -64,10 +64,55 @@ export async function handleGroupMessage(ctx: AppContext, user: User, message: T
     await ctx.telegram.sendMessage(chatId, t("groupPrivateCommand", locale));
     return;
   }
+  // «Беру» ответом на сообщение поручения в группе (ревью R1 #7)
+  if (message.reply_to_message && (await handleTextAnswer(ctx, user, chatId, text, message.reply_to_message.message_id))) return;
   // Создавать и менять события в группе может любой участник дома — как и в личном чате (US-90, [решение 2026-10-06])
   const scoped: AppContext = { ...ctx, calendarScope: await householdScope(ctx.db, home) };
   await handleCommand(scoped, user, { ...message, text });
 }
+
+/** Привязать чат к дому: владелец или участник с Google; уже привязан к этому дому — так и сказать (QA-18). */
+async function linkChat(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  home: Household | null,
+  membership: Membership | null,
+): Promise<void> {
+  const locale = user.locale;
+  if (home && membership && home.id === membership.household.id && !(await canManageLink(ctx, membership, user.id))) {
+    await ctx.telegram.sendMessage(chatId, t("groupLinkedElsewhere", locale, { name: home.name }));
+  } else if (!membership || !(await canManageLink(ctx, membership, user.id))) {
+    await ctx.telegram.sendMessage(chatId, t("groupLinkNeedsHome", locale));
+  } else if (home && home.id !== membership.household.id) {
+    await ctx.telegram.sendMessage(chatId, t("groupLinkedElsewhere", locale, { name: home.name }));
+  } else {
+    await linkConversation(ctx.db, conversationId, membership.household.id);
+    await ctx.telegram.sendMessage(chatId, t("groupLinked", locale, { name: membership.household.name, bot: ctx.config.telegramBotUsername }));
+  }
+}
+
+/**
+ * Бота добавили в группу (my_chat_member, ревью R1 #13): приветствие; добавил тот, кто может привязать, — кнопка
+ * «Привязать» к его дому. Посторонних отсеивает gate.ts (молча).
+ */
+export async function greetGroup(ctx: AppContext, upd: TgChatMemberUpdated): Promise<void> {
+  const joined = ["member", "administrator"].includes(upd.new_chat_member.status) && ["left", "kicked"].includes(upd.old_chat_member.status);
+  if (!joined || upd.chat.type === "private" || upd.chat.type === "channel" || upd.from.is_bot) return;
+  const { user } = await ensureTelegramUser(ctx.db, upd.from.id, ctx.clock.now());
+  const membership = await membershipOf(ctx.db, user.id);
+  const bot = ctx.config.telegramBotUsername;
+  await ensureConversation(ctx.db, upd.chat.id, "group");
+  if (membership && (await canManageLink(ctx, membership, user.id))) {
+    await ctx.telegram.sendMessage(upd.chat.id, t("groupHello", user.locale, { name: membership.household.name, bot }), {
+      inline_keyboard: [[{ text: t("groupLinkButton", user.locale), callback_data: GROUP_LINK_CALLBACK }]],
+    });
+  } else await ctx.telegram.sendMessage(upd.chat.id, t("groupHelloNoHome", user.locale, { bot }));
+}
+
+/** Кнопка «🔗 Привязать» в приветствии группы. */
+export const GROUP_LINK_CALLBACK = "hg:link";
 
 /**
  * Нажатие в группе: карточку может нажать любой взрослый дома (US-94) — проверяем членство нажавшего; действие
@@ -75,6 +120,13 @@ export async function handleGroupMessage(ctx: AppContext, user: User, message: T
  */
 export async function handleGroupCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
   const chatId = cq.message?.chat.id;
+  if (chatId && cq.data === GROUP_LINK_CALLBACK) {
+    await ctx.telegram.answerCallbackQuery(cq.id);
+    const conversationId = await ensureConversation(ctx.db, chatId, "group");
+    const [home, membership] = await Promise.all([householdOfConversation(ctx.db, conversationId), membershipOf(ctx.db, user.id)]);
+    await linkChat(ctx, user, chatId, conversationId, home, membership);
+    return;
+  }
   const parsed = parseCallbackData(cq.data);
   if (!chatId || !parsed) {
     await ctx.telegram.answerCallbackQuery(cq.id, cq.data?.startsWith("hm:") ? t("groupPrivateCommand", user.locale) : undefined);

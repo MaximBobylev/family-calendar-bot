@@ -4,8 +4,8 @@ import type { Messages } from "./types";
 
 export const commonMessages = {
   unsupported: {
-    ru: "Я умею только работать с календарём. Например: «Что у меня завтра?»",
-    en: "I can only work with your calendar. For example: “What's on tomorrow?”",
+    ru: "Это я пока не умею. Например: «Что у нас завтра?» или «Напомни мужу купить хлеб». Что я умею — /help",
+    en: "I can't do that yet. For example: “What's on tomorrow?” Everything I can do — /help",
   },
   oneAtATime: {
     ru: "Давайте по одной команде за раз.",

@@ -1,0 +1,234 @@
+# Исправления по продуктовому ревью R1 (docs/research/product-review-r1.md): справка и /start по состоянию, основной общий
+# календарь дома, имена и «Кому поручить?», ответы словом, «что я поручил», «Завтра» с делами, язык приглашённого.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z). Иван 1001 (владелец, Google: личный «Иван» и «Семья»),
+# Аня 2001 (без Google, не в allowlist). Имена в доме Иван владельцу не задавал — «муж» узнаём из выбора кнопкой.
+
+- id: help-and-start-without-llm
+  story: US-01
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    # Новый пользователь без Google: справка — с кнопкой «Подключить»; без вызова LLM (ревью R1 §4.2)
+    - telegram: { from: 1001, text: "/help" }
+    - telegram: { from: 1001, text: "что ты умеешь?" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Что я умею", "Дела семьи", "Напомни мужу забрать Машу в 17", "@cab_test_bot суббота 14:00", "подключите Google Календарь"], buttons: ["Подключить Google Календарь"] }
+        - { chat_id: 1001, text_contains: ["Что я умею"] }
+    - expect_llm_requests: 0
+    # С Google, без дома: /start — что можно уже сейчас и «🏠 Создать дом»
+    - google_account:
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+    - oauth: { consent: ivan@gmail.com }
+    - telegram: { from: 1001, first_name: "Иван", text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["ivan@gmail.com", "подключён"] }
+        - { chat_id: 1001, text_contains: ["Google Календарь подключён ✅", "Перешлите сообщение или фото афиши", "создайте дом"], buttons: ["🏠 Создать дом"] }
+    # Кнопка спрашивает название — ответ обычным сообщением
+    - press: "🏠 Создать дом"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Как назовём дом?"] }
+    - telegram: { from: 1001, first_name: "Иван", text: "Бобылевы" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Дом «Бобылевы» создан"], buttons: ["▫️ Иван", "✅ Семья", "⭐", "➕ Пригласить", "Готово"] }
+    - telegram: { from: 1001, text: "/help" }
+    - telegram: { from: 1001, text: "/start" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Что я умею"], text_not_contains: ["Дома пока нет", "подключите"] }
+        - { chat_id: 1001, text_contains: ["🏠 Дом «Бобылевы»: Иван", "Кто-то должен отвезти Ваню", "/help"] }
+    - expect_llm_requests: 0
+
+- id: household-without-family-calendar-asks
+  story: US-90
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: work@group.calendar.google.com, summary: "Работа", accessRole: writer, timeZone: Europe/Moscow }
+    # Семейного по названию нет — ничего не отмечаем сами, подсказываем создать «Семья» (ревью R1, блокер 2)
+    - telegram: { from: 1001, text: "/home create Бобылевы" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Семейного календаря я не нашёл", "Создать календарь", "«Семья»", "/connect"], buttons: ["▫️ Иван", "▫️ Работа", "➕ Пригласить", "Готово"] }
+    - press: "▫️ Работа"
+    - expect_telegram:
+        - { method: editMessageText, buttons: ["▫️ Иван", "✅ Работа", "⭐", "➕ Пригласить", "Готово"] }
+
+- id: member-writes-go-to-main-shared-calendar
+  story: US-90
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+      - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+      - telegram: { from: 1001, text: "/home kid Маша" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена, мама" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - expect_telegram_count: 5
+      - llm:
+          "Кружок Маши в пятницу в 17": { tool: create_event, args: { start: "в пятницу в 17", title: "Кружок Маши" } }
+          "Танцы Маши в субботу в 12": { tool: create_event, args: { start: "в субботу в 12", title: "Танцы Маши" } }
+          "Напомни мужу купить хлеб": { tool: assign_task, args: { assignee: "мужу", task: "купить хлеб" } }
+          "Напомни мужу забрать посылку завтра в 17": { tool: assign_task, args: { assignee: "мужу", when: "завтра в 17", task: "забрать посылку" } }
+          "Пусть Аня завтра в 18 заберёт Машу": { tool: assign_task, args: { assignee: "Аня", when: "завтра в 18", task: "забрать Машу" } }
+          "Пусть Аня полить цветы": { tool: assign_task, args: { assignee: "Аня", task: "полить цветы" } }
+          "что я поручил?": { tool: unsupported }
+    # Владелец сделал общим и свой личный календарь — запись участника всё равно в основной общий «Семья» (⭐)
+    - telegram: { from: 1001, text: "/home" }
+    - press: "📅 Календари дома"
+    - press: "▫️ Иван"
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Основной общий (сюда добавляю события семьи): Семья"] }
+        - { method: editMessageText }
+        - { method: editMessageText, buttons: ["✅ Иван", "☆", "✅ Семья", "⭐", "➕ Пригласить", "Готово"] }
+    - telegram: { from: 2001, text: "Кружок Маши в пятницу в 17" }
+    - press: { button: "Создать", from: 2001 }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Кружок Маши", start: "2026-10-09T17:00:00+03:00", end: "2026-10-09T18:00:00+03:00" }]
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 0 }
+    # Владелец выбирает основным другой — туда и пишем
+    - press: { button: "☆", from: 1001 }
+    - telegram: { from: 2001, text: "Танцы Маши в субботу в 12" }
+    - press: { button: "Создать", from: 2001 }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Танцы Маши", start: "2026-10-10T12:00:00+03:00", end: "2026-10-10T13:00:00+03:00" }]
+
+- id: assign-who-picker-learns-role
+  story: US-91
+  steps:
+    - *home
+    # «Мужу» не знаем — список имён и выбор кнопкой; роль запоминается выбранному (ревью R1, блокер 3)
+    - telegram: { from: 2001, text: "Напомни мужу купить хлеб" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Не нашёл «мужу» среди участников дома (Иван). Кому поручить?", "запомню, что «муж»"], buttons: ["Иван", "Отмена"] }
+    - press: { button: "Иван", from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["Запомнил: «муж» — это Иван."] }
+        - { chat_id: 2001, text_contains: ["Поручить?", "📌 Купить хлеб — без срока", "👤 Кому: Иван"] }
+    # В следующий раз — сразу
+    - telegram: { from: 2001, text: "Напомни мужу забрать посылку завтра в 17" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["Отменено"] }
+        - { chat_id: 2001, text_contains: ["Поручить?", "👤 Кому: Иван"] }
+    - telegram: { from: 1001, text: "/home" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Иван (владелец) — муж"] }
+    # Владелец задаёт имена участницы кнопкой «✏️ Аня» — ответ обычным сообщением
+    - press: { button: "✏️ Аня", from: 1001 }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Как называть участника «Аня»?"] }
+    - telegram: { from: 1001, text: "Аня, жена, мама, Анечка" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Запомнил: Аня (а также: жена, мама, Анечка)"] }
+
+- id: assign-text-answers-and-assigned-by-me
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Пусть Аня завтра в 18 заберёт Машу" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram_count: 3
+    # «Беру» словом сразу после предложения — как кнопка (ревью R1 #7)
+    - telegram: { from: 2001, text: "Беру" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня берёт: Забрать Машу — завтра в 18:00"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать Машу"], buttons: ["Сделано"] }
+        - { chat_id: 1001, text_contains: ["👍 Аня берёт: Забрать Машу"] }
+        - { chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать Машу — завтра в 18:00"] }
+    # Одна — на саму фразу поручения; «Беру» понят без LLM
+    - expect_llm_requests: 1
+    - telegram: { from: 1001, text: "Пусть Аня полить цветы" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram_count: 3
+    - telegram: { from: 2001, text: "не могу" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Аня не сможет: Полить цветы"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["Понял, передам"] }
+        - { chat_id: 1001, text_contains: ["Аня не сможет: Полить цветы"], buttons: ["Сделаю я", "Предложить другому"] }
+        - { chat_id: 2001, text_contains: ["Понял, передам: Полить цветы — не на вас."] }
+    # Автор видит, что поручил и что висит (ревью R1 #10)
+    - telegram: { from: 1001, text: "что я поручил?" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["📤 Поручено вами:", "• завтра в 18:00 — Забрать Машу · берёт Аня", "• без срока — Полить цветы · Аня не сможет — решить"]
+          buttons: ["Сделаю я: Полить цветы", "Предложить другому: Полить цветы"]
+    # «Сделано» словом — у взятого
+    - telegram: { from: 2001, text: "Сделано" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✔️ Сделано: Забрать Машу (Аня)"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✔️ Сделано: Забрать Машу"] }
+        - { chat_id: 1001, text_contains: ["✔️ Сделано: Забрать Машу (Аня)"] }
+        - { chat_id: 2001, text_contains: ["✔️ Сделано: Забрать Машу"] }
+    # Нет подходящего поручения — обычная команда (LLM)
+    - llm: { "Сделано": { tool: unsupported } }
+    - telegram: { from: 2001, text: "Сделано" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["Это я пока не умею"] }
+
+- id: digest-tomorrow-offered-with-tasks
+  story: US-93
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Пусть Аня завтра в 18 заберёт Машу" }
+    - press: { button: "Поручить", from: 1001 }
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    # Сводка «Завтра» — одной кнопкой из приветствия участника (ревью R1 #10)
+    - press: { button: "🌙 Сводка «Завтра» в 21:00", from: 2001 }
+    - expect_telegram_count: 7
+    - clock: "2026-10-07T18:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["📌 Ваши дела завтра:", "• завтра в 18:00 — Забрать Машу"] }
+
+- id: invitee-with-english-telegram-gets-english
+  story: US-90
+  steps:
+    - *home
+    - press: { button: "➕ Пригласить", from: 1001 }
+    - capture_telegram: { kate: "start=home_([A-Za-z0-9_-]+)" }
+    # Язык нового участника — из Telegram (ревью R1 #11, QA-32); владельцу — на его языке
+    - telegram: { from: 2002, first_name: "Kate", language: en, text: "/start home_{{kate}}" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Ссылка-приглашение"] }
+        - { chat_id: 2002, text_contains: ["You're in the household “Бобылевы”", "I'll do it / Can't"], buttons: ["🌙 “Tomorrow” summary at 21:00"] }
+        - { chat_id: 2002, text_contains: ["How should the household call you?"], buttons: ["👨 husband, dad", "👩 wife, mom"] }
+        - { chat_id: 1001, text_contains: ["В доме «Бобылевы» новый участник: Kate"] }
+    - press: { button: "👩 wife, mom", from: 2002 }
+    - expect_telegram:
+        - { chat_id: 2002, text_contains: ["Got it: Kate (also: wife, mom)"] }
+
+- id: member-settings-without-google-shows-what-works
+  story: US-04
+  steps:
+    - *home
+    # Участнику без Google — только то, что действует (ревью R1 #17): сводки, напоминания и уведомления, пояс, язык
+    - telegram: { from: 2001, text: "/settings" }
+    - expect_telegram:
+        - chat_id: 2001
+          text_contains: ["Об изменениях", "общие календари дома"]
+          text_not_contains: ["Календарь по умолчанию", "как в Google"]
+          buttons: ["🌍 Пояс", "☀️ Сводка", "🗣 English", "📣 Уведомления", "🔗 Подключить свой Google"]
+
+- id: household-duplicate-names-guard
+  story: US-90
+  steps:
+    - *home
+    # Ребёнок с именем взрослой — потом «Ане» не отличить (QA-16)
+    - telegram: { from: 1001, text: "/home kid Аня" }
+    - telegram: { from: 2001, text: "/home name Маша" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Имя «Аня» в доме уже есть"] }
+        - { chat_id: 2001, text_contains: ["Имя «Маша» в доме уже есть"] }

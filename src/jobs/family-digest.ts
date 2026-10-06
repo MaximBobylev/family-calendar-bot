@@ -10,7 +10,8 @@ import { escapeHtml } from "../bot/format";
 import { t } from "../bot/messages";
 import { hasGoogleAccount } from "../db/accounts";
 import { assignmentsDueBetween } from "../db/assignments";
-import { householdCalendarIds, membershipOf } from "../db/households";
+import { membershipOf } from "../db/households";
+import { privateScope } from "../bot/household/scope";
 import type { User } from "../db/users";
 
 /** Есть из чего собрать сводку: свой Google или дом (общие календари владельца). */
@@ -18,20 +19,23 @@ export async function hasDigestSource(db: D1Database, userId: string): Promise<b
   return (await hasGoogleAccount(db, userId)) || (await membershipOf(db, userId)) !== null;
 }
 
-/** Календари для сводки: свои — с Google; участник без Google — общие календари дома через аккаунт владельца. */
+/** Календари для сводки — те же, что в личном чате (privateScope): свои или общие календари дома через аккаунт владельца. */
 export async function digestProvider(ctx: AppContext, user: User): Promise<CalendarProvider | null> {
-  if (await hasGoogleAccount(ctx.db, user.id)) return new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock);
-  const m = await membershipOf(ctx.db, user.id);
-  if (!m) return null;
-  const ids = await householdCalendarIds(ctx.db, m.household.id);
-  return ids.length ? new GoogleCalendarProvider(ctx.config, ctx.db, m.household.ownerUserId, ctx.clock, ids) : null;
+  const scope = await privateScope(ctx, user.id);
+  if (scope) return scope.calendarIds.length ? new GoogleCalendarProvider(ctx.config, ctx.db, scope.ownerUserId, ctx.clock, scope.calendarIds) : null;
+  return (await hasGoogleAccount(ctx.db, user.id)) ? new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock) : null;
 }
 
-/** «📌 Ваши дела сегодня:» — открытые поручения участнику со сроком в этот день; нет — null. */
-export async function assignmentsBlock(ctx: AppContext, user: User, day: Day): Promise<string | null> {
+/** «📌 Ваши дела сегодня / завтра:» — открытые поручения участнику со сроком в этот день; нет — null. */
+export async function assignmentsBlock(
+  ctx: AppContext,
+  user: User,
+  day: Day,
+  title: "digestAssignments" | "digestAssignmentsTomorrow" = "digestAssignments",
+): Promise<string | null> {
   const tz = user.home_tz;
   const list = await assignmentsDueBetween(ctx.db, user.id, localToUtc({ day, minutes: 0 }, tz), localToUtc({ day: day + 1, minutes: 0 }, tz));
   if (list.length === 0) return null;
   const now = ctx.clock.now();
-  return [t("digestAssignments", user.locale), ...list.map((a) => `• ${whenOfAssignment(a, now, tz, user.locale)} — ${escapeHtml(a.title)}`)].join("\n");
+  return [t(title, user.locale), ...list.map((a) => `• ${whenOfAssignment(a, now, tz, user.locale)} — ${escapeHtml(a.title)}`)].join("\n");
 }

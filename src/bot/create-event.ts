@@ -7,7 +7,7 @@ import { localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
 import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
 import { type Feature, recordFeature } from "../db/features";
-import type { User } from "../db/users";
+import { findUserById, type User } from "../db/users";
 import type { AppContext } from "./context";
 import {
   type CalendarResolution,
@@ -21,7 +21,7 @@ import {
 } from "./create-logic";
 import { cardBody, createCard } from "./create-view";
 import { dateLabel, escapeHtml, hhmm } from "./format";
-import { familyCardLines, saveEventFamily } from "./assign/family";
+import { familyCardLines, notifyResponsible, saveEventFamily } from "./assign/family";
 import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
@@ -97,7 +97,8 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
   // Ответственный и «для кого» (US-92) — строками под телом карточки
   const fam = familyCardLines(a.draft.family, locale);
-  const sent = await ctx.telegram.sendMessage(chatId, `${text}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
+  const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
+  const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -169,6 +170,8 @@ export async function confirmCreate(
   // Автор — тот, кто попросил (в группе нажать «Создать» может любой взрослый дома, US-94)
   await noteCreator(ctx, created.ref, action.userId);
   await saveEventFamily(ctx, created.ref, action.payload.family);
+  // Ответственного назначили не сами — сказать ему лично (ревью R1 #9): «🚗 Отводите вы: Стоматолог (Ваня) — чт, 8 октября 16:00»
+  await notifyResponsible(ctx, action.payload.family, action.userId, o);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
   const body = cardBody(o, today, locale, calendarsCount > 1);
   const undo = await recordUndo(ctx, {
@@ -182,7 +185,14 @@ export async function confirmCreate(
   if (action.messageId) {
     const by = await creatorNote(ctx, action.userId, "homeCreatedByDone", locale);
     const fam = familyCardLines(action.payload.family, locale);
-    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}${fam}${by}`, { inline_keyboard: [row] }, { html: true });
+    const tz = await homeTzNote(ctx, o, locale);
+    await ctx.telegram.editMessageText(
+      chatId,
+      action.messageId,
+      `${t("created", locale)}\n\n${body}${tz}${fam}${by}`,
+      { inline_keyboard: [row] },
+      { html: true },
+    );
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
@@ -202,4 +212,17 @@ export async function confirmCreate(
     await attachMessage(ctx.db, qId, q.message_id);
   }
   return true;
+}
+
+/**
+ * Календари дома, а пояс автора не совпадает с поясом дома (владельца) — [решение 2026-10-06, QA-09]: время считаем в поясе
+ * автора (как он сказал), а в карточке показываем, сколько это по поясу дома: «🌍 17:00 по Asia/Yekaterinburg = 15:00 по
+ * Europe/Moscow». Иначе — пусто.
+ */
+async function homeTzNote(ctx: AppContext, o: CreateOption, locale: string): Promise<string> {
+  if (!ctx.calendarScope || o.allDay || !o.start || o.series) return "";
+  const owner = await findUserById(ctx.db, ctx.calendarScope.ownerUserId);
+  if (!owner || owner.home_tz === o.tz) return "";
+  const home = utcToLocal(localToUtc(o.start, o.tz), owner.home_tz);
+  return `\n${t("createHomeTzNote", locale, { time: hhmm(o.start.minutes), tz: o.tz, homeTime: hhmm(home.minutes), homeTz: owner.home_tz })}`;
 }

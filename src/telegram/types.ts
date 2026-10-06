@@ -12,6 +12,16 @@ export interface TgUser {
 export interface TgChat {
   id: number;
   type: "private" | "group" | "supergroup" | "channel";
+  title?: string;
+}
+
+/** Бота добавили в чат или убрали из него (my_chat_member) — приветствие в группе (ревью R1 #13). */
+export interface TgChatMemberUpdated {
+  chat: TgChat;
+  from: TgUser;
+  date: number;
+  old_chat_member: { status: string };
+  new_chat_member: { status: string };
 }
 
 export interface TgMessage {
@@ -56,6 +66,7 @@ export interface TgUpdate {
   edited_message?: TgMessage;
   callback_query?: TgCallbackQuery;
   inline_query?: TgInlineQuery;
+  my_chat_member?: TgChatMemberUpdated;
 }
 
 export interface InlineKeyboardButton {

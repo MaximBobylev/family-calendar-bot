@@ -72,7 +72,7 @@ describe("приглашение", () => {
 });
 
 describe("defaultHouseholdCalendars", () => {
-  it("по умолчанию + «семейные» с правом записи", () => {
+  it("только «семейные» с правом записи; основной (личный) календарь владельца — нет (ревью R1)", () => {
     const cal = (id: string, title: string, writable = true, isDefault = false, aliases: string[] = []) => ({ id, title, writable, isDefault, aliases });
     expect(
       defaultHouseholdCalendars([
@@ -84,7 +84,11 @@ describe("defaultHouseholdCalendars", () => {
         cal("y", "Kids", true, false, ["общий"]),
         cal("ro", "Семейный (чтение)", false),
       ]),
-    ).toEqual(["me", "fam", "x", "y"]);
+    ).toEqual(["fam", "x", "y"]);
+  });
+  it("основной календарь с семейным названием тоже не отмечаем — нет семейных — пусто", () => {
+    const cal = (id: string, title: string, isDefault = false) => ({ id, title, writable: true, isDefault, aliases: [] });
+    expect(defaultHouseholdCalendars([cal("me", "Семья Ивана", true), cal("w", "Работа")])).toEqual([]);
   });
 });
 

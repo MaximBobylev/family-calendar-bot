@@ -28,12 +28,11 @@
           "что у нас завтра?": { tool: list_events, args: { range: "завтра" } }
           "Плавание Маши в субботу в 10": { tool: create_event, args: { start: "в субботу в 10", title: "Плавание Маши" } }
       - telegram: { from: 1001, text: "/home create Бобылевы" }
-      - press: "✅ Иван"
       - press: "➕ Пригласить"
       - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
       - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
-      - reply: { from: 2001, text: "Аня, жена" }
-      - expect_telegram_count: 7
+      - telegram: { from: 2001, text: "Аня, жена" }
+      - expect_telegram_count: 6
     # Непривязанный чат: данных нет, подсказка как привязать
     - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас завтра?" }
     - expect_telegram:
@@ -87,10 +86,11 @@
     - expect_google_events: { email: ivan@gmail.com, calendar: family@group.calendar.google.com, events: [], count: 1 }
     # Любой взрослый дома — может; автор события — тот, кто попросил
     - press: { button: "Создать", from: 1001 }
-    # Личный чат владельца — другой чат календаря: уведомление об изменении (US-72)
+    # Другие чаты календаря — уведомление об изменении (US-72): личный чат владельца; групповой чат — источник, личный чат
+    # автора (Ани, видит «Семью» через дом) — эхо её же правки, туда не шлём (ревью R1 #18)
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["➕ Новое: «Плавание Маши»", "👤 Аня"] }
-        - { method: editMessageText, chat_id: -500, text_contains: ["✅ Создано", "Плавание Маши", "👤 Добавил(а): Аня"] }
+        - { method: editMessageText, chat_id: -500, text_contains: ["✅ Создано", "Плавание Маши", "👤 Автор: Аня"] }
     - expect_google_events:
         email: ivan@gmail.com
         calendar: family@group.calendar.google.com
@@ -127,4 +127,30 @@
     - telegram: { from: 1002, chat_id: -500, chat_type: group, text: "/home link" }
     - expect_telegram:
         - { chat_id: 1002, text_contains: ["Дом «Соседи» создан"] }
+        - { chat_id: -500, text_contains: ["уже привязан к дому «Бобылевы»"] }
+
+# Ревью R1 #13 и §4.2: бота добавили в группу — приветствие с кнопкой «Привязать»; /help в группе — без LLM.
+- id: group-bot-added-greets-and-links
+  story: US-94
+  steps:
+    - *home
+    - bot_added: { from: 1001, chat_id: -500 }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Я семейный помощник", "Привязать этот чат к дому «Бобылевы»?", "@cab_test_bot"], buttons: ["🔗 Привязать"] }
+    # Нажать «Привязать» может тот, кто вправе привязывать (владелец)
+    - press: { button: "🔗 Привязать", from: 1001, chat: -500 }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Чат привязан к дому «Бобылевы»"] }
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "/help@cab_test_bot" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["@cab_test_bot что у нас в выходные?", "/home link"] }
+    - expect_llm_requests: 0
+    # Добавил человек не из дома (в allowlist) — приветствие без кнопки; посторонний — молча
+    - bot_added: { from: 1002, chat_id: -600 }
+    - bot_added: { from: 999, chat_id: -700 }
+    - expect_telegram:
+        - { chat_id: -600, text_contains: ["владелец дома пишет здесь /home link"], buttons: [] }
+    # Участник без Google в уже привязанном чате: «уже привязан», а не «создайте дом» (QA-18)
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "/home link" }
+    - expect_telegram:
         - { chat_id: -500, text_contains: ["уже привязан к дому «Бобылевы»"] }

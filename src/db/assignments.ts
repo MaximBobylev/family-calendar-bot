@@ -18,8 +18,10 @@ export interface Assignment {
   forDependentId: string | null;
   originChatId: string | null;
   event: { accountId: string; calendarId: string; providerEventId: string } | null;
-  /** «Плавание Вани, сб 10:00» — подпись связанного события. */
+  /** Связанное событие: название (есть eventStartAt) или готовая подпись «Плавание Вани, сб 10:00» (старые строки, весь день). */
   eventLabel: string | null;
+  /** Начало связанного события (UTC, мс) — подпись строится при показе в поясе получателя (QA-03/04/05). */
+  eventStartAt: number | null;
 }
 
 export const ASSIGN_JOB = "assign";
@@ -41,10 +43,11 @@ type Row = {
   event_calendar_id: string | null;
   event_id: string | null;
   event_label: string | null;
+  event_start_at: number | null;
 };
 
 const COLUMNS =
-  "id, household_id, title, assignee_user_id, created_by, due_at, due_has_time, status, for_dependent_id, origin_chat_id, event_account_id, event_calendar_id, event_id, event_label";
+  "id, household_id, title, assignee_user_id, created_by, due_at, due_has_time, status, for_dependent_id, origin_chat_id, event_account_id, event_calendar_id, event_id, event_label, event_start_at";
 
 function fromRow(r: Row): Assignment {
   return {
@@ -63,6 +66,7 @@ function fromRow(r: Row): Assignment {
         ? { accountId: r.event_account_id, calendarId: r.event_calendar_id, providerEventId: r.event_id }
         : null,
     eventLabel: r.event_label,
+    eventStartAt: r.event_start_at,
   };
 }
 
@@ -71,8 +75,8 @@ export async function insertAssignment(db: D1Database, a: Omit<Assignment, "id" 
   await db
     .prepare(
       `INSERT INTO assignments (id, household_id, title, assignee_user_id, created_by, due_at, due_has_time, status, for_dependent_id, origin_chat_id,
-                                event_account_id, event_calendar_id, event_id, event_label, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                event_account_id, event_calendar_id, event_id, event_label, event_start_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -88,6 +92,7 @@ export async function insertAssignment(db: D1Database, a: Omit<Assignment, "id" 
       a.event?.calendarId ?? null,
       a.event?.providerEventId ?? null,
       a.eventLabel,
+      a.eventStartAt,
       now,
       now,
     )
@@ -123,8 +128,71 @@ export async function transition(
   return row ? fromRow(row) : null;
 }
 
-export async function setAssignmentDue(db: D1Database, id: string, dueAt: number, now: number): Promise<void> {
-  await db.prepare("UPDATE assignments SET due_at = ?, updated_at = ? WHERE id = ?").bind(dueAt, now, id).run();
+/** Новый срок; время связанного события сдвигается на ту же величину (перенос события, QA-03). */
+export async function setAssignmentDue(db: D1Database, id: string, dueAt: number, deltaMs: number, now: number): Promise<void> {
+  await db.prepare("UPDATE assignments SET due_at = ?, event_start_at = event_start_at + ?, updated_at = ? WHERE id = ?").bind(dueAt, deltaMs, now, id).run();
+}
+
+/** Открытые поручения на участнике и созданные им (уход из дома, удаление данных — QA-06/07). */
+export async function openAssignmentsInvolving(db: D1Database, householdId: string, userId: string): Promise<Assignment[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${COLUMNS} FROM assignments
+       WHERE household_id = ?1 AND status IN ('pending', 'accepted', 'declined') AND (assignee_user_id = ?2 OR created_by = ?2)`,
+    )
+    .bind(householdId, userId)
+    .all<Row>();
+  return results.map(fromRow);
+}
+
+/** Открытые поручения дома (роспуск — обновить сообщения, QA-15). */
+export async function openAssignmentsOfHousehold(db: D1Database, householdId: string): Promise<Assignment[]> {
+  const { results } = await db
+    .prepare(`SELECT ${COLUMNS} FROM assignments WHERE household_id = ? AND status IN ('pending', 'accepted', 'declined')`)
+    .bind(householdId)
+    .all<Row>();
+  return results.map(fromRow);
+}
+
+/** Поручения, созданные автором и ещё не закрытые (US-91: «что я поручил»), — новые сроки первыми по порядку. */
+export async function assignmentsCreatedBy(db: D1Database, userId: string, householdId: string): Promise<Assignment[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${COLUMNS} FROM assignments
+       WHERE household_id = ? AND created_by = ? AND status IN ('pending', 'accepted', 'declined')
+       ORDER BY due_at IS NULL, due_at, created_at`,
+    )
+    .bind(householdId, userId)
+    .all<Row>();
+  return results.map(fromRow);
+}
+
+/**
+ * Поручение, на которое отвечают словом («Беру», «Не могу», «Сделано», ревью R1 #7): по сообщению (reply) или последнее
+ * с предложением этому участнику в этом чате — в подходящих статусах.
+ */
+export async function assignmentForTextAnswer(
+  db: D1Database,
+  a: { userId: string; chatId: string; replyTo?: number; statuses: AssignmentStatus[] },
+): Promise<Assignment | null> {
+  const statuses = a.statuses.map((s) => `'${s}'`).join(",");
+  const row = await db
+    .prepare(
+      `SELECT ${COLUMNS.split(", ")
+        .map((c) => `x.${c}`)
+        .join(", ")}
+       FROM assignments x
+       JOIN assignment_messages m ON m.assignment_id = x.id
+       WHERE m.chat_id = ?1 AND x.status IN (${statuses})
+         AND (x.assignee_user_id = ?2 OR (x.assignee_user_id IS NULL AND m.user_id = ?2 AND m.answer IS NULL) OR m.role = 'group')
+         AND (?3 IS NULL OR m.message_id = ?3)
+         AND (?3 IS NOT NULL OR m.role = 'offer')
+       ORDER BY m.rowid DESC
+       LIMIT 1`,
+    )
+    .bind(a.chatId, a.userId, a.replyTo ?? null)
+    .first<Row>();
+  return row ? fromRow(row) : null;
 }
 
 /** Открытые поручения участнику (US-91: «мои дела»); с открытыми «кто-то должен» его дома. */

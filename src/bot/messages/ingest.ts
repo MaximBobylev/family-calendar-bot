@@ -6,7 +6,13 @@ import type { Messages } from "./types";
 export const ingestMessages = {
   // --- Пересланное → событие (US-65) ---
   forwardEventButton: { ru: "📅 Создать событие из этого", en: "📅 Create an event from this" },
-  forwardEventStarted: { ru: "📅 Создаю событие из пересланного: «{text}»", en: "📅 Creating an event from the forwarded message: “{text}”" },
+  forwardEventStarted: { ru: "📅 Создаю событие из пересланного…", en: "📅 Creating an event from the forwarded message…" },
+  forwardedLooksEvent: {
+    ru: "📅 Похоже на событие: «{text}». Создать?",
+    en: "📅 Looks like an event: “{text}”. Create it?",
+  },
+  forwardRunAsCommandButton: { ru: "Выполнить как команду", en: "Run as a command" },
+  forwardNoButton: { ru: "Не надо", en: "No, thanks" },
   ingestFromForwardBy: { ru: "Из пересланного сообщения от {name}", en: "From a forwarded message by {name}" },
   ingestFromForward: { ru: "Из пересланного сообщения", en: "From a forwarded message" },
   ingestFromImage: { ru: "Из изображения", en: "From an image" },

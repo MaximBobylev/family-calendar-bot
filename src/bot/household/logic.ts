@@ -100,6 +100,20 @@ export function parseNameAndAliases(raw: string): { name: string; aliases: strin
   return name ? { name, aliases: aliases.slice(0, MAX_ALIASES) } : null;
 }
 
+/**
+ * Похоже на ответ «имя и другие имена», а не на команду: без «?», цифр и слэша, до 8 частей по 1–3 слова
+ * («Аня, жена, мама»). «Что у нас завтра?» — не имя.
+ */
+export function looksLikeNames(text: string): boolean {
+  const s = text.trim();
+  if (!s || s.length > 120 || /[?!/\d@#]/.test(s)) return false;
+  const parts = s
+    .split(/[,;\n]/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return parts.length > 0 && parts.length <= 8 && parts.every((p) => p.split(/\s+/).length <= 3);
+}
+
 /** Код из `/start home_<code>` (deep link приглашения); иначе null. */
 export function parseHomeStart(text: string | undefined): string | null {
   const m = /^\/start(?:@\w+)?\s+home_([A-Za-z0-9_-]{6,64})$/.exec(text?.trim() ?? "");
@@ -115,11 +129,12 @@ export function inviteLink(botUsername: string, code: string): string {
 const SHARED_TITLE = /сем[ьеяй]|family|дом|home|общ|shared/i;
 
 /**
- * Календари дома по умолчанию при создании (US-90, [решение 2026-10-06]): календарь по умолчанию владельца и календари
- * с «общими» названиями — только с правом записи. Владелец меняет выбор кнопками.
+ * Календари дома по умолчанию при создании (US-90, [решение 2026-10-06, изменено по ревью R1]): только календари с «общими»
+ * названиями (или другими именами) и с правом записи. Основной календарь владельца — обычно личный и рабочий вперемешку —
+ * по умолчанию НЕ общий. Нет ни одного — владелец выбирает сам (или создаёт «Семья» в Google).
  */
 export function defaultHouseholdCalendars(calendars: { id: string; title: string; writable: boolean; isDefault: boolean; aliases: string[] }[]): string[] {
-  return calendars.filter((c) => c.writable && (c.isDefault || SHARED_TITLE.test(c.title) || c.aliases.some((a) => SHARED_TITLE.test(a)))).map((c) => c.id);
+  return calendars.filter((c) => c.writable && !c.isDefault && (SHARED_TITLE.test(c.title) || c.aliases.some((a) => SHARED_TITLE.test(a)))).map((c) => c.id);
 }
 
 /**

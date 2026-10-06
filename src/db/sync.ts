@@ -295,7 +295,7 @@ export async function botWritesFor(db: D1Database, pcid: string, ids: string[], 
 
 // --- Календарь → чаты ------------------------------------------------------------------------------------------------
 
-/** Чат, где виден календарь: сейчас — личный чат пользователя, у которого календарь подключён. */
+/** Чат, где виден календарь: личный чат пользователя или групповой чат дома. */
 export interface CalendarChat {
   chatId: string;
   /** Чей это личный чат (для группового чата дома — нет). */
@@ -308,24 +308,47 @@ export interface CalendarChat {
 }
 
 /**
- * «Календарь → чаты» (US-72): все чаты, где календарь виден, без повторов по чату. R0 — личные чаты всех пользователей,
- * у которых подключён этот календарь провайдера (тот же provider_calendar_id в разных аккаунтах). R1 — добавятся
- * групповые чаты домов, куда календарь подключён (US-94): дописать сюда UNION по conversations/households.
+ * «Календарь → чаты» (US-72, US-71): все чаты, где календарь виден, без повторов по чату:
+ * 1) личные чаты пользователей, у которых подключён этот календарь провайдера (тот же provider_calendar_id в разных аккаунтах);
+ * 2) личные чаты участников дома, у которых этого календаря нет в своём Google, если он — общий календарь их дома (видят
+ *    его через Google владельца, ревью R1 блокер 1, QA-01/08);
+ * 3) групповые чаты, привязанные к дому с этим общим календарём (US-94): язык и пояс — владельца дома, настройки — по умолчанию.
  */
 export async function chatsForCalendar(db: D1Database, pcid: string): Promise<CalendarChat[]> {
   const { results } = await db
     .prepare(
-      `SELECT ci.external_id AS chat_id, u.id AS user_id, u.locale, u.home_tz, u.settings_json, max(c.writable) AS writable
-       FROM calendars c
-       JOIN provider_accounts a ON a.id = c.account_id
-       JOIN users u ON u.id = a.user_id
-       JOIN channel_identities ci ON ci.user_id = u.id AND ci.channel = 'telegram'
-       WHERE c.provider_calendar_id = ?
-       GROUP BY ci.external_id
-       ORDER BY ci.external_id`,
+      `SELECT chat_id, user_id, locale, home_tz, settings_json, max(writable) AS writable
+       FROM (
+         SELECT ci.external_id AS chat_id, u.id AS user_id, u.locale, u.home_tz, u.settings_json, c.writable
+         FROM calendars c
+         JOIN provider_accounts a ON a.id = c.account_id
+         JOIN users u ON u.id = a.user_id
+         JOIN channel_identities ci ON ci.user_id = u.id AND ci.channel = 'telegram'
+         WHERE c.provider_calendar_id = ?1
+         UNION ALL
+         SELECT ci.external_id, u.id, u.locale, u.home_tz, u.settings_json, c.writable
+         FROM calendars c
+         JOIN household_calendars hc ON hc.calendar_id = c.id
+         JOIN household_members m ON m.household_id = hc.household_id
+         JOIN users u ON u.id = m.user_id
+         JOIN channel_identities ci ON ci.user_id = u.id AND ci.channel = 'telegram'
+         WHERE c.provider_calendar_id = ?1
+           AND NOT EXISTS (SELECT 1 FROM calendars oc JOIN provider_accounts pa ON pa.id = oc.account_id
+                           WHERE pa.user_id = u.id AND oc.provider_calendar_id = ?1)
+         UNION ALL
+         SELECT cv.chat_id, NULL, o.locale, o.home_tz, '{}', c.writable
+         FROM calendars c
+         JOIN household_calendars hc ON hc.calendar_id = c.id
+         JOIN households h ON h.id = hc.household_id
+         JOIN users o ON o.id = h.owner_user_id
+         JOIN conversations cv ON cv.household_id = h.id AND cv.kind = 'group'
+         WHERE c.provider_calendar_id = ?1
+       )
+       GROUP BY chat_id
+       ORDER BY chat_id`,
     )
     .bind(pcid)
-    .all<{ chat_id: string; user_id: string; locale: string; home_tz: string; settings_json: string; writable: number }>();
+    .all<{ chat_id: string; user_id: string | null; locale: string; home_tz: string; settings_json: string; writable: number }>();
   return results.map((r) => ({
     chatId: r.chat_id,
     userId: r.user_id,
@@ -336,13 +359,22 @@ export async function chatsForCalendar(db: D1Database, pcid: string): Promise<Ca
   }));
 }
 
-/** Календари провайдера, которые видит пользователь (для напоминаний US-71). */
+/**
+ * Календари провайдера, которые видит пользователь (для напоминаний US-71): свои подключённые и общие календари его дома
+ * (участник видит их через Google владельца, QA-02).
+ */
 export async function userCalendarIds(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT c.provider_calendar_id AS pcid
+      `SELECT c.provider_calendar_id AS pcid
        FROM calendars c JOIN provider_accounts a ON a.id = c.account_id
-       WHERE a.user_id = ?`,
+       WHERE a.user_id = ?1
+       UNION
+       SELECT c.provider_calendar_id
+       FROM household_members m
+       JOIN household_calendars hc ON hc.household_id = m.household_id
+       JOIN calendars c ON c.id = hc.calendar_id
+       WHERE m.user_id = ?1`,
     )
     .bind(userId)
     .all<{ pcid: string }>();

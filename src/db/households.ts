@@ -117,6 +117,61 @@ export async function toggleHouseholdCalendar(db: D1Database, household: Househo
   return true;
 }
 
+/**
+ * Основной общий календарь дома (ревью R1, блокер 2): куда записываются события участников. Выбранный владельцем, если
+ * он ещё общий; иначе — общий с правом записи, не основной (личный) календарь владельца, по названию. Нет общих — null.
+ */
+export async function householdDefaultCalendar(db: D1Database, householdId: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT c.id
+       FROM household_calendars hc
+       JOIN households h ON h.id = hc.household_id
+       JOIN calendars c ON c.id = hc.calendar_id
+       WHERE hc.household_id = ?
+       ORDER BY (c.id = h.default_calendar_id) DESC, c.writable DESC, c.is_default ASC, c.title
+       LIMIT 1`,
+    )
+    .bind(householdId)
+    .first<{ id: string }>();
+  return row?.id ?? null;
+}
+
+/** Сделать общий календарь основным для дома; только уже общий календарь. */
+export async function setHouseholdDefaultCalendar(db: D1Database, householdId: string, calendarId: string): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE households SET default_calendar_id = ?2
+       WHERE id = ?1 AND EXISTS (SELECT 1 FROM household_calendars WHERE household_id = ?1 AND calendar_id = ?2)`,
+    )
+    .bind(householdId, calendarId)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+/** Задать имя и другие имена участника дома (владелец — любому, участник — себе). false — такого участника нет. */
+export async function setMemberNameOf(db: D1Database, householdId: string, userId: string, name: string, aliases: string[]): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE household_members SET display_name = ?, aliases_json = ? WHERE household_id = ? AND user_id = ?")
+    .bind(name, JSON.stringify(aliases), householdId, userId)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+/** Добавить другое имя участнику («муж» — Ивану), если его ещё нет. */
+export async function addMemberAlias(db: D1Database, householdId: string, userId: string, alias: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE household_members
+       SET aliases_json = json_insert(aliases_json, '$[#]', ?3)
+       WHERE household_id = ?1 AND user_id = ?2
+         AND NOT EXISTS (SELECT 1 FROM json_each(aliases_json) j WHERE lower(j.value) = lower(?3))
+         AND lower(coalesce(display_name, '')) <> lower(?3)`,
+    )
+    .bind(householdId, userId, alias)
+    .run();
+}
+
 export async function membersOf(db: D1Database, householdId: string): Promise<Member[]> {
   const { results } = await db
     .prepare(

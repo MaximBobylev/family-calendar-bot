@@ -1,10 +1,11 @@
 // Команды дома в личном чате (US-90): создать дом, пригласить, вступить по ссылке, имя и другие имена, дети, выйти.
-// Разбор текста — logic.ts (без LLM); экран /home и кнопки — menu.ts.
+// Ответы на вопросы дома («Как вас называть?», имя ребёнка, название дома) — обычным сообщением через
+// dialog_state.awaiting, без reply (ревью R1 #7). Разбор текста — logic.ts (без LLM); экран /home и кнопки — menu.ts.
 
 import { randomToken } from "../../crypto";
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
 import { hasGoogleAccount } from "../../db/accounts";
-import { attachMessage, claimPendingAction, createPendingAction, ensureConversation, findOpenByMessage } from "../../db/conversations";
+import { ensureConversation, getDialogState, mergeDialogState } from "../../db/conversations";
 import {
   addMember,
   adoptOwnerTimezone,
@@ -19,43 +20,105 @@ import {
   membershipOf,
   peekInvite,
   removeMember,
-  setMemberName,
+  setMemberNameOf,
   upsertDependent,
 } from "../../db/households";
-import { ensureTelegramUser, type User } from "../../db/users";
-import type { TgMessage, TgUser } from "../../telegram/types";
+import { setLocale } from "../../db/settings";
+import { ensureTelegramUser, findUserById, type User } from "../../db/users";
+import type { InlineKeyboardButton, TgMessage, TgUser } from "../../telegram/types";
+import { releaseMemberAssignments } from "../assign/answers";
 import type { AppContext } from "../context";
 import { escapeHtml } from "../format";
 import { t } from "../messages";
 import {
+  cleanHouseholdName,
   defaultHouseholdCalendars,
   HOUSEHOLD_INVITE_TTL_MS,
   HOUSEHOLD_MAX_DEPENDENTS,
   HOUSEHOLD_MAX_MEMBERS,
   type HouseholdCommand,
   inviteLink,
+  looksLikeNames,
   parseHouseholdCommand,
   parseNameAndAliases,
 } from "./logic";
 import { calendarsScreen, notify, showHome } from "./menu";
 
-/** Вопрос «Как вас называть в доме?» (ForceReply) — ответ reply задаёт имя и другие имена. */
-export const HOME_NAME_QUESTION = "home_name";
+/** Сколько ждём ответа на вопросы дома (имя — человек может ответить не сразу). */
+const HOME_AWAIT_TTL_MS = 24 * 60 * 60 * 1000;
 
 const aliasesSuffix = (aliases: string[], locale: string) => (aliases.length ? t("homeAliasesSuffix", locale, { list: aliases.join(", ") }) : "");
 
+/** Кнопки ролей к вопросу об имени: «муж, папа» / «жена, мама». */
+export const roleButtons = (locale: string): InlineKeyboardButton[][] => [
+  [
+    { text: t("homeRoleHusband", locale), callback_data: "hm:role:h" },
+    { text: t("homeRoleWife", locale), callback_data: "hm:role:w" },
+  ],
+];
+
+/** Ждать ответа на вопрос дома следующим сообщением. */
+export async function awaitHome(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  awaiting: { kind: "home_name"; userId?: string } | { kind: "home_kid" } | { kind: "home_create" },
+): Promise<void> {
+  const conversationId = await ensureConversation(ctx.db, chatId, "private");
+  await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { ...awaiting, expiresAt: ctx.clock.now() + HOME_AWAIT_TTL_MS } }, ctx.clock.now());
+}
+
+/** Вопрос дома снят (ответили кнопкой). */
+export async function clearHomeAwait(ctx: AppContext, user: User, chatId: number): Promise<void> {
+  const conversationId = await ensureConversation(ctx.db, chatId, "private");
+  const { awaiting } = await getDialogState(ctx.db, conversationId, user.id);
+  if (awaiting?.kind.startsWith("home_")) await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
+}
+
 /**
- * Команды дома в личном чате и ответ на вопрос об имени. true — сообщение обработано, дальше не идёт.
+ * Команды дома в личном чате и ответы на вопросы дома. true — сообщение обработано, дальше не идёт.
  * Доступны и участнику без Google.
  */
 export async function handleHouseholdText(ctx: AppContext, user: User, message: TgMessage, tgUser: TgUser): Promise<boolean> {
   const text = message.text?.trim();
   if (!text) return false;
   const chatId = message.chat.id;
-  if (message.reply_to_message && (await answerNameQuestion(ctx, user, chatId, message.reply_to_message.message_id, text))) return true;
   const cmd = parseHouseholdCommand(text);
+  if (!cmd && (await answerHomeQuestion(ctx, user, chatId, text, tgUser))) return true;
   if (!cmd) return false;
   await runHouseholdCommand(ctx, user, chatId, cmd, tgUser);
+  return true;
+}
+
+/** Ответ на вопрос дома (awaiting). Не похоже на имя или название — вопрос снимается, сообщение идёт дальше как команда. */
+async function answerHomeQuestion(ctx: AppContext, user: User, chatId: number, text: string, tgUser: TgUser): Promise<boolean> {
+  const conversationId = await ensureConversation(ctx.db, chatId, "private");
+  const { awaiting } = await getDialogState(ctx.db, conversationId, user.id);
+  if (!awaiting || (awaiting.kind !== "home_name" && awaiting.kind !== "home_kid" && awaiting.kind !== "home_create")) return false;
+  await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
+  if (awaiting.expiresAt <= ctx.clock.now() || text.startsWith("/")) return false;
+  if (awaiting.kind === "home_create") {
+    const name = cleanHouseholdName(text);
+    if (!name || !looksLikeNames(text)) return false;
+    await createHome(ctx, user, chatId, name, await membershipOf(ctx.db, user.id), tgUser);
+    return true;
+  }
+  const parsed = looksLikeNames(text) ? parseNameAndAliases(text) : null;
+  const membership = await membershipOf(ctx.db, user.id);
+  if (!parsed || !membership) return false;
+  if (awaiting.kind === "home_kid") {
+    await addKid(ctx, user, chatId, membership.household, parsed.name, parsed.aliases);
+    return true;
+  }
+  const target = awaiting.userId ?? user.id;
+  // Другого участника называет только владелец
+  if (target !== user.id && membership.role !== "owner") return false;
+  if (await nameTaken(ctx, membership.household.id, parsed.name, target)) {
+    await ctx.telegram.sendMessage(chatId, t("homeNameTaken", user.locale, { name: parsed.name }));
+    return true;
+  }
+  if (!(await setMemberNameOf(ctx.db, membership.household.id, target, parsed.name, parsed.aliases))) return false;
+  await ctx.telegram.sendMessage(chatId, t("homeNameSet", user.locale, { name: parsed.name, aliases: aliasesSuffix(parsed.aliases, user.locale) }));
   return true;
 }
 
@@ -83,8 +146,9 @@ async function runHouseholdCommand(ctx: AppContext, user: User, chatId: number, 
       return;
     case "name":
       if (!membership) await send(t("homeNotInHousehold", locale));
+      else if (await nameTaken(ctx, membership.household.id, cmd.name, user.id)) await send(t("homeNameTaken", locale, { name: cmd.name }));
       else {
-        await setMemberName(ctx.db, membership.household.id, user.id, cmd.name, cmd.aliases);
+        await setMemberNameOf(ctx.db, membership.household.id, user.id, cmd.name, cmd.aliases);
         await send(t("homeNameSet", locale, { name: cmd.name, aliases: aliasesSuffix(cmd.aliases, locale) }));
       }
       return;
@@ -99,7 +163,7 @@ async function runHouseholdCommand(ctx: AppContext, user: User, chatId: number, 
   }
 }
 
-async function createHome(ctx: AppContext, user: User, chatId: number, name: string, membership: Membership | null, tgUser: TgUser): Promise<void> {
+export async function createHome(ctx: AppContext, user: User, chatId: number, name: string, membership: Membership | null, tgUser: TgUser): Promise<void> {
   const locale = user.locale;
   if (membership) {
     await ctx.telegram.sendMessage(chatId, t("homeAlreadyIn", locale, { name: membership.household.name }));
@@ -111,15 +175,18 @@ async function createHome(ctx: AppContext, user: User, chatId: number, name: str
     return;
   }
   const calendars = await new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock).calendars();
+  const shared = defaultHouseholdCalendars(calendars);
   const household = await createHousehold(ctx.db, {
     ownerId: user.id,
     name,
     ownerName: tgUser.first_name,
-    calendarIds: defaultHouseholdCalendars(calendars),
+    calendarIds: shared,
     now: ctx.clock.now(),
   });
-  const picker = await calendarsScreen(ctx, household, locale);
-  await ctx.telegram.sendMessage(chatId, escapeHtml(t("homeCreated", locale, { name })), { inline_keyboard: picker.buttons }, { html: true });
+  const picker = await calendarsScreen(ctx, household, locale, { done: "done" });
+  // Семейного по названию нет — личный не отмечаем сами, спрашиваем и подсказываем создать «Семья» (ревью R1, блокер 2)
+  const text = shared.length ? t("homeCreated", locale, { name }) : `${t("homeCreated", locale, { name })}\n\n${t("homeNoFamilyCalendar", locale)}`;
+  await ctx.telegram.sendMessage(chatId, escapeHtml(text), { inline_keyboard: picker.buttons }, { html: true });
 }
 
 /** Ссылка-приглашение (только владелец): одноразовая, 48 ч; preset — имя и другие имена приглашённого. */
@@ -150,9 +217,14 @@ export async function sendInvite(
   await ctx.telegram.sendMessage(chatId, `${text}${forWhom}`);
 }
 
-async function addKid(ctx: AppContext, user: User, chatId: number, household: Household, name: string, aliases: string[]): Promise<void> {
+export async function addKid(ctx: AppContext, user: User, chatId: number, household: Household, name: string, aliases: string[]): Promise<void> {
   const kids = await dependentsOf(ctx.db, household.id);
   const exists = kids.some((k) => k.name.toLowerCase() === name.toLowerCase());
+  // Имя взрослого участника — «Ане» потом не отличить (QA-16)
+  if (await nameTaken(ctx, household.id, name)) {
+    await ctx.telegram.sendMessage(chatId, t("homeNameTaken", user.locale, { name }));
+    return;
+  }
   if (!exists && kids.length >= HOUSEHOLD_MAX_DEPENDENTS) {
     await ctx.telegram.sendMessage(chatId, t("homeKidsFull", user.locale, { max: String(HOUSEHOLD_MAX_DEPENDENTS) }));
     return;
@@ -172,15 +244,34 @@ export async function leaveHousehold(ctx: AppContext, user: User, chatId: number
     await say(t("homeOwnerCantLeave", user.locale));
     return;
   }
+  // Поручения на нём — снова у авторов, напоминания сняты (QA-06)
+  await releaseMemberAssignments(ctx, household.id, user.id);
   await removeMember(ctx.db, household.id, user.id);
   await say(t("homeLeft", user.locale, { name: household.name }));
+  await notifyOwner(ctx, household, "homeMemberLeft", membership.displayName);
+}
+
+/** Имя уже носит другой взрослый участник или ребёнок дома (QA-16): тогда «Ане» не понять, кому. */
+async function nameTaken(ctx: AppContext, householdId: string, name: string, exceptUserId?: string): Promise<boolean> {
+  const n = name.toLowerCase();
+  const [members, kids] = await Promise.all([membersOf(ctx.db, householdId), dependentsOf(ctx.db, householdId)]);
+  return (
+    members.some((m) => m.userId !== exceptUserId && m.displayName.toLowerCase() === n) || (!!exceptUserId && kids.some((k) => k.name.toLowerCase() === n))
+  );
+}
+
+/** Владельцу — на его языке (QA-10): «новый участник» / «больше не в доме». */
+export async function notifyOwner(ctx: AppContext, household: Household, key: "homeMemberLeft" | "homeMemberJoined", name: string): Promise<void> {
   const owner = (await membersOf(ctx.db, household.id)).find((m) => m.role === "owner");
-  if (owner?.telegramId) await notify(ctx, owner.telegramId, t("homeMemberLeft", user.locale, { name: membership.displayName, home: household.name }));
+  if (!owner?.telegramId) return;
+  const ownerUser = await findUserById(ctx.db, owner.userId);
+  await notify(ctx, owner.telegramId, t(key, ownerUser?.locale ?? "ru", { name, home: household.name }));
 }
 
 /**
  * `/start home_<код>` (US-90): проверить приглашение ДО регистрации (посторонний с неверным кодом не становится
  * пользователем), затем атомарно «погасить» код и добавить в дом. Приглашённому allowlist не нужен.
+ * Язык нового участника — из Telegram: не русский — английский интерфейс (ревью R1 #11, QA-32).
  */
 export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number, code: string): Promise<void> {
   const lang = from.language_code ?? "ru";
@@ -190,7 +281,12 @@ export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number
     await ctx.telegram.sendMessage(chatId, t("homeInviteInvalid", lang));
     return;
   }
-  const { user } = await ensureTelegramUser(ctx.db, from.id, now);
+  const { user: registered, created } = await ensureTelegramUser(ctx.db, from.id, now);
+  let user = registered;
+  if (created && !/^(ru|uk|be)\b/i.test(lang)) {
+    await setLocale(ctx.db, user.id, "en");
+    user = { ...user, locale: "en" };
+  }
   const locale = user.locale;
   const current = await membershipOf(ctx.db, user.id);
   if (current) {
@@ -210,29 +306,18 @@ export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number
   const name = preset?.name ?? from.first_name;
   await addMember(ctx.db, { householdId: home.id, userId: user.id, name, aliases: preset?.aliases ?? [], now });
   await adoptOwnerTimezone(ctx.db, user.id, home.ownerUserId);
-  await ctx.telegram.sendMessage(chatId, t("homeJoined", locale, { name: home.name }));
-  // Имя задал владелец при приглашении — не переспрашиваем
-  if (!preset) await askName(ctx, user, chatId);
   const owner = (await membersOf(ctx.db, home.id)).find((m) => m.role === "owner");
-  if (owner?.telegramId) await notify(ctx, owner.telegramId, t("homeMemberJoined", locale, { name, home: home.name }));
+  // Что я буду делать и что можно попросить (ревью R1 §4.1); вечерняя сводка «Завтра» — одной кнопкой (ревью R1 #10)
+  await ctx.telegram.sendMessage(chatId, t("homeJoined", locale, { name: home.name, owner: owner?.displayName || "—" }), {
+    inline_keyboard: [[{ text: t("homeTomorrowButton", locale), callback_data: "hm:tmr" }]],
+  });
+  // Имя задал владелец при приглашении — не переспрашиваем
+  if (!preset) await askName(ctx, { ...user, locale }, chatId);
+  await notifyOwner(ctx, home, "homeMemberJoined", name);
 }
 
-async function askName(ctx: AppContext, user: User, chatId: number): Promise<void> {
-  const conversationId = await ensureConversation(ctx.db, chatId, "private");
-  const id = await createPendingAction(ctx.db, { conversationId, userId: user.id, kind: HOME_NAME_QUESTION, payload: {}, now: ctx.clock.now() });
-  const q = await ctx.telegram.sendMessage(chatId, t("homeAskName", user.locale), { force_reply: true });
-  await attachMessage(ctx.db, id, q.message_id);
-}
-
-/** Ответ (reply) на «Как вас называть в доме?». */
-async function answerNameQuestion(ctx: AppContext, user: User, chatId: number, replyTo: number, text: string): Promise<boolean> {
-  const conversationId = await ensureConversation(ctx.db, chatId, "private");
-  const q = await findOpenByMessage(ctx.db, conversationId, user.id, HOME_NAME_QUESTION, replyTo, ctx.clock.now());
-  if (!q || !(await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) return false;
-  const membership = await membershipOf(ctx.db, user.id);
-  const parsed = parseNameAndAliases(text);
-  if (!membership || !parsed) return false;
-  await setMemberName(ctx.db, membership.household.id, user.id, parsed.name, parsed.aliases);
-  await ctx.telegram.sendMessage(chatId, t("homeNameSet", user.locale, { name: parsed.name, aliases: aliasesSuffix(parsed.aliases, user.locale) }));
-  return true;
+/** «Как вас называть в доме?» — ответ обычным сообщением (awaiting) или кнопкой роли. */
+export async function askName(ctx: AppContext, user: User, chatId: number): Promise<void> {
+  await awaitHome(ctx, user, chatId, { kind: "home_name" });
+  await ctx.telegram.sendMessage(chatId, t("homeAskName", user.locale), { inline_keyboard: roleButtons(user.locale) });
 }

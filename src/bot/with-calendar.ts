@@ -24,7 +24,15 @@ export async function withCalendar(ctx: AppContext, user: User, chatId: number, 
     }
     // Записи в календарь — уведомление в другие чаты календаря (US-72) и пересчёт напоминаний (US-71)
     await action(
-      new GoogleCalendarProvider(ctx.config, ctx.db, scope?.ownerUserId ?? user.id, ctx.clock, scope?.calendarIds, botWriteListener(ctx, user, chatId)),
+      new GoogleCalendarProvider(
+        ctx.config,
+        ctx.db,
+        scope?.ownerUserId ?? user.id,
+        ctx.clock,
+        scope?.calendarIds,
+        botWriteListener(ctx, user, chatId),
+        scope?.defaultCalendarId,
+      ),
     );
     return true;
   } catch (e) {

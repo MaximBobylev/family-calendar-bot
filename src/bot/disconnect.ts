@@ -4,11 +4,13 @@
 
 import { googleCredentials, linkedElsewhere } from "../db/accounts";
 import { attachMessage, createPendingAction, ensureConversation, type PendingAction } from "../db/conversations";
-import { membershipOf } from "../db/households";
+import { membersOf, membershipOf } from "../db/households";
 import { deleteUserData, type User } from "../db/users";
 import { dropOrphanSyncs, stopUserChannels } from "../sync/engine";
 import { revokeStoredToken } from "../google/oauth";
 import type { AppContext } from "./context";
+import { releaseMemberAssignments } from "./assign/answers";
+import { notifyOwner } from "./household/commands";
 import { dissolveWithNotice } from "./household/menu";
 import { callbackData } from "./keyboards";
 import { t, type MessageKey } from "./messages";
@@ -30,7 +32,14 @@ export async function proposeDisconnect(ctx: AppContext, user: User, chatId: num
     payload: { chatId } satisfies DisconnectPayload,
     now: ctx.clock.now(),
   });
-  const sent = await ctx.telegram.sendMessage(chatId, t("disconnectConfirm", user.locale), {
+  // Владелец дома: подтверждение называет, что дом будет распущен (ревью R1 #15)
+  const membership = await membershipOf(ctx.db, user.id);
+  const others = membership?.role === "owner" ? (await membersOf(ctx.db, membership.household.id)).filter((m) => m.userId !== user.id) : [];
+  const dissolveNote =
+    membership?.role === "owner"
+      ? `\n\n${t("disconnectDissolves", user.locale, { name: membership.household.name, members: others.map((m) => m.displayName).join(", ") || "—" })}`
+      : "";
+  const sent = await ctx.telegram.sendMessage(chatId, `${t("disconnectConfirm", user.locale)}${dissolveNote}`, {
     inline_keyboard: [
       [
         { text: t("disconnectButton", user.locale), callback_data: callbackData(id, "ok") },
@@ -67,6 +76,11 @@ export async function confirmDisconnect(
   // Владелец уходит — дом распускается: общие календари шли через его Google (US-90, [решение 2026-10-06])
   const membership = await membershipOf(ctx.db, user.id);
   if (membership?.role === "owner") await dissolveWithNotice(ctx, membership.household, user.id, user.locale);
+  else if (membership) {
+    // Участник уходит вместе с данными: поручения на нём — снова у авторов (QA-07), владельцу — «больше не в доме» (QA-14)
+    await releaseMemberAssignments(ctx, membership.household.id, user.id);
+    await notifyOwner(ctx, membership.household, "homeMemberLeft", membership.displayName);
+  }
   await deleteUserData(ctx.db, user.id, telegramId);
   // Календари, которых больше нет ни у кого, — без подписки и снимков событий
   await dropOrphanSyncs(ctx.db);

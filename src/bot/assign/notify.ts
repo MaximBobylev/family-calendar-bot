@@ -38,7 +38,7 @@ export async function statusMarkup(
   const when = whenOfAssignment(a, ctx.clock.now(), v.home_tz, locale);
   const p = { title: a.title, when, name: memberName(home, a.assigneeUserId) };
   const offer = t(a.assigneeUserId ? "assignOffer" : "assignOfferSomeone", locale, p);
-  const body = assignmentText(offer, a, home, locale, { to: true });
+  const body = assignmentText(offer, a, home, locale, { to: true, now: ctx.clock.now(), tz: v.home_tz });
   const cancel = [{ text: t("assignCancelButton", locale), callback_data: assignCallback(a.id, "cancel") }];
   switch (a.status) {
     case "pending": {
@@ -71,7 +71,7 @@ export function offerMarkup(
   const { locale } = v;
   const p = { title: a.title, when: whenOfAssignment(a, ctx.clock.now(), v.home_tz, locale), name: memberName(home, a.assigneeUserId) };
   const mine = a.assigneeUserId === recipientId;
-  const details = (head: string) => assignmentText(head, a, home, locale, { from: true });
+  const details = (head: string) => assignmentText(head, a, home, locale, { from: true, now: ctx.clock.now(), tz: v.home_tz });
   switch (a.status) {
     case "pending":
       if (answer === "declined") return { text: t("assignDeclinedYou", locale, p), markup: markup([]) };

@@ -19,7 +19,6 @@
               - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T11:00:00+03:00" }, end: { dateTime: "2026-10-08T12:00:00+03:00" } }
           - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
     - telegram: { from: 1001, text: "/home create Бобылевы" }
-    - press: { button: "✅ Иван", from: 1001 }
     - telegram: { from: 1001, text: "/home name Иван, муж" }
     - telegram: { from: 1001, text: "/home kid Маша" }
     - telegram: { from: 1001, text: "/home invite Аня, жена" }
@@ -29,7 +28,7 @@
     - telegram: { from: 1001, text: "/settings" }
     - press: "☀️ Сводка"
     - press: "07:00"
-    - expect_telegram_count: 10
+    - expect_telegram_count: 9
     # Участник без Google — сводка ставится страховкой раз в час
     - hourly: true
     - llm:
@@ -40,7 +39,9 @@
     - telegram: { from: 1001, text: "Пусть Аня завтра в 15 купит торт" }
     - press: { button: "Поручить", from: 1001 }
     - press: { button: "Беру", chat: 2001, from: 2001 }
-    - expect_telegram_count: 8
+    # +2 к прежним 8: Аня видит «Семью» через дом — ей «➕ Новое: Плавание Маши» (ревью R1, блокер 1) и, как ответственной,
+    # «🚗 Отводите вы» (ревью R1 #9)
+    - expect_telegram_count: 10
     # Владелец (Google): свои и общие календари, «для кого / отводит»
     - clock: "2026-10-08T04:00:00Z"
     - tick: true

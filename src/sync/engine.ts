@@ -65,6 +65,8 @@ export const PUSH_PATH = "/google/push";
 export interface Origin {
   chatId: string;
   authorName?: string;
+  /** Кто сделал — ему в личный чат эхо своей правки не шлём (ревью R1 #18). */
+  authorUserId?: string;
 }
 
 /** Новое состояние события: after = null — удалено; hint — что сделал бот, если прежнего снимка нет. */
@@ -79,7 +81,9 @@ export interface Entry {
 function attribute(writes: BotWriteRow[], e: Entry, before: Snapshot | null): Origin | undefined {
   const series = e.after?.seriesId ?? before?.seriesId;
   const w = writes.find((x) => (x.eventId === e.eventId && (!e.after || x.etag === e.after.etag)) || (!!series && x.eventId === series));
-  return w ? { chatId: w.chatId, ...(w.authorName ? { authorName: w.authorName } : {}) } : undefined;
+  return w
+    ? { chatId: w.chatId, ...(w.authorName ? { authorName: w.authorName } : {}), ...(w.authorUserId ? { authorUserId: w.authorUserId } : {}) }
+    : undefined;
 }
 
 /**

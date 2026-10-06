@@ -22,6 +22,12 @@ export async function hasAccess(ctx: AppContext, telegramId: number, message?: T
 }
 
 export async function gateUpdate(ctx: AppContext, update: TgUpdate): Promise<Gate> {
+  // Бота добавили в группу (ревью R1 #13): приветствие — только если добавил человек с доступом; посторонним — молча
+  if (update.my_chat_member) {
+    const m = update.my_chat_member;
+    if (m.from.is_bot || m.chat.type === "private" || m.chat.type === "channel") return "ignore";
+    return (await hasAccess(ctx, m.from.id)) ? "process" : "ignore";
+  }
   const message = update.message;
   const from = message?.from ?? update.callback_query?.from;
   if (!from || from.is_bot || (!message && !update.callback_query)) return "ignore";
