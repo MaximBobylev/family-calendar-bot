@@ -55,7 +55,8 @@ export const commonMessages = {
   cardExpired: { ru: "Карточка устарела — повторите команду.", en: "This card has expired — please repeat the command." },
   confirmButton: { ru: "Подтвердить", en: "Confirm" },
   internalError: { ru: "Что-то пошло не так. Попробуйте ещё раз.", en: "Something went wrong. Please try again." },
-  actionFailed: { ru: "⚠️ Не получилось — ничего не изменено. Повторите команду.", en: "⚠️ That failed — nothing was changed. Please repeat the command." },
+  // Не «ничего не изменено»: сбой может случиться и после записи в календарь (решение 2026-10-05)
+  actionFailed: { ru: "⚠️ Не получилось — что-то пошло не так. Повторите команду.", en: "⚠️ That didn't work — something went wrong. Please repeat the command." },
   notImplemented: {
     ru: "Это я пока не умею — в разработке.",
     en: "I can't do that yet — it's in development.",

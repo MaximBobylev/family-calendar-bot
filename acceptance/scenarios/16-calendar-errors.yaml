@@ -87,7 +87,7 @@
     - press: "Создать"
     - expect_telegram:
         - { text_contains: ["Google Календарь не отвечает"] }
-        - { method: editMessageText, text_contains: ["Не получилось — ничего не изменено"] }
+        - { method: editMessageText, text_contains: ["Не получилось — что-то пошло не так"] }
     - provider_outage: { provider: google-write, status: 0 }
     - press: { button: "Создать", again: true }
     - expect_callback_answer: { text_contains: ["Действие не завершилось"] }
