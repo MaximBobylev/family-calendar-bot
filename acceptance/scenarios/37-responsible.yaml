@@ -30,7 +30,6 @@
           calendars:
             - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
       - telegram: { from: 1001, text: "/home create Бобылевы" }
-      - press: { button: "✅ Иван", from: 1001 }
       - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
       - telegram: { from: 1001, text: "/home kid Маша" }
       - telegram: { from: 1001, text: "/home kid Ваня" }
@@ -40,7 +39,7 @@
       - telegram: { from: 1001, text: "/home invite Дима, брат" }
       - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
       - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
-      - expect_telegram_count: 11
+      - expect_telegram_count: 10
       - llm:
           "Стоматолог Вани в четверг в 16 в семейном, отводит Дима":
             { tool: create_event, args: { start: "в четверг в 16", calendar: "Семья", title: "Стоматолог Вани" } }
@@ -54,7 +53,11 @@
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["Создать событие?", "Стоматолог Вани", "чт, 8 октября, 16:00–17:00", "👤 Отводит: Дима", "🧒 Для: Ваня"], text_not_contains: ["отводит Дима"] }
     - press: { button: "Создать", from: 1001 }
+    # «Семья» видна Диме и Ане через дом — им «➕ Новое» (ревью R1, блокер 1); ответственному — лично «Отводите вы» (ревью R1 #9)
     - expect_telegram:
+        - { chat_id: 1002, text_contains: ["➕ Новое: «Стоматолог Вани»"] }
+        - { chat_id: 2001, text_contains: ["➕ Новое: «Стоматолог Вани»"] }
+        - { chat_id: 1002, text_contains: ["🚗 Отводите вы: Стоматолог (Ваня) — чт, 8 октября 16:00"] }
         - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Создано", "Стоматолог Вани", "👤 Отводит: Дима", "🧒 Для: Ваня"] }
     # В Google — название как сказано; «для кого» и ответственный — у нас (EventMeta)
     - expect_google_events:
@@ -79,6 +82,8 @@
     - press: { button: "Создать", from: 1001 }
     - telegram: { from: 2001, text: "что у нас в четверг?" }
     - expect_telegram:
+        - { chat_id: 1002, text_contains: ["➕ Новое"] }
+        - { chat_id: 2001, text_contains: ["➕ Новое"] }
         - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Создано"] }
         - { chat_id: 2001, text_contains: ["16:00–17:00  Стоматолог (Ваня)"], text_not_contains: ["отводит"] }
 
@@ -96,9 +101,11 @@
         - { chat_id: 1001, text_contains: ["Плавание Вани", "12:00"], buttons: ["Подтвердить", "Отмена"] }
     - press: { button: "Подтвердить", from: 1001 }
     - expect_telegram:
-        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+        - { chat_id: 2001, text_contains: ["🔁 Перенесено: «Плавание Вани»"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня берёт: Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
         - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"], buttons: ["Сделано"] }
-        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Берёт: Аня"] }
         - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
         - { method: editMessageText, chat_id: 1001, text_contains: ["Изменено"] }
     # Прежнее «за день» (пт 10:00) не приходит; новое — пт 12:00

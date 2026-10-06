@@ -54,9 +54,9 @@
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)"] }
         - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)"] }
-        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня берёт: Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
         - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"], buttons: ["Сделано"] }
-        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Берёт: Аня"] }
         - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
     # Повторный push без изменений — ничего
     - google_push: { calendar: family@group.calendar.google.com }
@@ -81,9 +81,9 @@
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["Плавание Вани", "12:00"], buttons: ["Подтвердить", "Отмена"] }
         - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)", "👤 Иван"] }
-        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня берёт: Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
         - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
-        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Берёт: Аня"] }
         - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
         - { method: editMessageText, chat_id: 1001, text_contains: ["Изменено"] }
     # Push Google про эту же правку — эхо: ни второго сдвига, ни второго уведомления

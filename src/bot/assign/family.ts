@@ -142,7 +142,7 @@ export async function notifyResponsible(
   o: { title: string; tz: string; allDay: boolean; startDay: Day; start?: Moment },
 ): Promise<void> {
   if (!family?.responsibleUserId || family.responsibleUserId === creatorId) return;
-  const title = family.forName && !o.title.includes(family.forName) ? `${o.title} (${family.forName})` : o.title;
+  const title = family.forName ? familyTitle(o.title, { name: family.forName, names: [family.forName] }) : o.title;
   await notifyMember(ctx, family.responsibleUserId, (v) => {
     const today = utcToLocal(ctx.clock.now(), v.home_tz).day;
     let when = dateLabel(o.startDay, today, v.locale);

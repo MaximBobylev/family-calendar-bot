@@ -137,7 +137,7 @@
     - *setup
     - telegram: { from: 1001, text: "Какая завтра погода?" }
     - expect_telegram:
-        - text_contains: ["только работать с календарём"]
+        - text_contains: ["Это я пока не умею", "/help"]
 
 - id: several-commands-at-once
   story: US-12

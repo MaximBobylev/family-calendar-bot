@@ -108,7 +108,7 @@
     - *setup
     - telegram: { from: 1001, text: "Неправильно" }
     - expect_telegram:
-        - { text_contains: ["Я умею только работать с календарём"] }
+        - { text_contains: ["Это я пока не умею"] }
     - expect_voice_rehearings: 0
 
 - id: repeat-after-success-is-not-a-signal

@@ -46,10 +46,10 @@
     # Дима берёт прямо в группе
     - press: { button: "Беру", chat: -500, from: 1002 }
     - expect_telegram:
-        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Дима взял(а): Купить корм коту — завтра"], buttons: ["Отменить поручение"] }
+        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Дима берёт: Купить корм коту — завтра"], buttons: ["Отменить поручение"] }
         - { method: editMessageText, chat_id: 1002, text_contains: ["✅ Вы взяли: Купить корм коту"], buttons: ["Сделано"] }
-        - { method: editMessageText, chat_id: 1001, text_contains: ["Взял(а): Дима"], buttons: [] }
-        - { chat_id: 2001, text_contains: ["👍 Дима взял(а): Купить корм коту"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Берёт: Дима"], buttons: [] }
+        - { chat_id: 2001, text_contains: ["👍 Дима берёт: Купить корм коту"] }
     # Отменить может только автор
     - press: { button: "Отменить поручение", chat: -500, from: 1001 }
     - expect_callback_answer: { text_contains: ["только автор"] }
@@ -59,15 +59,19 @@
   story: US-91
   steps:
     - *home
-    # Эскалация — автору и в семейный чат дома
+    # Именное поручение: сначала мягкое напоминание исполнителю, потом эскалация — только автору, лично; в семейный чат —
+    # ничего: публичное «ещё не подтвердила» — укор (поведение изменено по ревью R1 #5: раньше эскалация шла и в чат)
     - telegram: { from: 1001, text: "Напомни жене полить цветы в 18" }
     - press: { button: "Поручить", from: 1001 }
     - expect_telegram_count: 3
+    - clock: "2026-10-07T12:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["🔔 Ответьте, пожалуйста: возьмёте? Полить цветы — сегодня в 18:00"], buttons: ["Беру", "Не могу"] }
     - clock: "2026-10-07T13:00:00Z"
     - tick: true
     - expect_telegram:
-        - { chat_id: 1001, text_contains: ["⏳ Аня ещё не подтвердил(а): Полить цветы — сегодня в 18:00"] }
-        - { chat_id: -500, text_contains: ["⏳ Аня ещё не подтвердил(а): Полить цветы — сегодня в 18:00"], buttons: [] }
+        - { chat_id: 1001, text_contains: ["⏳ Аня: пока без ответа — Полить цветы — сегодня в 18:00"] }
 
 - id: assign-group-escalation-someone-take-in-chat
   story: US-91
@@ -78,14 +82,15 @@
     - expect_telegram_count: 4
     - clock: "2026-10-07T13:00:00Z"
     - tick: true
+    # «Кто-то должен» — автору и нейтрально в семейный чат с «Беру» (ревью R1 #5)
     - expect_telegram:
         - { chat_id: 1001, text_contains: ["⏳ Пока никто не взял: Забрать посылку — сегодня в 18:00"] }
-        - { chat_id: -500, text_contains: ["⏳ Пока никто не взял: Забрать посылку"], buttons: ["Беру"] }
+        - { chat_id: -500, text_contains: ["🙋 Нужен кто-то: Забрать посылку — сегодня в 18:00"], buttons: ["Беру"] }
     # В чате — любой взрослый
     - press: { button: "Беру", chat: -500, from: 2001 }
     - expect_telegram:
-        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Забрать посылку"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня берёт: Забрать посылку"] }
         - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать посылку"], buttons: ["Сделано"] }
-        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"], buttons: [] }
-        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Аня взял(а): Забрать посылку"] }
-        - { chat_id: 1001, text_contains: ["👍 Аня взял(а)"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Берёт: Аня"], buttons: [] }
+        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Аня берёт: Забрать посылку"] }
+        - { chat_id: 1001, text_contains: ["👍 Аня берёт"] }

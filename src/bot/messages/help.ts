@@ -6,12 +6,12 @@ import type { Messages } from "./types";
 export const helpMessages = {
   // --- /start: четыре состояния ---
   startNew: {
-    ru: "Привет! Я семейный помощник в Telegram 🏠\n\nПересылайте мне объявления, приглашения и фото афиш — я занесу их в общий Google Календарь, напомню, кому нужно, и прослежу, что дело взяли.\n\nНачнём с календаря — это пару кликов.\n\nВас пригласили в семью? Откройте ссылку-приглашение ещё раз — Google не понадобится.",
-    en: "Hi! I'm a family assistant in Telegram 🏠\n\nForward me announcements, invitations and posters — I'll put them into the shared Google Calendar, remind the right people and make sure someone takes the task.\n\nLet's start with the calendar — a couple of clicks.\n\nInvited to a family? Open the invite link again — no Google needed.",
+    ru: "Привет! Я семейный помощник в Telegram 🏠\n\nПересылайте мне объявления, приглашения и фото афиш — я занесу их в общий Google Календарь, напомню, кому нужно, и прослежу, что дело взяли.\n\nЧтобы начать, подключите Google Календарь — это пару кликов. Потом спрашивайте голосом или текстом: «Что у меня завтра?»\n\nВас пригласили в семью? Откройте ссылку-приглашение ещё раз — Google не понадобится.",
+    en: "Hi! I'm a family assistant in Telegram 🏠\n\nForward me announcements, invitations and posters — I'll put them into the shared Google Calendar, remind the right people and make sure someone takes the task.\n\nTo get started, connect your Google Calendar — a couple of clicks. Then ask by voice or text: “What's on tomorrow?”\n\nInvited to a family? Open the invite link again — no Google needed.",
   },
   startConnected: {
-    ru: "Календарь подключён ✅ Что можно уже сейчас:\n• «Что у меня завтра?» — голосом или текстом\n• «Поставь стоматолога в четверг в 16»\n• Перешлите сообщение или фото афиши — сделаю событие\n\nЧтобы делить дела с семьёй, создайте дом: жена или муж получат расписание и поручения прямо в Telegram, без Google.\n\nВсе возможности — /help",
-    en: "Calendar connected ✅ What you can do right away:\n• “What's on tomorrow?” — by voice or text\n• “Dentist on Thursday at 4pm”\n• Forward a message or a poster photo — I'll make an event\n\nTo share tasks with your family, create a household: your partner gets the schedule and tasks right in Telegram, no Google needed.\n\nEverything I can do — /help",
+    ru: "Google Календарь подключён ✅ Что можно уже сейчас:\n• «Что у меня завтра?» — голосом или текстом\n• «Поставь стоматолога в четверг в 16»\n• Перешлите сообщение или фото афиши — сделаю событие\n\nЧтобы делить дела с семьёй, создайте дом: жена или муж получат расписание и поручения прямо в Telegram, без Google.\n\nВсе возможности — /help",
+    en: "Google Calendar connected ✅ What you can do right away:\n• “What's on tomorrow?” — by voice or text\n• “Dentist on Thursday at 4pm”\n• Forward a message or a poster photo — I'll make an event\n\nTo share tasks with your family, create a household: your partner gets the schedule and tasks right in Telegram, no Google needed.\n\nEverything I can do — /help",
   },
   startOwner: {
     ru: "🏠 Дом «{name}»: {members}{kids}\n• «Пусть {other} заберёт Машу в 17» — передам дело с кнопками «Беру / Не могу»\n• «Кто-то должен отвезти Ваню на плавание в субботу» — возьмёт первый\n• «Что у нас на выходных?»\n\nВсе возможности — /help · дом и участники — /home",

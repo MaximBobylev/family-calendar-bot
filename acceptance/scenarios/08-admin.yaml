@@ -157,7 +157,7 @@
     - press: "➕ Пригласить"
     - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
     - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
-    - reply: { from: 2001, text: "Аня, жена, мама" }
+    - telegram: { from: 2001, text: "Аня, жена, мама" }
     # Второе приглашение — не использовано
     - press: { button: "➕ Пригласить", from: 1001 }
     - capture_telegram: { invite2: "start=home_([A-Za-z0-9_-]+)" }
@@ -173,7 +173,8 @@
           - "Участников<b>2</b>"
           - "Без Google<b>1</b>"
           - "Групповых чатов<b>1</b>"
-          - "<td>2</td><td>1 / 1</td><td>0</td><td>1</td><td>2</td><td>1</td>"
+          # Общих календарей — 1: личный «Иван» по умолчанию не общий (ревью R1, блокер 2)
+          - "<td>2</td><td>1 / 1</td><td>0</td><td>1</td><td>1</td><td>1</td>"
         text_not_contains: ["Бобылевы", "Аня", "жена", "Иван", "{{invite}}", "{{invite2}}", "home_", "-500", "ivan@gmail.com"]
         capture: { home: 'href="/admin/households/([0-9a-f-]{36})"', owner: 'href="/admin/households/[0-9a-f-]{36}">(u-[0-9a-f]{6})<' }
     - http_get:

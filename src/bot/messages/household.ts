@@ -58,8 +58,8 @@ export const householdMessages = {
     en: "Want to see the family's plans and your tasks for tomorrow every evening? Turn on the “Tomorrow” summary with one tap.",
   },
   homeRemoveConfirm: {
-    ru: "Убрать {name} из дома «{home}»? {name} перестанет получать расписание семьи и дела; открытые поручения на {name} вернутся их авторам.",
-    en: "Remove {name} from “{home}”? {name} will stop getting the family schedule and tasks; open tasks on {name} go back to their authors.",
+    ru: "Убрать из дома «{home}»: {name}? Расписание семьи и дела больше не будут приходить, открытые поручения вернутся их авторам.",
+    en: "Remove {name} from “{home}”? The family schedule and tasks will stop coming, open tasks go back to their authors.",
   },
   homeRemoveYes: { ru: "Да, убрать", en: "Yes, remove" },
   homeAskNameOf: {
