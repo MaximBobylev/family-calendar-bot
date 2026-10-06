@@ -4,9 +4,11 @@
 
 import { googleCredentials, linkedElsewhere } from "../db/accounts";
 import { attachMessage, createPendingAction, ensureConversation, type PendingAction } from "../db/conversations";
+import { membershipOf } from "../db/households";
 import { deleteUserData, type User } from "../db/users";
 import { revokeStoredToken } from "../google/oauth";
 import type { AppContext } from "./context";
+import { dissolveWithNotice } from "./household/menu";
 import { callbackData } from "./keyboards";
 import { t, type MessageKey } from "./messages";
 
@@ -59,6 +61,9 @@ export async function confirmDisconnect(
     if (await linkedElsewhere(ctx.db, creds.emailHash, user.id)) result = "disconnectRevokeShared";
     else result = (await revokeStoredToken(ctx.config, creds)) ? "disconnectDone" : "disconnectRevokeFailed";
   }
+  // Владелец уходит — дом распускается: общие календари шли через его Google (US-90, [решение 2026-10-06])
+  const membership = await membershipOf(ctx.db, user.id);
+  if (membership?.role === "owner") await dissolveWithNotice(ctx, membership.household, user.id, user.locale);
   await deleteUserData(ctx.db, user.id, telegramId);
   await reply(result);
 }

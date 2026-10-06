@@ -64,6 +64,7 @@
         // Тестовый ключ (не секрет): 32 байта нулей в base64
         "TOKEN_ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "TELEGRAM_BOT_TOKEN": "test-token",
+        "TELEGRAM_BOT_USERNAME": "cab_test_bot",
         "TELEGRAM_WEBHOOK_SECRET": "test-secret",
         "ALLOWED_TELEGRAM_IDS": "1001,1002"
       },

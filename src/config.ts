@@ -10,6 +10,8 @@ export interface Config {
   telegramApiBase: string;
   telegramBotToken: string;
   telegramWebhookSecret: string;
+  /** Имя бота без @ (TELEGRAM_BOT_USERNAME): ссылки-приглашения в дом (US-90), обращения к боту в группе (US-94). */
+  telegramBotUsername: string;
   /** Публичный адрес Worker'а — для redirect_uri и ссылок из бота. */
   publicBaseUrl: string;
   googleApiBase: string;
@@ -67,6 +69,7 @@ export function loadConfig(env: Env): Config {
     telegramApiBase: env.TELEGRAM_API_BASE,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN,
     telegramWebhookSecret: env.TELEGRAM_WEBHOOK_SECRET,
+    telegramBotUsername: (env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, ""),
     publicBaseUrl: env.PUBLIC_BASE_URL,
     googleApiBase: env.GOOGLE_API_BASE,
     googleOAuthBase: env.GOOGLE_OAUTH_BASE,

@@ -1,0 +1,128 @@
+# US-94: бот в семейном групповом чате (база). «Сейчас» — ср 7 октября 2026, 10:00 МСК. Имя бота на стенде — @cab_test_bot.
+# Дом «Бобылевы»: владелец 1001 (Google), Аня 2001 (по приглашению, без Google). Семейный чат — -500.
+# 1002 — в allowlist, но не в доме; 999 — посторонний.
+
+- id: group-link-and-read
+  story: US-94
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              events:
+                - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+      - llm:
+          "что у нас завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Плавание Маши в субботу в 10": { tool: create_event, args: { start: "в субботу в 10", title: "Плавание Маши" } }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - press: "✅ Иван"
+      - press: "➕ Пригласить"
+      - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
+      - reply: { from: 2001, text: "Аня, жена" }
+      - expect_telegram_count: 7
+    # Непривязанный чат: данных нет, подсказка как привязать
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["не привязан к дому", "/home link"], text_not_contains: ["Ужин"] }
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home@cab_test_bot link" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Чат привязан к дому «Бобылевы»", "@cab_test_bot"] }
+    # Участник без Google читает общие календари дома через Google владельца
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Ужин у бабушки"], text_not_contains: ["Планёрка"] }
+    # Без обращения к боту — не читаем (privacy mode)
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "что у нас завтра?" }
+    - expect_no_telegram: true
+    # Ответ (reply) на сообщение бота — обращение
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "что у нас завтра?", reply_to_bot: true }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Ужин у бабушки"] }
+    # Команда другому боту — не нам
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home@other_bot link" }
+    - expect_no_telegram: true
+    # Личное — только в личном чате
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/settings" }
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "/home" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["в личном чате"] }
+        - { chat_id: -500, text_contains: ["в личном чате"] }
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home unlink" }
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["отвязан от дома «Бобылевы»"] }
+        - { chat_id: -500, text_contains: ["не привязан к дому"] }
+
+- id: group-create-confirmed-by-another-adult
+  story: US-94
+  steps:
+    - *home
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home link" }
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "@cab_test_bot Плавание Маши в субботу в 10" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Чат привязан"] }
+        - { chat_id: -500, text_contains: ["Создать событие?", "Плавание Маши", "👤 Добавляет: Аня"], buttons: ["Создать", "Отмена"] }
+    # Не участник дома (хоть и в allowlist) — кнопку нажать не может
+    - press: { button: "Создать", from: 1002 }
+    - expect_callback_answer: { text_contains: ["только для участников дома"] }
+    - expect_no_telegram: true
+    # Посторонний — тем более (отсечён ещё в webhook)
+    - press: { button: "Создать", from: 999 }
+    - expect_callback_answer: { empty: true }
+    - expect_no_telegram: true
+    - expect_google_events: { email: ivan@gmail.com, calendar: family@group.calendar.google.com, events: [], count: 1 }
+    # Любой взрослый дома — может; автор события — тот, кто попросил
+    - press: { button: "Создать", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: -500, text_contains: ["✅ Создано", "Плавание Маши", "👤 Добавил(а): Аня"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Плавание Маши", start: "2026-10-10T10:00:00+03:00", end: "2026-10-10T11:00:00+03:00" }]
+
+- id: group-outsiders-and-non-members
+  story: US-94
+  steps:
+    - *home
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home link" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Чат привязан"] }
+    # Участник allowlist, но не дома — в чате дома не отвечаем ему данными
+    - telegram: { from: 1002, chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас завтра?" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["только участникам дома «Бобылевы»"], text_not_contains: ["Ужин"] }
+    # Чужая группа постороннего
+    - telegram: { from: 999, chat_id: -700, chat_type: group, text: "/home link" }
+    - expect_telegram:
+        - { chat_id: -700, text_contains: ["закрытом режиме"] }
+    # Привязать может только участник дома с Google: не в доме / в доме без Google — нельзя
+    - telegram: { from: 1002, chat_id: -600, chat_type: group, text: "/home link" }
+    - telegram: { from: 2001, chat_id: -600, chat_type: group, text: "/home link" }
+    - expect_telegram:
+        - { chat_id: -600, text_contains: ["участник дома с подключённым Google"] }
+        - { chat_id: -600, text_contains: ["участник дома с подключённым Google"] }
+    # Чат уже привязан к другому дому — не перепривязать
+    - connected_user:
+        from: 1002
+        email: petr@gmail.com
+        calendars:
+          - { id: petr@gmail.com, summary: "Пётр", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+    - telegram: { from: 1002, text: "/home create Соседи" }
+    - telegram: { from: 1002, chat_id: -500, chat_type: group, text: "/home link" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Дом «Соседи» создан"] }
+        - { chat_id: -500, text_contains: ["уже привязан к дому «Бобылевы»"] }

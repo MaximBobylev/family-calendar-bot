@@ -5,6 +5,7 @@ import { commonMessages } from "../src/bot/messages/common";
 import { createMessages } from "../src/bot/messages/create";
 import { deleteMessages } from "../src/bot/messages/delete";
 import { findMessages } from "../src/bot/messages/find";
+import { householdMessages } from "../src/bot/messages/household";
 import { inputMessages } from "../src/bot/messages/input";
 import { modifyMessages } from "../src/bot/messages/modify";
 import { readMessages } from "../src/bot/messages/read";
@@ -17,6 +18,7 @@ const parts = [
   createMessages,
   deleteMessages,
   findMessages,
+  householdMessages,
   inputMessages,
   modifyMessages,
   readMessages,

@@ -14,7 +14,8 @@ import { recognizeVoice } from "./voice";
 export async function handleCommand(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
   const chatId = message.chat.id;
   await withTyping(ctx, chatId, async () => {
-    const conversationId = await ensureConversation(ctx.db, chatId, "private");
+    // Групповой чат дома — свой разговор (US-94); состояние диалога — по паре чат × пользователь
+    const conversationId = await ensureConversation(ctx.db, chatId, message.chat.type === "private" ? "private" : "group");
     let text = message.text?.trim();
     let voice: { fileId: string; durationSec: number } | undefined;
     if (!text && (message.voice || message.audio)) {

@@ -85,6 +85,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
     private readonly db: D1Database,
     private readonly userId: string,
     private readonly clock: Clock,
+    /** Только эти календари (общие календари дома, US-90); не задано — все календари пользователя. */
+    private readonly onlyCalendarIds?: readonly string[],
   ) {}
 
   /** Календари пользователя из D1 — один запрос на экземпляр (tech-debt #13). Ошибка не запоминается. */
@@ -108,15 +110,18 @@ export class GoogleCalendarProvider implements CalendarProvider {
       )
       .bind(this.userId)
       .all<{ id: string; account_id: string; provider_calendar_id: string; title: string; writable: number; is_default: number; aliases: string | null }>();
-    return results.map((r) => ({
-      id: r.id,
-      accountId: r.account_id,
-      providerCalendarId: r.provider_calendar_id,
-      title: r.title,
-      writable: r.writable === 1,
-      isDefault: r.is_default === 1,
-      aliases: (JSON.parse(r.aliases ?? "[]") as string[]).sort(),
-    }));
+    const only = this.onlyCalendarIds;
+    return results
+      .filter((r) => !only || only.includes(r.id))
+      .map((r) => ({
+        id: r.id,
+        accountId: r.account_id,
+        providerCalendarId: r.provider_calendar_id,
+        title: r.title,
+        writable: r.writable === 1,
+        isDefault: r.is_default === 1,
+        aliases: (JSON.parse(r.aliases ?? "[]") as string[]).sort(),
+      }));
   }
 
   private token(): Promise<string> {

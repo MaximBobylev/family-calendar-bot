@@ -22,7 +22,8 @@ export interface TgMessage {
   text?: string;
   voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   audio?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
-  reply_to_message?: { message_id: number };
+  /** from — чтобы в группе отличить ответ боту (US-94). */
+  reply_to_message?: { message_id: number; from?: TgUser };
   forward_origin?: unknown;
 }
 

@@ -15,11 +15,20 @@ import { t } from "./messages";
  */
 export async function withCalendar(ctx: AppContext, user: User, chatId: number, action: (provider: GoogleCalendarProvider) => Promise<void>): Promise<boolean> {
   try {
-    await action(new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock));
+    // Календари дома (US-90, US-94): через аккаунт владельца, только общие календари
+    const scope = ctx.calendarScope;
+    if (scope && scope.calendarIds.length === 0) {
+      await ctx.telegram.sendMessage(chatId, t("homeNoSharedCalendars", user.locale));
+      return false;
+    }
+    await action(new GoogleCalendarProvider(ctx.config, ctx.db, scope?.ownerUserId ?? user.id, ctx.clock, scope?.calendarIds));
     return true;
   } catch (e) {
     console.error("calendar action failed", e instanceof Error ? e.message : e);
-    if (e instanceof AuthRevoked) {
+    if (e instanceof AuthRevoked && ctx.calendarScope) {
+      // Доступ отозван у владельца дома — участнику нечего переподключать
+      await ctx.telegram.sendMessage(chatId, t("homeCalendarsUnavailable", user.locale));
+    } else if (e instanceof AuthRevoked) {
       await ctx.telegram.sendMessage(chatId, t("googleRevoked", user.locale), await connectKeyboard(ctx, user.id, user.locale, user.tgName));
     } else if (e instanceof PermissionDenied) {
       await ctx.telegram.sendMessage(chatId, t("calendarForbidden", user.locale));
