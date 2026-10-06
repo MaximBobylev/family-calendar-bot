@@ -36,6 +36,8 @@ export interface Config {
   stt: SttConfig[];
   /** Мультимодальный разбор голоса для эскалации (VOICE_CHAIN); пусто — эскалации нет. */
   voice: VoiceConfig[];
+  /** Чтение фото/скриншотов (US-66): Gemini-провайдеры из VOICE_CHAIN — тот же ключ и модель; пусто — фото не читаем. */
+  vision: VoiceConfig[];
   limits: UsageLimits;
   costs: CostEstimates;
 }
@@ -88,6 +90,7 @@ export function loadConfig(env: Env): Config {
       { name: "workers-ai", kind: "workers-ai", baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
     ],
     voice: parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? [],
+    vision: (parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? []).filter((c) => c.kind === "gemini"),
     limits: USAGE_LIMITS,
     costs: COST_ESTIMATES,
   };

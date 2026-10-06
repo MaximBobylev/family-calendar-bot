@@ -1,0 +1,131 @@
+# US-65: пересланное сообщение → событие. Кнопка «📅 Создать событие из этого» на карточке пересланного (US-10):
+# дата — нашим парсером по тексту, название и место — LLM или эвристика, в описании — источник и цитата;
+# всегда карточка-подтверждение. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: forward-announcement-to-event
+  story: US-65
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Родительское собрание в четверг в 18:00, каб. 12": { tool: create_event, args: { start: "в четверг в 18:00", title: "Родительское собрание" } }
+          "Не забудьте сдать деньги на экскурсию": { tool: create_event, args: { start: "", title: "Сдать деньги на экскурсию" } }
+          "Удали планёрку": { tool: delete_event, args: { event: "планёрку" } }
+    - telegram: { from: 1001, text: "Родительское собрание в четверг в 18:00, каб. 12", forwarded: true, forward_from: "Мария" }
+    - expect_telegram:
+        - text_contains: ["Это пересланное сообщение: «Родительское собрание в четверг в 18:00, каб. 12»"]
+          buttons: ["📅 Создать событие из этого", "Выполнить", "Не выполнять"]
+    - expect_llm_requests: 0
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["📅 Создаю событие из пересланного"] }
+        - text_contains: ["Создать событие?", "<b>Родительское собрание</b>", "чт, 8 октября, 18:00–19:00", "📍 каб. 12", "📝 Из пересланного сообщения от Мария:"]
+          buttons: ["Создать", "Отмена"]
+    # Один вызов LLM — за названием; команда из чужого текста не выполняется
+    - expect_llm_requests: 1
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "Родительское собрание"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events:
+          - summary: "Родительское собрание"
+            start: "2026-10-08T18:00:00+03:00"
+            end: "2026-10-08T19:00:00+03:00"
+            location: "каб. 12"
+            description: "Из пересланного сообщения от Мария:\n«Родительское собрание в четверг в 18:00, каб. 12»"
+
+- id: forward-booking-without-llm-title
+  story: US-65
+  steps:
+    - *setup
+    # LLM не помогла (фикстуры нет — ошибка у обоих провайдеров): название и место — эвристикой, дата — парсером
+    - telegram: { from: 1001, text: "Вы записаны к стоматологу 14.10 в 9:30, ул. Ленина 5, каб. 12", forwarded: true }
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { text_contains: ["Это пересланное сообщение"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - text_contains: ["Создать событие?", "<b>К стоматологу</b>", "ср, 14 октября, 09:30–10:30", "📍 ул. Ленина 5, каб. 12", "Из пересланного сообщения от Friend"]
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - { summary: "К стоматологу", start: "2026-10-14T09:30:00+03:00", end: "2026-10-14T10:30:00+03:00", location: "ул. Ленина 5, каб. 12" }
+
+- id: forward-without-date-asks-when
+  story: US-65
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Не забудьте сдать деньги на экскурсию", forwarded: true }
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { text_contains: ["Это пересланное сообщение"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - { text_contains: ["Не нашёл в сообщении даты и времени. Когда поставить «Сдать деньги на экскурсию»?"] }
+    # Ответ дополняет тот же черновик: название и источник сохраняются
+    - telegram: { from: 1001, text: "в пятницу в 9" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Сдать деньги на экскурсию</b>", "пт, 9 октября, 09:00–10:00", "Из пересланного сообщения"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events:
+          - summary: "Сдать деньги на экскурсию"
+            start: "2026-10-09T09:00:00+03:00"
+            end: "2026-10-09T10:00:00+03:00"
+            description: "Из пересланного сообщения от Friend:\n«Не забудьте сдать деньги на экскурсию»"
+
+- id: forward-relative-date-from-original-message
+  story: US-65
+  steps:
+    - *setup
+    # Сообщение написано вчера (вт 6 октября): «завтра» — это сегодня, ср 7 октября, а не чт 8
+    - telegram:
+        from: 1001
+        text: "Завтра в 19:00 у Маши родительское собрание, школа 41"
+        forwarded: true
+        forward_date: "2026-10-06T15:00:00Z"
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { text_contains: ["Это пересланное сообщение"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - { text_contains: ["Создать событие?", "ср, 7 октября, 19:00–20:00", "📍 школа 41"], text_not_contains: ["8 октября"] }
+    # Неделю назад «завтра в 9» уже прошло — спросить, а не создавать в прошлом
+    - telegram:
+        from: 1001
+        text: "Завтра в 9:00 сбор у школы"
+        forwarded: true
+        forward_date: "2026-10-05T12:00:00Z"
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Это пересланное сообщение"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - { text_contains: ["Это время уже прошло"] }
+
+- id: forward-run-still-works
+  story: US-10
+  steps:
+    - *setup
+    # Кнопка «Выполнить» осталась: команда выполняется от нажавшего
+    - telegram: { from: 1001, text: "Удали планёрку", forwarded: true }
+    - press: "Выполнить"
+    - expect_telegram:
+        - { text_contains: ["Выполнить как команду?"] }
+        - { method: editMessageText, text_contains: ["Выполняю"] }
+        - { text_contains: ["Удалить?", "Планёрка"] }

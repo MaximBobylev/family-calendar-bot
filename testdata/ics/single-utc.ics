@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Clinic//Booking//RU
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:booking-123@clinic.example
+DTSTAMP:20261006T120000Z
+DTSTART:20261014T063000Z
+DTEND:20261014T071500Z
+SUMMARY:Приём у стоматолога\, д-р Иванова
+LOCATION:ул. Ленина 5\, каб. 12
+DESCRIPTION:Возьмите паспорт.\nПриходите за 10 минут. Подробнее: https://clinic.ex
+ ample/booking/123
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Напоминание
+TRIGGER:-PT1H
+END:VALARM
+END:VEVENT
+END:VCALENDAR

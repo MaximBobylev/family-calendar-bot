@@ -25,6 +25,11 @@ export interface TgMessage {
   /** from — чтобы в группе отличить ответ боту (US-94). */
   reply_to_message?: { message_id: number; from?: TgUser };
   forward_origin?: unknown;
+  /** Фото — размеры по возрастанию (US-66). */
+  photo?: { file_id: string; file_size?: number; width: number; height: number }[];
+  /** Файл: картинка без сжатия (US-66), приглашение .ics (US-67). */
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  caption?: string;
 }
 
 export interface TgCallbackQuery {

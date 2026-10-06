@@ -54,6 +54,8 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
     t("settingsReminders", l, { value: remindersLabel(s.reminders, l) }),
     t("settingsAllDayReminders", l, { value: allDayRemindersLabel(s.allDayReminders, l) }),
     s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
+    t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
+    t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
     t("settingsLanguage", l),
     "",
     `<i>${t("settingsHint", l)}</i>`,
@@ -128,8 +130,20 @@ export function digestScreen(user: User): Screen {
   const l = user.locale;
   const cur = user.settings.digestOff ? undefined : (user.settings.digestTime ?? DEFAULT_DIGEST_TIME);
   const items = DIGEST_TIMES.map((tm) => btn(mark(tm === cur, tm), `digset:${tm.replace(":", "")}`));
+  // «Завтра» и «Неделя» (US-70, R1) — на том же экране
+  const week = user.settings.weekDigest;
   return {
-    text: t("settingsChooseDigest", l, { tz: user.home_tz }),
-    buttons: [...rows(items, 3), [btn(t("settingsOtherTime", l), "digother"), ...(cur ? [btn(t("settingsDigestDisable", l), "digoff")] : [])], back(l)],
+    text: `${t("settingsChooseDigest", l, { tz: user.home_tz })}\n\n${t("settingsDigestMore", l)}`,
+    buttons: [
+      ...rows(items, 3),
+      [btn(t("settingsOtherTime", l), "digother"), ...(cur ? [btn(t("settingsDigestDisable", l), "digoff")] : [])],
+      [btn(mark(!!user.settings.tomorrowDigest, t("settingsTomorrowButton", l)), "digtm")],
+      [
+        btn(mark(!week, t("settingsWeekOffButton", l)), "digwk:off"),
+        btn(mark(week === "sun", t("settingsWeekSunButton", l)), "digwk:sun"),
+        btn(mark(week === "mon", t("settingsWeekMonButton", l)), "digwk:mon"),
+      ],
+      back(l),
+    ],
   };
 }

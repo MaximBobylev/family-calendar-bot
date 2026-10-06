@@ -91,6 +91,26 @@ type Step =
   /** Сколько раз бот переслушивал голосовые мультимодальной моделью. */
   | { expect_voice_rehearings: number }
   /**
+   * Фото (US-66): content — «содержимое» файла (ключ фикстуры), seen — что «увидит» Gemini:
+   * {text, tool?: create_event, args?} | {no_event: true, text?} | {error: status}. as_document — картинка файлом с этим mime.
+   */
+  | {
+      photo: {
+        from: number;
+        content: string;
+        caption?: string;
+        seen?: { text?: string; tool?: string; args?: Record<string, unknown>; no_event?: boolean; error?: number };
+        as_document?: string;
+        size?: number;
+        forwarded?: boolean;
+        forward_from?: string;
+      };
+    }
+  /** Файл (US-67, .ics): содержимое — content; file_name, mime_type как пришлёт Telegram. */
+  | { document: { from: number; file_name: string; content: string; mime_type?: string; size?: number } }
+  /** Сколько раз бот отправлял картинку в Gemini (US-66); caption_contains — в последнем запросе была подпись. */
+  | { expect_vision_requests: number | { count: number; caption_contains?: string } }
+  /**
    * HTTP-запрос к SUT. В path, значениях form и text_(not_)contains подставляются {{имя}} из capture предыдущих шагов;
    * capture: { имя: регэксп с одной группой } — запомнить кусок ответа (например, id из ссылки).
    */
@@ -154,6 +174,13 @@ interface TelegramInput {
   username?: string;
   /** Пересланное сообщение (forward_origin от другого пользователя) — не команда (US-10). */
   forwarded?: boolean;
+  /** Имя автора пересланного (по умолчанию «Friend») и дата исходного сообщения ISO (по умолчанию скрыта — 0), US-65. */
+  forward_from?: string;
+  forward_date?: string;
+  /** Вложения (US-66, US-67) — шаги photo и document. */
+  photo?: { file_id: string; file_size?: number; width: number; height: number }[];
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  caption?: string;
   /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
   expect_failure?: boolean;
   /** Ответ (reply) на последнее сообщение бота в этом чате — обращение к боту в группе (US-94). */
@@ -379,7 +406,18 @@ async function runScenario(s: Scenario): Promise<void> {
       ...(t.reply_to ? { reply_to_message: { message_id: t.reply_to } } : {}),
       ...(t.reply_to_bot ? { reply_to_message: await lastBotMessageIn(t.chat_id ?? t.from) } : {}),
       ...(t.voice ? { voice: { ...t.voice, mime_type: "audio/ogg" } } : {}),
-      ...(t.forwarded ? { forward_origin: { type: "user", date: 0, sender_user: { id: 777, is_bot: false, first_name: "Friend" } } } : {}),
+      ...(t.forwarded
+        ? {
+            forward_origin: {
+              type: "user",
+              date: t.forward_date ? Math.floor(Date.parse(t.forward_date) / 1000) : 0,
+              sender_user: { id: 777, is_bot: false, first_name: t.forward_from ?? "Friend" },
+            },
+          }
+        : {}),
+      ...(t.photo ? { photo: t.photo } : {}),
+      ...(t.document ? { document: t.document } : {}),
+      ...(t.caption ? { caption: t.caption } : {}),
     };
     const update = { update_id: updateId, [t.edited ? "edited_message" : "message"]: message };
     const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
@@ -545,6 +583,51 @@ async function runScenario(s: Scenario): Promise<void> {
         },
         where,
       );
+    } else if ("photo" in step) {
+      const ph = step.photo;
+      const fileId = `photo-${++voiceSeq}`;
+      await post(`${FAKES}/__fake/telegram/files`, { file_id: fileId, content: ph.content });
+      if (ph.seen) await post(`${FAKES}/__fake/vision/fixtures`, { [ph.content]: ph.seen });
+      const size = ph.size ?? ph.content.length;
+      await sendUpdate(
+        {
+          from: ph.from,
+          ...(ph.as_document
+            ? { document: { file_id: fileId, file_name: "image", mime_type: ph.as_document, file_size: size } }
+            : {
+                photo: [
+                  { file_id: `${fileId}-small`, file_size: Math.min(size, 1000), width: 90, height: 160 },
+                  { file_id: fileId, file_size: size, width: 720, height: 1280 },
+                ],
+              }),
+          ...(ph.caption ? { caption: ph.caption } : {}),
+          ...(ph.forwarded ? { forwarded: true } : {}),
+          ...(ph.forward_from ? { forward_from: ph.forward_from } : {}),
+        },
+        where,
+      );
+    } else if ("document" in step) {
+      const d = step.document;
+      const fileId = `doc-${++voiceSeq}`;
+      await post(`${FAKES}/__fake/telegram/files`, { file_id: fileId, content: d.content });
+      await sendUpdate(
+        {
+          from: d.from,
+          document: {
+            file_id: fileId,
+            file_name: d.file_name,
+            ...(d.mime_type ? { mime_type: d.mime_type } : {}),
+            file_size: d.size ?? Buffer.byteLength(d.content),
+          },
+        },
+        where,
+      );
+    } else if ("expect_vision_requests" in step) {
+      const want = typeof step.expect_vision_requests === "number" ? { count: step.expect_vision_requests } : step.expect_vision_requests;
+      const list = (await (await fetch(`${FAKES}/__fake/vision/requests`)).json()) as { caption?: string }[];
+      if (list.length !== want.count) throw new AssertionError(`${where}: ${list.length} vision requests, expected ${want.count}`);
+      if (want.caption_contains && !list.at(-1)?.caption?.includes(want.caption_contains))
+        throw new AssertionError(`${where}: last vision request caption ${JSON.stringify(list.at(-1)?.caption)}, expected «${want.caption_contains}»`);
     } else if ("http_get" in step || "http_post" in step) {
       const isPost = "http_post" in step;
       const h: HttpCheck & { form?: Record<string, string> } = isPost ? step.http_post : step.http_get;

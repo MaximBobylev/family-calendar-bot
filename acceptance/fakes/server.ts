@@ -10,7 +10,7 @@
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
 //   /stt-openai/audio/transcriptions — фейк OpenAI-совместимого STT (Groq), multipart: те же фикстуры
 //   /gemini/v1beta/models/<m>:generateContent — фейк мультимодального разбора голоса: ответ по содержимому аудио
-//   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые)
+//   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые, фото, .ics — содержимое строкой)
 //
 // Управление для раннера:
 //   GET  /__fake/telegram/calls     — все вызовы Telegram с последнего сброса
@@ -40,6 +40,9 @@
 //   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
 //   POST /__fake/voice/fixtures     — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
 //   GET  /__fake/voice/requests     — запросы мультимодального разбора: [{content}]
+//   POST /__fake/vision/fixtures    — {"<содержимое картинки>": {text, tool?, args?} | {no_event: true, text?} | {error: status}}:
+//                                     ответ Gemini на картинку (inlineData image/*), US-66
+//   GET  /__fake/vision/requests    — запросы чтения картинок: [{content, mimeType, caption?}]
 //   POST /__fake/reset              — сброс состояния
 
 import { createHash } from "node:crypto";
@@ -100,6 +103,10 @@ let llmRequests: unknown[] = [];
 let sttRequests: { via: string }[] = [];
 let voiceFixtures = new Map<string, { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number }>();
 let voiceRequests: { content: string }[] = [];
+// --- Картинки (US-66): ответ Gemini по содержимому файла ---
+type VisionFixture = { text?: string; tool?: string; args?: Record<string, unknown>; no_event?: boolean; error?: number };
+let visionFixtures = new Map<string, VisionFixture>();
+let visionRequests: { content: string; mimeType: string; caption?: string }[] = [];
 /** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
 let outages = new Map<string, number>();
 let revocations: { token: string; status: number }[] = [];
@@ -187,6 +194,25 @@ function telegramResult(method: string, body: Record<string, unknown>): unknown 
   }
 }
 
+/** Gemini на картинку (US-66): functionCall create_event | no_event с видимым текстом из фикстуры по содержимому файла. */
+function visionAnswer(res: ServerResponse, body: { contents?: { parts?: { inlineData?: { mimeType?: string; data?: string }; text?: string }[] }[] }) {
+  const parts = body.contents?.[0]?.parts ?? [];
+  const img = parts.find((p) => p.inlineData)!.inlineData!;
+  const content = Buffer.from(img.data ?? "", "base64").toString("utf8");
+  const caption = parts.find((p) => p.text)?.text;
+  visionRequests.push({ content, mimeType: img.mimeType ?? "", ...(caption ? { caption } : {}) });
+  const fx = visionFixtures.get(content);
+  if (!fx) return send(res, 400, { error: { message: `fake vision: no fixture for «${content}»` } });
+  if (fx.error) return send(res, fx.error, { error: { code: fx.error, message: "fake vision error" } });
+  const call = fx.no_event
+    ? { name: "no_event", args: { text: fx.text ?? "" } }
+    : { name: fx.tool ?? "create_event", args: { text: fx.text ?? "", ...(fx.args ?? {}) } };
+  return send(res, 200, {
+    candidates: [{ content: { role: "model", parts: [{ functionCall: call }] } }],
+    usageMetadata: { promptTokenCount: 1500, candidatesTokenCount: 80 },
+  });
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://fakes");
   try {
@@ -202,6 +228,8 @@ const server = createServer(async (req, res) => {
       sttRequests = [];
       voiceFixtures = new Map();
       voiceRequests = [];
+      visionFixtures = new Map();
+      visionRequests = [];
       outages = new Map();
       telegramFiles = new Map();
       sttFixtures = new Map();
@@ -278,6 +306,11 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/voice/requests") return send(res, 200, voiceRequests);
+    if (url.pathname === "/__fake/vision/fixtures" && req.method === "POST") {
+      for (const [content, fx] of Object.entries(await readJson(req))) visionFixtures.set(content, fx as VisionFixture);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/vision/requests") return send(res, 200, visionRequests);
 
     // --- Мультимодальный разбор голоса (Gemini generateContent): аудио → transcript + functionCall ---
     if (/^\/gemini\/v1beta\/models\/[^/]+:generateContent$/.test(url.pathname) && req.method === "POST") {
@@ -285,6 +318,7 @@ const server = createServer(async (req, res) => {
       if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
       const body = (await readJson(req)) as { contents?: { parts?: { inlineData?: { mimeType?: string; data?: string } }[] }[] };
       const part = body.contents?.[0]?.parts?.find((p) => p.inlineData);
+      if (part?.inlineData?.mimeType?.startsWith("image/")) return visionAnswer(res, body as never);
       if (part?.inlineData?.mimeType !== "audio/ogg") return send(res, 400, { error: { message: "fake voice: expected inlineData audio/ogg" } });
       const content = Buffer.from(part.inlineData.data ?? "", "base64").toString("utf8");
       voiceRequests.push({ content });

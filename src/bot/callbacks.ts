@@ -13,6 +13,7 @@ import { runCommand } from "./dialog";
 import { DISCONNECT_CARD, confirmDisconnect } from "./disconnect";
 import { PICK_CARD, confirmPick } from "./find-event";
 import { FORWARD_CARD, confirmForwarded, type ForwardCardPayload } from "./forwarded";
+import { ICS_CARD, confirmIcs, type IcsCardPayload } from "./ingest";
 import { parseCallbackData } from "./keyboards";
 import { t } from "./messages";
 import { MODIFY_CARD, confirmModify, proposeChange } from "./modify-event";
@@ -34,6 +35,8 @@ const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
   [MODIFY_CARD, (ctx, provider, user, action, choice) => confirmModify(ctx, provider, user, action as Parameters<typeof confirmModify>[3], choice)],
   [UNDO_CARD, (ctx, provider, user, action) => performUndo(ctx, provider, user, action as Parameters<typeof performUndo>[3])],
   [DELETE_CARD, (ctx, provider, user, action, choice) => confirmDelete(ctx, provider, user, action as Parameters<typeof confirmDelete>[3], choice)],
+  // US-67: события из .ics
+  [ICS_CARD, (ctx, provider, user, action, choice) => confirmIcs(ctx, provider, user, action as PendingAction<IcsCardPayload>, choice)],
   [
     PICK_CARD,
     async (ctx, provider, user, action, choice) => {
@@ -50,7 +53,7 @@ const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
  * etag (уже применённое — «изменили»/«уже удалена», без второго действия), pick — лишь снова показывает карточку.
  * forward и disconnect не повторяем: честное «не завершилось, повторите команду».
  */
-const RETRYABLE = new Set([CREATE_CARD, MODIFY_CARD, DELETE_CARD, UNDO_CARD, PICK_CARD]);
+const RETRYABLE = new Set([CREATE_CARD, MODIFY_CARD, DELETE_CARD, UNDO_CARD, PICK_CARD, ICS_CARD]);
 
 /** Ответ на нажатие карточки, которую забрать не удалось (US-05, tech-debt #6). */
 const BUSY_ANSWER = {

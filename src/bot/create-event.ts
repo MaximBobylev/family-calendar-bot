@@ -3,7 +3,7 @@
 // US-32: серии. Здесь — сценарий (I/O); черновик → варианты — create-logic.ts, карточка — create-view.ts.
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
-import { localToUtc, utcToLocal } from "../dates/calendar";
+import { localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
 import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
 import { type Feature, recordFeature } from "../db/features";
@@ -37,6 +37,8 @@ export interface CreateArgs {
   chatId: number;
   conversationId: string;
   draft: CreateDraft;
+  /** От какого момента считать «завтра», «в четверг»: дата исходного пересланного сообщения (US-65). Нет — сейчас. */
+  refNow?: number;
 }
 
 export async function startCreate(ctx: AppContext, provider: CalendarProvider, a: CreateArgs): Promise<void> {
@@ -52,7 +54,10 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     return;
   }
 
-  const res = resolveDraft(a.draft, now, tz, cal, locale, user.settings.durationMin ?? DEFAULT_DURATION_MIN);
+  let res = resolveDraft(a.draft, a.refNow ? utcToLocal(a.refNow, tz) : now, tz, cal, locale, user.settings.durationMin ?? DEFAULT_DURATION_MIN);
+  // «Завтра» от даты пересланного сообщения уже прошло (US-65) — как «это время уже прошло»
+  if (a.refNow && res.kind === "options" && res.options.every((o) => (o.start ? minutesBetween(o.start, now) <= 0 : o.endDay < now.day)))
+    res = { kind: "ask", question: "inPast", keepStart: false };
   if (res.kind === "reply") {
     await ctx.telegram.sendMessage(chatId, res.text);
     return;
@@ -148,6 +153,7 @@ export async function confirmCreate(
     ...(o.start ? { start: o.start } : {}),
     ...(o.end ? { end: o.end } : {}),
     ...(o.location ? { location: o.location } : {}),
+    ...(o.description ? { description: o.description } : {}),
     ...(o.series ? { recurrence: [o.series.rrule] } : {}),
     ...remindersFor(user, o.allDay),
   });

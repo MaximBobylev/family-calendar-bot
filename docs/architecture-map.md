@@ -12,7 +12,8 @@ Telegram → POST /telegram/webhook (src/index.ts)
        повтор после сбоя: ctx.progress из inbox (текст голосового, «🎙» отправлено, интент) — STT/LLM не повторяются
        handleUpdate (доступ, вступление в дом по ссылке, регистрация, группа → household/group.ts, команды дома, «Подключить»;
                      участник без Google — ctx.calendarScope: общие календари дома через Google владельца)
-         → bot/input/message.ts:handleCommand — текст / голос (input/voice.ts → stt/whisper.ts) / пересланное (forwarded.ts)
+         → bot/input/message.ts:handleCommand — текст / голос (input/voice.ts → stt/whisper.ts) / пересланное (forwarded.ts) /
+                                                фото и .ics (ingest.ts → vision/understand.ts, ics/*)
          → bot/dialog.ts:runCommand — /connect, /settings, ответы на вопросы (dialog_state), отмена карточек, «отмени последнее»,
                                      поводы переслушать (voice-rehear.ts)
          → bot/nlu-step.ts — nlu/intents.ts (LLM, nlu/llm.ts), лимит (input/limit.ts), журнал
@@ -46,6 +47,8 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | Админка | `src/admin/*`, `docs/admin-console.md` |
 | Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
+| Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
+| Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
 ## src/
@@ -96,7 +99,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык) |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
@@ -105,7 +108,9 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/settings/labels.ts` | Подписи: длительность, напоминания («за 1 ч», «накануне в 9:00») |
 | `bot/undo.ts` | US-61: отмена последнего действия |
 | `bot/disconnect.ts` | US-03: `/disconnect` — отзыв токена и удаление данных |
-| `bot/forwarded.ts` | US-10: пересланное — не команда, карточка «Выполнить как команду?» |
+| `bot/forwarded.ts` | US-10: пересланное — не команда, карточка «Выполнить как команду?» / «📅 Создать событие из этого» (US-65); `forwardOrigin` — автор и дата |
+| `bot/ingest.ts` | US-65/66/67: событие из чужого контента — черновик из пересланного или фото → карточка создания; `.ics` → карточка `ics` (`confirmIcs`); вложения — `handleAttachment` |
+| `bot/ingest-logic.ts` | Чистая логика для ingest: дата по предложениям (`foreignDateSpans`), место (`guessPlace`), название без LLM, описание-источник |
 | `bot/typing.ts` | «печатает…» каждые 4 с до ответа |
 | **nlu/** | Понимание текста |
 | `nlu/intents.ts` | Реестр интентов: `SYSTEM_PROMPT`, `TOOLS`, разбор ответа LLM |
@@ -134,9 +139,11 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
+| **vision/** | `understand.ts` — US-66: картинка → видимый текст + `create_event`/`no_event` (Gemini из VOICE_CHAIN, `config.vision`) |
+| **ics/** | `parse.ts` — разбор `.ics` (RFC 5545: свёртка, TZID, DATE, DURATION, RRULE; чистый); `convert.ts` — событие файла → время в поясе пользователя |
 | **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
-| **jobs/** | `digest.ts` — US-70 утренний дайджест |
+| **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week` |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
 | **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
 | **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
@@ -147,7 +154,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | Путь | Что |
 |---|---|
 | `acceptance/runner.ts` | Раннер YAML-сценариев (чёрный ящик по HTTP); фильтр `SCENARIO=…`, `--list` |
-| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth), LLM, STT, Gemini; управление `/__fake/*` |
+| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth), LLM, STT, Gemini (голос и картинки — по `mimeType`); управление `/__fake/*` |
 | `acceptance/scenarios/NN-*.yaml` | Сценарии; поле `story:` связывает с `docs/user-stories.md` |
 | `test/*.test.ts` | Vitest: чистая логика и адаптеры переносимых наборов (`dates.corpus`, `extract`, `rrule`) |
 | `testdata/` | Переносимые наборы: `dates/` (золотой корпус), `extract/`, `recurrence/`, `nlu/` (только для живых замеров) |

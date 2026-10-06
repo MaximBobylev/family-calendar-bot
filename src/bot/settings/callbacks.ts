@@ -159,6 +159,28 @@ export async function handleSettingsCallback(
       u = await setDigest(ctx, u, null);
       saved = true;
       break;
+    // US-70, R1: «Завтра» — переключатель, «Неделя» — нет / вс 20:00 / пн 08:00; экран остаётся открытым
+    case "digtm": {
+      const on = !u.settings.tomorrowDigest;
+      await updateSettings(ctx.db, user.id, { tomorrowDigest: on || undefined });
+      await rescheduleDigest(ctx.db, user.id, ctx.clock.now());
+      const { tomorrowDigest: _t, ...rest } = u.settings;
+      u = { ...u, settings: on ? { ...rest, tomorrowDigest: true } : rest };
+      saved = true;
+      screen = digestScreen(u);
+      break;
+    }
+    case "digwk":
+      if (cb.value === "off" || cb.value === "sun" || cb.value === "mon") {
+        const week = cb.value === "off" ? undefined : cb.value;
+        await updateSettings(ctx.db, user.id, { weekDigest: week });
+        await rescheduleDigest(ctx.db, user.id, ctx.clock.now());
+        const { weekDigest: _w, ...rest } = u.settings;
+        u = { ...u, settings: week ? { ...rest, weekDigest: week } : rest };
+        saved = true;
+        screen = digestScreen(u);
+      }
+      break;
     case "digother":
       await mergeDialogState(
         ctx.db,
