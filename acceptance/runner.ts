@@ -36,6 +36,8 @@ type Step =
   | { alerts: true | { expect_sent: string[] } }
   | { telegram: TelegramInput }
   | { webhook_raw: { body: unknown; secret?: string | null; expect_status: number } }
+  /** Пользователь from добавил бота в групповой чат chat_id (my_chat_member: left → member) — приветствие (ревью R1 #13). */
+  | { bot_added: { from: number; chat_id: number; first_name?: string } }
   | { expect_telegram: TelegramExpectation[] }
   | { expect_no_telegram: true }
   /** Сколько сообщений бот отправил с прошлой проверки (без проверки содержимого) — для длинных серий. */
@@ -536,6 +538,22 @@ async function runScenario(s: Scenario): Promise<void> {
         if (!m) throw new AssertionError(`${where}: capture_telegram ${name} /${re}/ not found in bot messages`);
         vars.set(name, m[1]!);
       }
+    } else if ("bot_added" in step) {
+      updateId++;
+      const b = step.bot_added;
+      const update = {
+        update_id: updateId,
+        my_chat_member: {
+          chat: { id: b.chat_id, type: "group", title: "Family" },
+          from: { id: b.from, is_bot: false, first_name: b.first_name ?? "Test", language_code: "ru" },
+          date: 0,
+          old_chat_member: { status: "left", user: { id: 1, is_bot: true, first_name: "Bot", username: BOT_USERNAME } },
+          new_chat_member: { status: "member", user: { id: 1, is_bot: true, first_name: "Bot", username: BOT_USERNAME } },
+        },
+      };
+      const res = await post(`${SUT}/telegram/webhook`, update, { "x-telegram-bot-api-secret-token": SECRET });
+      if (res.status !== 200) throw new AssertionError(`${where}: webhook → ${res.status}`);
+      await drainInbox("drain", where);
     } else if ("webhook_raw" in step) {
       const w = step.webhook_raw;
       const headers: Record<string, string> = w.secret === null ? {} : { "x-telegram-bot-api-secret-token": w.secret ?? SECRET };

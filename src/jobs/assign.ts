@@ -1,5 +1,6 @@
-// US-91: задачи поручения в планировщике — напоминания исполнителю (за день, за час; без времени — утром в день срока),
-// эскалация автору и в групповой чат дома, если за 2 часа до срока никто не ответил, и «истекло» в конце дня — без упрёков.
+// US-91: задачи поручения в планировщике — напоминания исполнителю (за день, «ответьте, пожалуйста» за 3 ч, за час; без
+// времени — утром в день срока), эскалация (именное — только автору лично; «кто-то должен» — автору и нейтрально в групповой
+// чат дома с «Беру»), если никто не ответил, и «истекло» в конце дня — без упрёков. Расписание — planAssignmentJobs.
 // Что делать, решается по текущему состоянию поручения: взяли, отменили, перенесли — устаревшая задача ничего не шлёт.
 
 import { assignCallback, offerButtons, doneButtons, whenOfAssignment } from "../bot/assign/view";
@@ -28,14 +29,17 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
 
   switch (what) {
     case "day":
+    case "ask":
     case "hour":
     case "morning": {
-      // «Кто-то должен» без исполнителя — напоминать некому, это забота эскалации
-      if (!a.assigneeUserId || late) return;
+      // «Кто-то должен» без исполнителя — напоминать некому, это забота эскалации. Исполнитель ушёл из дома — молчим (QA-06)
+      if (!a.assigneeUserId || late || !home.members.some((m) => m.userId === a.assigneeUserId)) return;
+      // «Ответьте, пожалуйста» — только пока не ответили
+      if (what === "ask" && a.status !== "pending") return;
       const sent = await notifyMember(
         ctx,
         a.assigneeUserId,
-        (v) => t("assignReminder", v.locale, { title: a.title, when: whenOfAssignment(a, now, v.home_tz, v.locale) }),
+        (v) => t(what === "ask" ? "assignAsk" : "assignReminder", v.locale, { title: a.title, when: whenOfAssignment(a, now, v.home_tz, v.locale) }),
         (v) => (a.status === "pending" ? offerButtons(a.id, v.locale) : doneButtons(a.id, v.locale)),
       );
       const chat = sent ? (await viewerOf(ctx, a.assigneeUserId)).chatId : null;
@@ -44,16 +48,15 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
     }
     case "escalate": {
       if (a.status !== "pending" || late) return;
-      const text = (locale: string, tz: string) => {
-        const p = { title: a.title, when: whenOfAssignment(a, now, tz, locale), name: memberName(home, a.assigneeUserId) };
-        return t(a.assigneeUserId ? "assignEscalation" : "assignEscalationSomeone", locale, p);
-      };
-      await notifyMember(ctx, a.createdBy, (v) => text(v.locale, v.home_tz));
-      // Семейный чат дома (US-94): там «Беру» может нажать любой взрослый — для «кто-то должен»
+      const p = (locale: string, tz: string) => ({ title: a.title, when: whenOfAssignment(a, now, tz, locale), name: memberName(home, a.assigneeUserId) });
+      // Именное поручение — только автору, лично: публично в семейном чате это укор (эпик 9, ревью R1 #5)
+      await notifyMember(ctx, a.createdBy, (v) => t(a.assigneeUserId ? "assignEscalation" : "assignEscalationSomeone", v.locale, p(v.locale, v.home_tz)));
+      if (a.assigneeUserId) return;
+      // «Кто-то должен» — нейтрально предложить в семейном чате дома (US-94): «Беру» может нажать любой взрослый
       const author = await viewerOf(ctx, a.createdBy);
       for (const chat of await householdGroupChats(ctx.db, a.householdId)) {
-        const rows = a.assigneeUserId ? [] : [[{ text: t("assignTakeButton", author.locale), callback_data: assignCallback(a.id, "take") }]];
-        const sent = await ctx.telegram.sendMessage(chat, text(author.locale, author.home_tz), { inline_keyboard: rows });
+        const rows = [[{ text: t("assignTakeButton", author.locale), callback_data: assignCallback(a.id, "take") }]];
+        const sent = await ctx.telegram.sendMessage(chat, t("assignNeedSomeone", author.locale, p(author.locale, author.home_tz)), { inline_keyboard: rows });
         await addAssignmentMessage(ctx.db, a.id, { chatId: chat, messageId: sent.message_id, userId: null, role: "group" });
       }
       return;

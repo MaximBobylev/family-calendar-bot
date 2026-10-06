@@ -70,6 +70,10 @@ export const accountMessages = {
     ru: "Отключить Google Календарь и удалить все ваши данные?\n\nЯ отзову доступ к календарю и удалю настройки, названия календарей, черновики и журнал команд. События в самом Google Календаре останутся как есть.",
     en: "Disconnect Google Calendar and delete all your data?\n\nI'll revoke calendar access and delete your settings, calendar names, drafts and command log. Events in Google Calendar itself stay as they are.",
   },
+  disconnectDissolves: {
+    ru: "Дом «{name}» будет распущен: участники ({members}) потеряют доступ к общему календарю и поручениям.",
+    en: "The household “{name}” will be dissolved: members ({members}) lose access to the shared calendar and tasks.",
+  },
   disconnectButton: { ru: "Отключить и удалить", en: "Disconnect and delete" },
   disconnectDone: {
     ru: "✅ Готово: доступ к Google Календарю отозван, все ваши данные удалены.\n\nЧтобы начать заново — /start.",

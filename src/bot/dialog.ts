@@ -12,7 +12,7 @@ import { BARE_CANCEL, UNDO_PHRASE } from "../nlu/modify-hints";
 import { isNotRight, NOT_RIGHT_WINDOW_MS, REPEAT_WINDOW_MS, similarTranscripts } from "../voice/signals";
 import type { AppContext } from "./context";
 import { CREATE_CARD, startCreate, TITLE_QUESTION, type CreateDraft, type TitleQuestionPayload } from "./create-event";
-import { ASSIGN_CARD } from "./assign/start";
+import { ASSIGN_CARD, ASSIGN_WHO_CARD } from "./assign/start";
 import { DELETE_CARD } from "./delete-event";
 import { DISCONNECT_CARD } from "./disconnect";
 import { PICK_CARD } from "./find-event";
@@ -41,6 +41,7 @@ export async function cancelCards(ctx: AppContext, user: User, conversationId: s
     FORWARD_CARD,
     ICS_CARD,
     ASSIGN_CARD,
+    ASSIGN_WHO_CARD,
   ]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;
@@ -99,8 +100,9 @@ export async function runCommand(
   const state = await getDialogState(ctx.db, conversationId, user.id);
   if (state.awaiting) {
     await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
-    if (state.awaiting.expiresAt > ctx.clock.now() && state.awaiting.kind !== "create_time") {
-      if (await handleSettingsInput(ctx, user, chatId, state.awaiting, text)) return;
+    const aw = state.awaiting;
+    if (aw.expiresAt > ctx.clock.now() && (aw.kind === "settings_tz" || aw.kind === "settings_digest_time" || aw.kind === "settings_alias")) {
+      if (await handleSettingsInput(ctx, user, chatId, aw, text)) return;
     }
     if (state.awaiting.kind === "create_time" && state.awaiting.expiresAt > ctx.clock.now()) {
       const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.home_tz)), user.home_tz);

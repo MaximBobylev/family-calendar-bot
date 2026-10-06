@@ -10,7 +10,7 @@ import { detailHints } from "../nlu/detail-hints";
 import { effectiveIntent, lookupQuery, NEXT_WORD } from "../nlu/intent-overrides";
 import type { Intent } from "../nlu/intents";
 import { MASS_DELETE, modifyHints, modifyQuery } from "../nlu/modify-hints";
-import { listAssignments } from "./assign/answers";
+import { listAssignedByMe, listAssignments } from "./assign/answers";
 import { familyHints } from "./assign/family";
 import { assignOverride } from "./assign/logic";
 import { assignmentApplies, startAssign } from "./assign/start";
@@ -43,7 +43,8 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       await startAssign(ctx, user, chatId, conversationId, text, intent);
       return;
     case "list_assignments":
-      await listAssignments(ctx, user, chatId, text);
+      if (intent.byMe) await listAssignedByMe(ctx, user, chatId);
+      else await listAssignments(ctx, user, chatId, text);
       return;
     case "create_event": {
       // Ответственный и «для кого» (US-92): «…, отводит папа» — не часть названия и не дата

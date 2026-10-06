@@ -25,7 +25,11 @@ export interface DialogState {
     /** Ввод пояса или других названий календаря из /settings (US-04, US-06). */
     | { kind: "settings_tz"; expiresAt: number }
     | { kind: "settings_digest_time"; expiresAt: number }
-    | { kind: "settings_alias"; calendarId: string; expiresAt: number };
+    | { kind: "settings_alias"; calendarId: string; expiresAt: number }
+    /** Вопросы дома (ревью R1 #3, #7): «Как вас называть?» (userId — кого называет владелец), имя ребёнка, название дома. */
+    | { kind: "home_name"; userId?: string; expiresAt: number }
+    | { kind: "home_kid"; expiresAt: number }
+    | { kind: "home_create"; expiresAt: number };
   /** Последний показанный список — для «перенеси вторую» (US-60). */
   lastList?: { refs: StoredRef[]; at: number };
   /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */

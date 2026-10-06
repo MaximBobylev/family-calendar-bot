@@ -21,7 +21,7 @@ import {
 } from "./create-logic";
 import { cardBody, createCard } from "./create-view";
 import { dateLabel, escapeHtml, hhmm } from "./format";
-import { familyCardLines, saveEventFamily } from "./assign/family";
+import { familyCardLines, notifyResponsible, saveEventFamily } from "./assign/family";
 import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
@@ -169,6 +169,8 @@ export async function confirmCreate(
   // Автор — тот, кто попросил (в группе нажать «Создать» может любой взрослый дома, US-94)
   await noteCreator(ctx, created.ref, action.userId);
   await saveEventFamily(ctx, created.ref, action.payload.family);
+  // Ответственного назначили не сами — сказать ему лично (ревью R1 #9): «🚗 Отводите вы: Стоматолог (Ваня) — чт, 8 октября 16:00»
+  await notifyResponsible(ctx, action.payload.family, action.userId, o);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
   const body = cardBody(o, today, locale, calendarsCount > 1);
   const undo = await recordUndo(ctx, {

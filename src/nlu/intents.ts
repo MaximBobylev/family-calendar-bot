@@ -48,7 +48,7 @@ export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
   | AssignTaskIntent
   /** «Мои дела», «что на мне завтра» (US-91) — только по тексту, не tool. */
-  | { name: "list_assignments" }
+  | { name: "list_assignments"; byMe?: boolean }
   | FindEventIntent
   | CreateEventIntent
   | ModifyEventIntent

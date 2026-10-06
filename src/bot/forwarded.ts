@@ -7,7 +7,9 @@ import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { AppContext } from "./context";
 import { escapeHtml } from "./format";
+import { formatMoment, utcToLocal } from "../dates/calendar";
 import { eventFromForwarded } from "./ingest";
+import { foreignDateSpans } from "./ingest-logic";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
 import { withTyping } from "./with-typing";
@@ -18,6 +20,8 @@ export const FORWARD_CARD = "forward";
 const MAX_STORED_LEN = 1000;
 /** Сколько показываем в карточке. */
 const MAX_SHOWN_LEN = 300;
+/** Похоже на событие — коротко: полный текст ещё будет в карточке события и в описании (ревью R1 #8). */
+const MAX_SHOWN_EVENT_LEN = 120;
 
 /** Откуда переслано (US-65): имя автора или чата, дата исходного сообщения (секунды Unix; 0 — скрыта). */
 export interface ForwardOrigin {
@@ -62,18 +66,32 @@ export async function proposeForwarded(
     payload: { chatId, text: stored, ...origin } satisfies ForwardCardPayload,
     now: ctx.clock.now(),
   });
-  const shown = stored.length > MAX_SHOWN_LEN ? `${stored.slice(0, MAX_SHOWN_LEN)}…` : stored;
+  // Похоже на событие (в тексте есть дата) — главный сценарий R1: «Создать событие» первым, без вопроса безопасности
+  // в заголовке (ревью R1 #8). Без нажатия ничего не выполняется при любом порядке кнопок.
+  const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
+  const looksEvent = !!foreignDateSpans(stored, nowLocal, user.home_tz).point;
+  const l = user.locale;
+  const limit = looksEvent ? MAX_SHOWN_EVENT_LEN : MAX_SHOWN_LEN;
+  const shown = escapeHtml(stored.length > limit ? `${stored.slice(0, limit)}…` : stored);
   const sent = await ctx.telegram.sendMessage(
     chatId,
-    t("forwardedConfirm", user.locale, { text: escapeHtml(shown) }),
+    looksEvent ? t("forwardedLooksEvent", l, { text: shown }) : t("forwardedConfirm", l, { text: shown }),
     {
-      inline_keyboard: [
-        [{ text: t("forwardEventButton", user.locale), callback_data: callbackData(id, "ev") }],
-        [
-          { text: t("forwardRunButton", user.locale), callback_data: callbackData(id, "run") },
-          { text: t("forwardSkipButton", user.locale), callback_data: callbackData(id, "x") },
-        ],
-      ],
+      inline_keyboard: looksEvent
+        ? [
+            [{ text: t("forwardEventButton", l), callback_data: callbackData(id, "ev") }],
+            [
+              { text: t("forwardRunAsCommandButton", l), callback_data: callbackData(id, "run") },
+              { text: t("forwardNoButton", l), callback_data: callbackData(id, "x") },
+            ],
+          ]
+        : [
+            [{ text: t("forwardEventButton", l), callback_data: callbackData(id, "ev") }],
+            [
+              { text: t("forwardRunButton", l), callback_data: callbackData(id, "run") },
+              { text: t("forwardSkipButton", l), callback_data: callbackData(id, "x") },
+            ],
+          ],
     },
     { html: true },
   );
@@ -93,11 +111,7 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
     await ctx.telegram.editMessageText(
       chatId,
       action.messageId,
-      run
-        ? t("forwardRunning", user.locale, { text: shown })
-        : event
-          ? t("forwardEventStarted", user.locale, { text: shown })
-          : t("forwardSkipped", user.locale),
+      run ? t("forwardRunning", user.locale, { text: shown }) : event ? t("forwardEventStarted", user.locale) : t("forwardSkipped", user.locale),
       undefined,
       { html: true },
     );

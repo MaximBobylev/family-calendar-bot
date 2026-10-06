@@ -139,8 +139,13 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   }
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const inPeriod = list.events.filter((e) => e.endDay >= period.from && e.startDay <= period.to);
-  // «📌 Ваши дела сегодня» (US-93) — только в утренней сводке «Сегодня»: срок поручения — сегодня
-  const tasks = kind === DIGEST_JOB ? await assignmentsBlock(ctx, user, today) : null;
+  // «📌 Ваши дела сегодня» (US-93) — в утренней сводке; «📌 Ваши дела завтра» — в вечерней «Завтра» (ревью R1 #10)
+  const tasks =
+    kind === DIGEST_JOB
+      ? await assignmentsBlock(ctx, user, today)
+      : kind === TOMORROW_DIGEST_JOB
+        ? await assignmentsBlock(ctx, user, today + 1, "digestAssignmentsTomorrow")
+        : null;
   let parts: string[];
   if (inPeriod.length === 0 && period.empty) {
     // «Завтра встреч нет» (US-70 AC) — одной строкой, без заголовка

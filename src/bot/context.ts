@@ -24,6 +24,8 @@ export interface CalendarScope {
   householdName: string;
   ownerUserId: string;
   calendarIds: string[];
+  /** Основной общий календарь дома — туда записываются события по умолчанию (ревью R1, блокер 2). */
+  defaultCalendarId?: string;
 }
 
 export function createContext(env: Env, config: Config, clock: Clock): AppContext {

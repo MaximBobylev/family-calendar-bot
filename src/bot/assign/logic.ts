@@ -47,6 +47,14 @@ export function findMentioned<T extends Named>(text: string, list: T[]): T | und
   return undefined;
 }
 
+/** Семейные роли — другие имена участника («муж», «мама»): «мужу» → «муж» (ревью R1, блокер 3). */
+const ROLE_WORDS = ["муж", "жена", "папа", "мама", "бабушка", "дедушка", "сын", "дочь", "дочка", "брат", "сестра", "husband", "wife", "dad", "mom"];
+
+/** Слово из фразы — семейная роль? Тогда её начальная форма: «мужу» → «муж», «маме» → «мама». */
+export function roleAlias(word: string): string | undefined {
+  return ROLE_WORDS.find((r) => sameName(word, r));
+}
+
 // --- Фразы поручений -------------------------------------------------------------------
 
 export type AssignPhrase = { assignee: string; rest: string } | { someone: true; rest: string };
@@ -81,13 +89,33 @@ const MY_TASKS =
 
 export const isMyTasksQuestion = (text: string) => MY_TASKS.test(text.trim());
 
+/** «Что я поручил», «мои поручения», «кому что я поручила» (ревью R1 #10): поручения автора. */
+const ASSIGNED_BY_ME =
+  /^(?:а\s+)?(?:покажи\s+)?(?:мои\s+поручени\p{L}*|(?:что|кому\s+что|какие\s+дела)\s+я\s+поручил\p{L}*|поручено\s+мной|что\s+я\s+(?:попросил\p{L}*|раздал\p{L}*))|^(?:what\s+(?:did\s+)?i\s+assigned?|my\s+assignments|assigned\s+by\s+me)/iu;
+
+export const isAssignedByMeQuestion = (text: string) => ASSIGNED_BY_ME.test(text.trim());
+
+/** «Напомни мне …», «напомни себе …» — напоминание себе, не поручение (QA-13). */
+const SELF_REMIND = /^(?:пожалуйста,?\s+)?(?:напомни|напомните)(?:те)?\s+(?:мне|себе|нам)\b|^(?:please\s+)?remind\s+(?:me|myself|us)\b/iu;
+
 /**
  * Поручения — по сильным словам в тексте, до поправок effectiveIntent: «Пусть Аня завтра отменит бронь» — поручение, а не
  * удаление события. LLM может назвать поручение и сама (assign_task) — тогда её интент.
  */
 export function assignOverride(text: string, intent: Intent): Intent | null {
+  if (isAssignedByMeQuestion(text)) return { name: "list_assignments", byMe: true };
   if (isMyTasksQuestion(text)) return { name: "list_assignments" };
-  if (intent.name === "assign_task") return intent;
+  // Детерминированная защита важнее ответа LLM (QA-13): «напомни мне …» — событие-напоминание себе; «напомни за день до …»
+  // — напоминание у события (US-42); исполнитель «мне», «за день» — не участник
+  if (intent.name === "assign_task") {
+    if (SELF_REMIND.test(text.trim()) || (intent.assignee && NOT_ASSIGNEE.test(intent.assignee.trim().split(/\s+/)[0] ?? ""))) {
+      return isDetailChange(text)
+        ? { name: "modify_event" }
+        : { name: "create_event", start: intent.when ?? "", ...(intent.task ? { title: intent.task } : {}) };
+    }
+    if (isDetailChange(text) && !parseAssignPhrase(text)) return { name: "modify_event" };
+    return intent;
+  }
   // Напоминание у события («напомни за день до созвона», US-42) — не поручение
   if (isDetailChange(text)) return null;
   const phrase = parseAssignPhrase(text);
@@ -149,7 +177,7 @@ export function familyTitle(title: string, dependent: Named & { name: string }):
 
 // --- Расписание напоминаний (US-91) ------------------------------------------------------------
 
-export type AssignJobWhat = "day" | "hour" | "morning" | "escalate" | "expire";
+export type AssignJobWhat = "day" | "ask" | "hour" | "morning" | "escalate" | "expire";
 
 const HOUR = 60 * 60 * 1000;
 /** Поручение на день без времени: напомнить в 9:00, эскалация в 12:00 ([решение 2026-10-06]). */
@@ -157,25 +185,56 @@ const DAY_ONLY_REMIND_MIN = 9 * 60;
 const DAY_ONLY_ESCALATE_MIN = 12 * 60;
 /** Эскалация автору, если исполнитель не ответил за 2 часа до срока (US-91, допущение). */
 export const ESCALATE_BEFORE_MS = 2 * HOUR;
+/** Мягкое «Ответьте, пожалуйста: возьмёте?» исполнителю — за 3 часа до срока, если ответа ещё нет (ревью R1 #6). */
+export const ASK_BEFORE_MS = 3 * HOUR;
+/** Эскалация — не раньше чем через 30 минут после первого напоминания исполнителю (ревью R1 #6). */
+export const ESCALATE_AFTER_REMINDER_MS = 30 * 60 * 1000;
+
+const REMINDERS: AssignJobWhat[] = ["day", "ask", "hour", "morning"];
 
 /**
- * Когда напоминать: за 1 день (если срок — завтра и позже) и за 1 час; эскалация — за 2 часа, если не ответили; истекает —
- * в конце дня срока (не раньше чем через 2 часа после срока). Только моменты в будущем.
+ * Когда напоминать (US-91, [решение 2026-10-06, изменено по ревью R1]):
+ * - срок со временем: за 1 день (если срок — завтра и позже), «ответьте, пожалуйста» за 3 часа (только если ещё не ответили)
+ *   и за 1 час; без времени — в 9:00 дня срока;
+ * - эскалация автору — за 2 часа до срока (без времени — в 12:00), но не раньше первого напоминания исполнителю + 30 минут:
+ *   эскалация = max(срок − 2 ч, первое напоминание + 30 мин); не успевает до срока или напоминаний впереди нет — без эскалации.
+ *   «Кто-то должен» (named = false) — напоминать некому, эскалация в свой срок;
+ * - истекает в конце дня срока (не раньше чем через 2 часа после срока). Только моменты в будущем.
  */
-export function planAssignmentJobs(a: { dueAt: number; hasTime: boolean; now: number; tz: string }): { what: AssignJobWhat; fireAt: number }[] {
+export function planAssignmentJobs(a: {
+  dueAt: number;
+  hasTime: boolean;
+  now: number;
+  tz: string;
+  named?: boolean;
+}): { what: AssignJobWhat; fireAt: number }[] {
+  const named = a.named ?? true;
   const dueDay: Day = utcToLocal(a.dueAt, a.tz).day;
   const today = utcToLocal(a.now, a.tz).day;
   const at = (day: Day, minutes: number) => localToUtc({ day, minutes }, a.tz);
   const plan: { what: AssignJobWhat; fireAt: number }[] = [];
+  let escalate: number;
+  let deadline: number;
   if (a.hasTime) {
     if (dueDay >= today + 1) plan.push({ what: "day", fireAt: a.dueAt - 24 * HOUR });
-    plan.push({ what: "escalate", fireAt: a.dueAt - ESCALATE_BEFORE_MS });
+    if (named) plan.push({ what: "ask", fireAt: a.dueAt - ASK_BEFORE_MS });
     plan.push({ what: "hour", fireAt: a.dueAt - HOUR });
     plan.push({ what: "expire", fireAt: Math.max(at(dueDay + 1, 0), a.dueAt + 2 * HOUR) });
+    escalate = a.dueAt - ESCALATE_BEFORE_MS;
+    deadline = a.dueAt;
   } else {
     plan.push({ what: "morning", fireAt: at(dueDay, DAY_ONLY_REMIND_MIN) });
-    plan.push({ what: "escalate", fireAt: at(dueDay, DAY_ONLY_ESCALATE_MIN) });
     plan.push({ what: "expire", fireAt: at(dueDay + 1, 0) });
+    escalate = at(dueDay, DAY_ONLY_ESCALATE_MIN);
+    deadline = at(dueDay + 1, 0);
   }
-  return plan.filter((p) => p.fireAt > a.now).sort((x, y) => x.fireAt - y.fireAt);
+  const future = plan.filter((p) => p.fireAt > a.now);
+  if (named) {
+    const first = future.filter((p) => REMINDERS.includes(p.what)).sort((x, y) => x.fireAt - y.fireAt)[0];
+    if (first) {
+      const fireAt = Math.max(escalate, first.fireAt + ESCALATE_AFTER_REMINDER_MS);
+      if (fireAt < deadline) future.push({ what: "escalate", fireAt });
+    }
+  } else if (escalate > a.now) future.push({ what: "escalate", fireAt: escalate });
+  return future.sort((x, y) => x.fireAt - y.fireAt);
 }

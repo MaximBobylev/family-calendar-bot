@@ -6,7 +6,7 @@ import type { CalendarProvider } from "../calendar/model";
 import { claimCard, ensureConversation, finishCard, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
 import type { TgCallbackQuery } from "../telegram/types";
-import { ASSIGN_CARD, type AssignCardPayload, confirmAssign } from "./assign/start";
+import { ASSIGN_CARD, ASSIGN_WHO_CARD, type AssignCardPayload, type AssignWhoPayload, confirmAssign, confirmWho } from "./assign/start";
 import type { AppContext } from "./context";
 import { CREATE_CARD, confirmCreate, type CreateCardPayload } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete } from "./delete-event";
@@ -103,6 +103,12 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
     if (text) await withTyping(ctx, chatId, () => runCommand(ctx, user, chatId, action.conversationId, text));
     return;
   }
+  if (action.kind === ASSIGN_WHO_CARD) {
+    // «Кому поручить?» (ревью R1 #3): выбор исполнителя кнопкой — дальше обычная карточка поручения
+    await finishCard(ctx.db, action.id, "done");
+    await confirmWho(ctx, user, action as PendingAction<AssignWhoPayload>, parsed.choice);
+    return;
+  }
   if (action.kind === ASSIGN_CARD) {
     // Поручение (US-91): календарь нужен только для «+ в календарь» — ошибки календаря внутри (withCalendar)
     try {
@@ -125,6 +131,12 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
       await finishCard(ctx.db, action.id, "failed");
       if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale)).catch(() => undefined);
     }
+    return;
+  }
+  // Общие календари дома убрали, пока карточка была открыта (QA-12): один честный ответ вместо двух
+  if (ctx.calendarScope && ctx.calendarScope.calendarIds.length === 0) {
+    await finishCard(ctx.db, action.id, "failed");
+    if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("homeNoSharedCalendars", user.locale));
     return;
   }
   let completed = false;

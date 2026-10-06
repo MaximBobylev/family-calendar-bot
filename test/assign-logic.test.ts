@@ -93,6 +93,24 @@ describe("assignOverride", () => {
     expect(isMyTasksQuestion("что у меня завтра")).toBe(false);
     expect(assignOverride("что на мне завтра", { name: "list_events", range: "завтра" })).toEqual({ name: "list_assignments" });
   });
+  it("что я поручил (ревью R1 #10)", () => {
+    expect(assignOverride("Что я поручил?", { name: "unsupported" })).toEqual({ name: "list_assignments", byMe: true });
+    expect(assignOverride("мои поручения", { name: "unsupported" })).toEqual({ name: "list_assignments", byMe: true });
+    expect(assignOverride("кому что я поручила", { name: "unsupported" })).toEqual({ name: "list_assignments", byMe: true });
+  });
+  it("LLM сказала assign_task, но это напоминание себе или у события — защита по тексту важнее (QA-13)", () => {
+    expect(assignOverride("Напомни мне завтра купить хлеб", { name: "assign_task", assignee: "мне", when: "завтра", task: "купить хлеб" })).toEqual({
+      name: "create_event",
+      start: "завтра",
+      title: "купить хлеб",
+    });
+    expect(assignOverride("Напомни за день до плавания", { name: "assign_task", assignee: "за день" })).toEqual({ name: "modify_event" });
+    expect(assignOverride("Напомни мужу купить хлеб", { name: "assign_task", assignee: "мужу", task: "купить хлеб" })).toEqual({
+      name: "assign_task",
+      assignee: "мужу",
+      task: "купить хлеб",
+    });
+  });
 });
 
 describe("название поручения", () => {
@@ -121,21 +139,32 @@ describe("ответственный и для кого (US-92)", () => {
 describe("planAssignmentJobs", () => {
   const tz = "Europe/Moscow";
   const at = (iso: string) => Date.parse(iso);
-  const plan = (due: string, now: string, hasTime = true) =>
-    planAssignmentJobs({ dueAt: at(due), hasTime, now: at(now), tz }).map((p) => [p.what, new Date(p.fireAt).toISOString()]);
+  const plan = (due: string, now: string, hasTime = true, named = true) =>
+    planAssignmentJobs({ dueAt: at(due), hasTime, now: at(now), tz, named }).map((p) => [p.what, new Date(p.fireAt).toISOString()]);
 
-  it("сегодня: эскалация за 2 ч, напоминание за 1 ч, истекает в конце дня", () => {
+  it("сегодня: «ответьте» за 3 ч, эскалация за 2 ч — после напоминания, за 1 ч, истекает в конце дня (ревью R1 #6)", () => {
     expect(plan("2026-10-07T14:00:00Z", "2026-10-07T07:00:00Z")).toEqual([
+      ["ask", "2026-10-07T11:00:00.000Z"],
       ["escalate", "2026-10-07T12:00:00.000Z"],
       ["hour", "2026-10-07T13:00:00.000Z"],
       ["expire", "2026-10-07T21:00:00.000Z"],
     ]);
   });
   it("завтра и позже: ещё и за день", () => {
-    expect(plan("2026-10-10T07:00:00Z", "2026-10-07T07:00:00Z").map((p) => p[0])).toEqual(["day", "escalate", "hour", "expire"]);
+    expect(plan("2026-10-10T07:00:00Z", "2026-10-07T07:00:00Z").map((p) => p[0])).toEqual(["day", "ask", "escalate", "hour", "expire"]);
   });
-  it("в прошлом не планируем: за полтора часа — только за час", () => {
-    expect(plan("2026-10-07T14:00:00Z", "2026-10-07T12:30:00Z").map((p) => p[0])).toEqual(["hour", "expire"]);
+  it("эскалация не раньше первого напоминания + 30 мин: за 2,5 ч — напоминание за час, эскалация за 30 мин", () => {
+    expect(plan("2026-10-07T14:00:00Z", "2026-10-07T11:30:00Z")).toEqual([
+      ["hour", "2026-10-07T13:00:00.000Z"],
+      ["escalate", "2026-10-07T13:30:00.000Z"],
+      ["expire", "2026-10-07T21:00:00.000Z"],
+    ]);
+  });
+  it("в прошлом не планируем: за полчаса — без напоминаний и эскалации", () => {
+    expect(plan("2026-10-07T14:00:00Z", "2026-10-07T13:30:00Z").map((p) => p[0])).toEqual(["expire"]);
+  });
+  it("«кто-то должен»: напоминать некому, эскалация в свой срок", () => {
+    expect(plan("2026-10-07T14:00:00Z", "2026-10-07T07:00:00Z", true, false).map((p) => p[0])).toEqual(["escalate", "hour", "expire"]);
   });
   it("без времени: утром в 9:00, эскалация в 12:00, истекает в полночь", () => {
     expect(plan("2026-10-07T21:00:00Z", "2026-10-07T07:00:00Z", false)).toEqual([
@@ -143,6 +172,9 @@ describe("planAssignmentJobs", () => {
       ["escalate", "2026-10-08T09:00:00.000Z"],
       ["expire", "2026-10-08T21:00:00.000Z"],
     ]);
+  });
+  it("без времени, утро уже прошло: без эскалации (не раньше напоминания)", () => {
+    expect(plan("2026-10-06T21:00:00Z", "2026-10-07T07:00:00Z", false).map((p) => p[0])).toEqual(["expire"]);
   });
   it("поздно вечером: истекает не раньше чем через 2 ч после срока", () => {
     expect(plan("2026-10-07T20:30:00Z", "2026-10-07T07:00:00Z").at(-1)).toEqual(["expire", "2026-10-07T22:30:00.000Z"]);

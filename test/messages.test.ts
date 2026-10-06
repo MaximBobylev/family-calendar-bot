@@ -6,6 +6,7 @@ import { commonMessages } from "../src/bot/messages/common";
 import { createMessages } from "../src/bot/messages/create";
 import { deleteMessages } from "../src/bot/messages/delete";
 import { findMessages } from "../src/bot/messages/find";
+import { helpMessages } from "../src/bot/messages/help";
 import { householdMessages } from "../src/bot/messages/household";
 import { ingestMessages } from "../src/bot/messages/ingest";
 import { inlineMessages } from "../src/bot/messages/inline";
@@ -32,6 +33,7 @@ const parts = [
   settingsMessages,
   undoMessages,
   ingestMessages,
+  helpMessages,
 ];
 
 describe("messages", () => {

@@ -12,19 +12,19 @@ import { hasGoogleAccount } from "../../db/accounts";
 import { addAssignmentMessage, insertAssignment, scheduleAssignmentJobs } from "../../db/assignments";
 import { attachMessage, createPendingAction, type PendingAction } from "../../db/conversations";
 import { setEventFamily } from "../../db/event-meta";
-import { householdCalendarIds } from "../../db/households";
+import { addMemberAlias, householdCalendarIds, householdDefaultCalendar } from "../../db/households";
 import { recordFeature } from "../../db/features";
 import { DEFAULT_DURATION_MIN } from "../../db/settings";
 import type { User } from "../../db/users";
 import type { AssignTaskIntent, Intent } from "../../nlu/intents";
 import type { AppContext } from "../context";
-import { dateLabel, hhmm } from "../format";
+import { dateLabel } from "../format";
 import { noteCreator } from "../household/scope";
 import { callbackData } from "../keyboards";
 import { t } from "../messages";
 import { withCalendar } from "../with-calendar";
 import { type Home, loadHome } from "./family";
-import { findMentioned, matchNamed, parseAssignPhrase, planAssignmentJobs, taskTitle } from "./logic";
+import { findMentioned, matchNamed, parseAssignPhrase, planAssignmentJobs, roleAlias, taskTitle } from "./logic";
 import { sendOffers, statusMarkup } from "./notify";
 import { type AssignView, assignmentText, dueLabel, remindersLine } from "./view";
 
@@ -58,7 +58,7 @@ async function quietProvider(ctx: AppContext, user: User): Promise<CalendarProvi
   const scope = ctx.calendarScope;
   if (scope && scope.calendarIds.length === 0) return null;
   if (!scope && !(await hasGoogleAccount(ctx.db, user.id))) return null;
-  return new GoogleCalendarProvider(ctx.config, ctx.db, scope?.ownerUserId ?? user.id, ctx.clock, scope?.calendarIds);
+  return new GoogleCalendarProvider(ctx.config, ctx.db, scope?.ownerUserId ?? user.id, ctx.clock, scope?.calendarIds, undefined, scope?.defaultCalendarId);
 }
 
 /**
@@ -70,6 +70,7 @@ async function findEventToLink(
   d: { title: string; dueAt: number; hasTime: boolean },
   tz: string,
   sharedIds: string[],
+  homeDefault: string | null,
 ): Promise<{ event?: CalendarEvent; newEvent?: AssignDraft["newEvent"] }> {
   const day = utcToLocal(d.dueAt, tz).day;
   const { events } = await provider.listEvents(localToUtc({ day, minutes: 0 }, tz), localToUtc({ day: day + 1, minutes: 0 }, tz), tz);
@@ -81,15 +82,19 @@ async function findEventToLink(
     .sort((a, b) => b.score - a.score)[0];
   if (best) return { event: best.e };
   if (!d.hasTime) return {};
-  // Новое событие — в общий календарь дома (его видят все участники), иначе — в календарь по умолчанию
+  // Новое событие — в основной общий календарь дома (его видят все участники; личный календарь владельца — нет,
+  // ревью R1 блокер 2), иначе — в календарь по умолчанию
   const writable = (await provider.calendars()).filter((c) => c.writable);
   const shared = writable.filter((c) => sharedIds.includes(c.id));
-  const cal = shared.find((c) => c.isDefault) ?? shared[0] ?? writable.find((c) => c.isDefault) ?? writable[0];
+  const cal = shared.find((c) => c.id === homeDefault) ?? shared[0] ?? writable.find((c) => c.isDefault) ?? writable[0];
   return cal ? { newEvent: { calendarId: cal.id, calendarTitle: cal.title } } : {};
 }
 
-const eventLabel = (e: CalendarEvent, today: number, locale: string) =>
-  e.start ? `${e.title}, ${dateLabel(e.start.day, today, locale)} ${hhmm(e.start.minutes)}` : `${e.title}, ${dateLabel(e.startDay, today, locale)}`;
+/** Связанное событие: со временем — название и момент начала (подпись — при показе, QA-03/04/05); весь день — готовая подпись. */
+const eventLink = (e: CalendarEvent, tz: string, today: number, locale: string): { eventLabel: string; eventStartAt: number | null } =>
+  e.start
+    ? { eventLabel: e.title, eventStartAt: localToUtc(e.start, tz) }
+    : { eventLabel: `${e.title}, ${dateLabel(e.startDay, today, locale)}`, eventStartAt: null };
 
 /**
  * Поправка «это поручение» по тексту применима: LLM сама сказала assign_task, или в доме есть такой участник
@@ -102,8 +107,86 @@ export async function assignmentApplies(ctx: AppContext, userId: string, overrid
   return override.someone === true || (!!override.assignee && matchNamed(override.assignee, home.members).length > 0);
 }
 
-/** «Напомни мужу забрать Машу из школы в 17» → карточка автору. */
-export async function startAssign(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, intent: AssignTaskIntent): Promise<void> {
+/** Выбор исполнителя, когда «{who}» не нашёлся (ревью R1 #3): кнопки участников; роль («муж») запоминается выбранному. */
+export const ASSIGN_WHO_CARD = "assign_who";
+
+export interface AssignWhoPayload {
+  chatId: number;
+  text: string;
+  intent: AssignTaskIntent;
+  /** Кандидаты по порядку кнопок m0, m1, … */
+  members: string[];
+  /** Другое имя, которое запомнить выбранному («муж»). */
+  alias?: string;
+}
+
+async function askWho(
+  ctx: AppContext,
+  user: User,
+  a: { chatId: number; conversationId: string; text: string; intent: AssignTaskIntent; who: string; home: Home; others: Home["members"] },
+): Promise<void> {
+  const locale = user.locale;
+  const kid = matchNamed(a.who, a.home.dependents)[0];
+  const alias = kid ? undefined : roleAlias(a.who);
+  const id = await createPendingAction(ctx.db, {
+    conversationId: a.conversationId,
+    userId: user.id,
+    kind: ASSIGN_WHO_CARD,
+    payload: {
+      chatId: a.chatId,
+      text: a.text,
+      intent: a.intent,
+      members: a.others.map((m) => m.userId),
+      ...(alias ? { alias } : {}),
+    } satisfies AssignWhoPayload,
+    now: ctx.clock.now(),
+  });
+  const text = kid
+    ? t("assignWhoIsKid", locale, { name: kid.name })
+    : t("assignWhoNotFound", locale, {
+        who: a.who,
+        list: a.others.map((m) => m.displayName).join(", "),
+        remember: alias ? t("assignWhoRemember", locale, { alias }) : "",
+      });
+  const sent = await ctx.telegram.sendMessage(a.chatId, text, {
+    inline_keyboard: [
+      ...a.others.map((m, i) => [{ text: m.displayName || "—", callback_data: callbackData(id, `m${i}`) }]),
+      [{ text: t("cancelButton", locale), callback_data: callbackData(id, "x") }],
+    ],
+  });
+  await attachMessage(ctx.db, id, sent.message_id);
+}
+
+/** Нажали участника на «Кому поручить?»: запомнить роль и продолжить поручение с ним. */
+export async function confirmWho(ctx: AppContext, user: User, action: PendingAction<AssignWhoPayload>, choice: string): Promise<void> {
+  const p = action.payload;
+  const locale = user.locale;
+  const pick = /^m(\d+)$/.exec(choice);
+  const userId = pick ? p.members[Number(pick[1])] : undefined;
+  const home = userId ? await loadHome(ctx.db, user.id) : null;
+  const member = home?.members.find((m) => m.userId === userId);
+  if (!home || !member) {
+    if (action.messageId) await ctx.telegram.editMessageText(p.chatId, action.messageId, t("cancelled", locale));
+    return;
+  }
+  if (p.alias) {
+    await addMemberAlias(ctx.db, home.household.id, member.userId, p.alias);
+    if (action.messageId)
+      await ctx.telegram.editMessageText(p.chatId, action.messageId, t("homeAliasLearned", locale, { alias: p.alias, name: member.displayName }));
+  } else if (action.messageId) await ctx.telegram.editMessageText(p.chatId, action.messageId, `👤 ${member.displayName}`);
+  await startAssign(ctx, user, p.chatId, action.conversationId, p.text, p.intent, member.userId);
+}
+
+/** «Напомни мужу забрать Машу из школы в 17» → карточка автору. forcedAssignee — выбран кнопкой (askWho). */
+export async function startAssign(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  text: string,
+  intent: AssignTaskIntent,
+  forcedAssignee?: string,
+): Promise<void> {
   const locale = user.locale;
   const tz = user.home_tz;
   const now = ctx.clock.now();
@@ -117,9 +200,10 @@ export async function startAssign(ctx: AppContext, user: User, chatId: number, c
   const phrase = parseAssignPhrase(text);
   const who = phrase && "assignee" in phrase ? phrase.assignee : intent.someone ? undefined : intent.assignee;
   let assigneeUserId: string | null = null;
-  if (who) {
+  if (forcedAssignee) assigneeUserId = forcedAssignee;
+  else if (who) {
     const found = matchNamed(who, home.members);
-    if (found.length === 0) return void (await say(t("assignWhoNotFound", locale, { who, list: others.map((m) => m.displayName).join(", ") })));
+    if (found.length === 0) return void (await askWho(ctx, user, { chatId, conversationId, text, intent, who, home, others }));
     if (found.length > 1) return void (await say(t("assignWhoAmbiguous", locale, { who, list: found.map((m) => m.displayName).join(` ${t("or", locale)} `) })));
     if (found[0]!.userId === user.id) return void (await say(t("assignToSelf", locale)));
     assigneeUserId = found[0]!.userId;
@@ -142,15 +226,24 @@ export async function startAssign(ctx: AppContext, user: User, chatId: number, c
     dueHasTime: due?.hasTime ?? false,
     forDependentId: kid?.id ?? null,
     eventLabel: null,
+    eventStartAt: null,
   };
   // Событие в календаре: подходящее — связать (и взять его время, если срок — только день); нет — предложить создать
   if (due) {
     try {
       const provider = await quietProvider(ctx, user);
-      const link = provider ? await findEventToLink(provider, { title, ...due }, tz, await householdCalendarIds(ctx.db, home.household.id)) : {};
+      const link = provider
+        ? await findEventToLink(
+            provider,
+            { title, ...due },
+            tz,
+            await householdCalendarIds(ctx.db, home.household.id),
+            await householdDefaultCalendar(ctx.db, home.household.id),
+          )
+        : {};
       if (link.event) {
         draft.event = link.event.ref;
-        draft.eventLabel = eventLabel(link.event, utcToLocal(now, tz).day, locale);
+        Object.assign(draft, eventLink(link.event, tz, utcToLocal(now, tz).day, locale));
         if (!due.hasTime && link.event.start) {
           draft.dueAt = localToUtc(link.event.start, tz);
           draft.dueHasTime = true;
@@ -182,7 +275,7 @@ export async function startAssign(ctx: AppContext, user: User, chatId: number, c
 
 function cardText(d: AssignDraft, home: Home, now: number, tz: string, locale: string): string {
   const header = `${t("assignConfirm", locale)}\n\n${t(d.assigneeUserId ? "assignOffer" : "assignOfferSomeone", locale, { title: d.title, when: dueLabel(d.dueAt, d.dueHasTime, now, tz, locale) })}`;
-  const lines = [assignmentText(header, d, home, locale, { to: true })];
+  const lines = [assignmentText(header, d, home, locale, { to: true, now, tz })];
   if (d.newEvent) lines.push(t("assignEventNew", locale, { calendar: d.newEvent.calendarTitle }));
   const reminders = remindersLine(d, now, tz, locale);
   if (reminders) lines.push(reminders);
@@ -229,7 +322,8 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
     if (!ok || !created) return false;
     await noteCreator(ctx, created, action.userId);
     d.event = created;
-    d.eventLabel = `${d.title}, ${dueLabel(d.dueAt, true, now, user.home_tz, locale)}`;
+    d.eventLabel = d.title;
+    d.eventStartAt = d.dueAt;
   }
 
   const a = await insertAssignment(
@@ -245,6 +339,7 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
       originChatId: chatId < 0 ? String(chatId) : null,
       event: d.event ?? null,
       eventLabel: d.eventLabel,
+      eventStartAt: d.eventStartAt,
     },
     now,
   );
@@ -255,7 +350,12 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
       ...(d.forDependentId ? { forDependentId: d.forDependentId } : {}),
     });
   }
-  if (a.dueAt !== null) await scheduleAssignmentJobs(ctx.db, a.id, planAssignmentJobs({ dueAt: a.dueAt, hasTime: a.dueHasTime, now, tz: user.home_tz }));
+  if (a.dueAt !== null)
+    await scheduleAssignmentJobs(
+      ctx.db,
+      a.id,
+      planAssignmentJobs({ dueAt: a.dueAt, hasTime: a.dueHasTime, now, tz: user.home_tz, named: a.assigneeUserId !== null }),
+    );
   if (action.messageId) {
     const role = chatId < 0 ? "group" : "author";
     const status = await statusMarkup(ctx, a, home, user, role);

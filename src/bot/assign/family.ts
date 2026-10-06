@@ -6,7 +6,9 @@ import type { CalendarEvent, EventRef } from "../../calendar/model";
 import { type Dependent, dependentsOf, getHousehold, type Household, type Member, membersOf, membershipOf } from "../../db/households";
 import { familyMetaFor, setEventFamily } from "../../db/event-meta";
 import type { AppContext } from "../context";
-import { escapeHtml } from "../format";
+import { type Day, localToUtc, type Moment, utcToLocal } from "../../dates/calendar";
+import { dateLabel, escapeHtml, hhmm } from "../format";
+import { notifyMember } from "./notify";
 import { t } from "../messages";
 import { type EventFamily, type FamilyLabel, familyTitle, findMentioned, matchNamed, type Named, responsibleClause } from "./logic";
 
@@ -127,4 +129,27 @@ export async function familyLabeler(db: D1Database, userId: string, events: Cale
     const note = name ? t(kid ? "famLeads" : "famResponsible", locale, { name }) : undefined;
     return { title: kid ? familyTitle(e.title, kid) : e.title, ...(note ? { note } : {}) };
   };
+}
+
+/**
+ * Ответственный за новое событие узнаёт лично (ревью R1 #9), если назначил не он сам: нейтрально, в своём поясе и на своём
+ * языке. С ребёнком — «🚗 Отводите вы: Стоматолог (Ваня) — …», без — «👤 На вас: …».
+ */
+export async function notifyResponsible(
+  ctx: AppContext,
+  family: EventFamily | undefined,
+  creatorId: string,
+  o: { title: string; tz: string; allDay: boolean; startDay: Day; start?: Moment },
+): Promise<void> {
+  if (!family?.responsibleUserId || family.responsibleUserId === creatorId) return;
+  const title = family.forName && !o.title.includes(family.forName) ? `${o.title} (${family.forName})` : o.title;
+  await notifyMember(ctx, family.responsibleUserId, (v) => {
+    const today = utcToLocal(ctx.clock.now(), v.home_tz).day;
+    let when = dateLabel(o.startDay, today, v.locale);
+    if (!o.allDay && o.start) {
+      const local = utcToLocal(localToUtc(o.start, o.tz), v.home_tz);
+      when = `${dateLabel(local.day, today, v.locale)} ${hhmm(local.minutes)}`;
+    }
+    return t(family.forName ? "famYouLead" : "famYouResponsible", v.locale, { title, when });
+  }).catch((e) => console.warn("responsible notify failed", e instanceof Error ? e.message : e));
 }

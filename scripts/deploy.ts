@@ -164,7 +164,8 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
     secret_token: secrets.TELEGRAM_WEBHOOK_SECRET,
     // edited_message не подписываем: игнорируется, но тратил бы квоты
     // inline_query — inline-карточки (US-95); inline-режим включает владелец в @BotFather: /setinline
-    allowed_updates: ["message", "callback_query", "inline_query"],
+    // my_chat_member — бота добавили в группу: приветствие с привязкой к дому (ревью R1 #13)
+    allowed_updates: ["message", "callback_query", "inline_query", "my_chat_member"],
     // Не сбрасываем: после неудачного деплоя там как раз ждут сообщения пользователей
     drop_pending_updates: false,
   }),
@@ -173,32 +174,46 @@ const tg = (await res.json()) as { ok: boolean; description?: string };
 if (!tg.ok) throw new Error(`setWebhook failed: ${tg.description}`);
 
 // 5. Меню команд Telegram (кнопка «/» в чате)
+// Личка — полное меню; группы — как обращаться и привязка чата (ревью R1 §4.3)
 const commands = {
   ru: [
-    { command: "settings", description: "Настройки" },
+    { command: "help", description: "Что я умею" },
     { command: "home", description: "Дом: семья, общие календари, приглашения" },
+    { command: "settings", description: "Настройки: сводки и напоминания" },
     { command: "connect", description: "Подключить или переподключить Google" },
     { command: "disconnect", description: "Отключить календарь и удалить данные" },
   ],
   en: [
-    { command: "settings", description: "Settings" },
+    { command: "help", description: "What I can do" },
     { command: "home", description: "Household: family, shared calendars, invites" },
+    { command: "settings", description: "Settings: summaries and reminders" },
     { command: "connect", description: "Connect or reconnect Google" },
     { command: "disconnect", description: "Disconnect calendar and delete data" },
   ],
+  groupRu: [
+    { command: "help", description: "Как ко мне обращаться" },
+    { command: "home", description: "Привязать чат к дому: /home link" },
+  ],
+  groupEn: [
+    { command: "help", description: "How to talk to me" },
+    { command: "home", description: "Link this chat to a household: /home link" },
+  ],
 };
-for (const [lang, list] of [
-  ["", commands.ru],
-  ["ru", commands.ru],
-  ["en", commands.en],
+for (const [lang, list, scope] of [
+  ["", commands.ru, "all_private_chats"],
+  ["ru", commands.ru, "all_private_chats"],
+  ["en", commands.en, "all_private_chats"],
+  ["", commands.groupRu, "all_group_chats"],
+  ["ru", commands.groupRu, "all_group_chats"],
+  ["en", commands.groupEn, "all_group_chats"],
 ] as const) {
   const r = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKEN}/setMyCommands`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ commands: list, ...(lang ? { language_code: lang } : {}) }),
+    body: JSON.stringify({ commands: list, scope: { type: scope }, ...(lang ? { language_code: lang } : {}) }),
   });
   const body = (await r.json()) as { ok: boolean; description?: string };
-  if (!body.ok) console.warn(`setMyCommands (${lang || "default"}) failed: ${body.description}`);
+  if (!body.ok) console.warn(`setMyCommands (${scope}, ${lang || "default"}) failed: ${body.description}`);
 }
 
 console.log(`\n✅ Deployed: ${url}`);
