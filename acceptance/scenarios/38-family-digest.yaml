@@ -1,0 +1,55 @@
+# US-93: семейный дайджест — обычная утренняя сводка (US-70) с «для кого / отводит» и делами участника на сегодня;
+# участник без Google получает сводку по общим календарям дома. «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z).
+# Дом «Бобылевы»: Иван 1001 (владелец, Google; сводка — в 07:00), Аня 2001 (без Google; сводка по умолчанию — 08:00).
+
+- id: family-digest-member-without-google
+  story: US-93
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T11:00:00+03:00" }, end: { dateTime: "2026-10-08T12:00:00+03:00" } }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+    - telegram: { from: 1001, text: "/home create Бобылевы" }
+    - press: { button: "✅ Иван", from: 1001 }
+    - telegram: { from: 1001, text: "/home name Иван, муж" }
+    - telegram: { from: 1001, text: "/home kid Маша" }
+    - telegram: { from: 1001, text: "/home invite Аня, жена" }
+    - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+    # Сводка Ивана — в 07:00, чтобы порядок был определён
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "☀️ Сводка"
+    - press: "07:00"
+    - expect_telegram_count: 10
+    # Участник без Google — сводка ставится страховкой раз в час
+    - hourly: true
+    - llm:
+        "Плавание Маши завтра в 10 в семейном, отводит Аня": { tool: create_event, args: { start: "завтра в 10", calendar: "Семья", title: "Плавание Маши" } }
+        "Пусть Аня завтра в 15 купит торт": { tool: assign_task, args: { assignee: "Аня", when: "завтра в 15", task: "купить торт" } }
+    - telegram: { from: 1001, text: "Плавание Маши завтра в 10 в семейном, отводит Аня" }
+    - press: { button: "Создать", from: 1001 }
+    - telegram: { from: 1001, text: "Пусть Аня завтра в 15 купит торт" }
+    - press: { button: "Поручить", from: 1001 }
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram_count: 8
+    # Владелец (Google): свои и общие календари, «для кого / отводит»
+    - clock: "2026-10-08T04:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Доброе утро", "10:00–11:00  Плавание (Маша) — отводит Аня", "11:00–12:00  Планёрка"], text_not_contains: ["Ваши дела"] }
+    # Аня (без Google): общие календари дома и её дела на сегодня
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - chat_id: 2001
+          text_contains: ["Доброе утро", "10:00–11:00  Плавание (Маша) — отводит Аня", "📌 Ваши дела сегодня:", "• сегодня в 15:00 — Купить торт"]
+          text_not_contains: ["Планёрка"]

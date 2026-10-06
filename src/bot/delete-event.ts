@@ -7,6 +7,7 @@ import { attachMessage, createPendingAction, getDialogState, mergeDialogState, t
 import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
+import { cancelAssignmentsForEvent } from "./assign/answers";
 import type { AppContext } from "./context";
 import { locateEvent, type EventRequest } from "./find-event";
 import { escapeHtml, whenOf } from "./format";
@@ -123,6 +124,8 @@ export async function confirmDelete(
       // etag — только для конкретного экземпляра; у серии он свой
       await provider.deleteEvent(ref, { notify: p.notify, ...(!whole && p.etag ? { etag: p.etag } : {}) });
       await edit(`${t(whole ? "deletedSeries" : "deleted", locale)}\n\n${details}`);
+      // Поручения, связанные с удалённым событием, отменяются (US-91); серия целиком — пока нет (экземпляры)
+      if (!whole) await cancelAssignmentsForEvent(ctx, p.ref, user.id);
     }
   } catch (e) {
     if (e instanceof EventConflict) {

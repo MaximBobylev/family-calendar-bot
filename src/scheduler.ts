@@ -5,7 +5,8 @@
 // Исполнитель должен быть идемпотентным по смыслу: при сбое после отправки задача может повториться.
 
 import type { AppContext } from "./bot/context";
-import { runDigestJob, DIGEST_JOB, TOMORROW_DIGEST_JOB, WEEK_DIGEST_JOB } from "./jobs/digest";
+import { ASSIGN_JOB, runAssignJob } from "./jobs/assign";
+import { DIGEST_JOB, runDigestJob, TOMORROW_DIGEST_JOB, WEEK_DIGEST_JOB } from "./jobs/digest";
 import { errorClass, log } from "./log";
 import { PUSH_SYNC_JOB, runPushSyncJob, runSyncJob, runWatchRenewJob, SYNC_JOB, WATCH_RENEW_JOB } from "./sync/engine";
 import { NOTIFY_FLUSH_JOB, runNotifyFlushJob } from "./sync/notify";
@@ -43,6 +44,7 @@ const HANDLERS: Record<string, JobHandler> = {
   [WATCH_RENEW_JOB]: runWatchRenewJob,
   [NOTIFY_FLUSH_JOB]: runNotifyFlushJob,
   [TG_REMINDER_JOB]: runReminderJob,
+  [ASSIGN_JOB]: runAssignJob,
 };
 
 export async function claimDueJobs(db: D1Database, now: number, limit = 500): Promise<DueJob[]> {

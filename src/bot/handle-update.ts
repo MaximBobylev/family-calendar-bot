@@ -6,6 +6,8 @@ import { hasGoogleAccount } from "../db/accounts";
 import { membershipOf } from "../db/households";
 import { ensureTelegramUser, type User } from "../db/users";
 import type { TgUpdate } from "../telegram/types";
+import { handleAssignCallback } from "./assign/answers";
+import { isAssignCallback } from "./assign/view";
 import { handleCallback } from "./callbacks";
 import type { AppContext } from "./context";
 import { isDisconnectCommand, proposeDisconnect } from "./disconnect";
@@ -58,6 +60,11 @@ export async function handleUpdate(ctx: AppContext, update: TgUpdate): Promise<v
   const addToken = message && !isGroup ? parseAddStart(message.text) : null;
   if (message && addToken) {
     await handleAddStart(ctx, user, message.chat.id, addToken);
+    return;
+  }
+  // Кнопки поручения (US-91): нажимает сам участник — и в личном чате, и в группе дома
+  if (update.callback_query && isAssignCallback(update.callback_query.data)) {
+    await handleAssignCallback(ctx, user, update.callback_query);
     return;
   }
   if (isGroup) {

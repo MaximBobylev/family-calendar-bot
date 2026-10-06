@@ -5,6 +5,7 @@
 // Инкрементально по syncToken; 410 — полная пересинхронизация окна −1/+60 дней со сверкой со снимками.
 // Изменения (applyEntries) → снимки, напоминания US-71, уведомления US-72 — одним batch.
 
+import { cancelAssignmentsForProviderEvent, shiftAssignmentsForProviderEvent } from "../bot/assign/answers";
 import type { AppContext } from "../bot/context";
 import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { AuthRevoked, EventGone, PermissionDenied } from "../calendar/model";
@@ -101,6 +102,9 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
   const deletes: string[] = [];
   const touched: string[] = [];
   const changes: Change[] = [];
+  // Поручения, связанные с событием (US-91): перенос/удаление мимо бота. Сделанное ботом (запись в слушателе — origin,
+  // или её эхо по тому же etag) поручения уже сдвинул/отменил сам (modify-event.ts, delete-event.ts) — не повторяем.
+  const linked: { eventId: string; kind: ChangeKind; deltaMs: number; actor: string | null }[] = [];
   for (const e of entries) {
     const before = old.get(e.eventId) ?? null;
     if (!e.after && !before) continue;
@@ -109,6 +113,13 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
     else deletes.push(e.eventId);
     touched.push(e.eventId);
     const kind = !before && e.hint ? e.hint : diffEvent(before, e.after);
+    if (!e.origin && before && (kind === "moved" || kind === "cancelled")) {
+      const direct = writes.some((w) => w.eventId === e.eventId && !!e.after && w.etag === e.after.etag);
+      // Запись бота в серию целиком: экземпляры приходят синком — автор известен по журналу
+      const series = writes.find((w) => w.eventId === (e.after?.seriesId ?? before.seriesId));
+      const deltaMs = kind === "moved" && isActive(e.after) && isActive(before) ? e.after.startMs! - before.startMs! : 0;
+      if (!direct) linked.push({ eventId: e.eventId, kind, deltaMs, actor: series?.authorUserId ?? null });
+    }
     if (kind && opts.notify) {
       const origin = e.origin ?? attribute(writes, e, before);
       changes.push({ kind, before, after: e.after, ...(origin ? { origin } : {}) });
@@ -123,6 +134,15 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
     ...reminderStatements(ctx.db, pcid, touched, upserts.filter(isActive), reminderUsers(chats), now),
   ];
   await notifyChanges(ctx, pcid, changes, stmts, chats);
+  for (const l of linked) {
+    try {
+      if (l.kind === "moved") await shiftAssignmentsForProviderEvent(ctx, pcid, l.eventId, l.deltaMs, l.actor);
+      else await cancelAssignmentsForProviderEvent(ctx, pcid, l.eventId, l.actor);
+    } catch (err) {
+      // Снимок уже обновлён — повтор синка изменения не увидит; сбой поручения не должен ронять синк остальных
+      log("assign_sync_failed", { kind: l.kind, error: errorClass(err) });
+    }
+  }
   if (changes.length) log("calendar_changes", { changes: changes.length, by_bot: changes.filter((c) => c.origin).length });
   return changes.length;
 }

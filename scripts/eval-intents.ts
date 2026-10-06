@@ -18,6 +18,7 @@ import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from
 import { parseDateFragment } from "../src/dates";
 import { intentFromCalls, parseIntent, type Intent } from "../src/nlu/intents";
 import { safeParse, LlmHttpError } from "../src/nlu/llm";
+import { assignOverride } from "../src/bot/assign/logic";
 import { effectiveIntent } from "../src/nlu/intent-overrides";
 import { VARIANTS } from "./nlu-variants";
 
@@ -114,7 +115,8 @@ interface Outcome {
 
 function downstream(c: Case, intent: Intent): Outcome {
   // Те же поправки, что в боте (routeIntent): глаголы, «когда …?», «следующая встреча»
-  const eff: Intent = effectiveIntent(c.text, intent);
+  // Как в routeIntent: поручения (US-91) — по тексту раньше остальных поправок
+  const eff: Intent = assignOverride(c.text, intent) ?? effectiveIntent(c.text, intent);
   const out: Outcome = { intent: eff.name, rawIntent: intent.name };
   if (eff.name === "create_event") {
     const rec = extractRecurrenceSpan(c.text, now, tz);

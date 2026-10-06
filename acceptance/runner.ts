@@ -118,8 +118,8 @@ type Step =
   /** POST формы (application/x-www-form-urlencoded) — действия на страницах (админка). */
   | { http_post: HttpCheck & { form?: Record<string, string> } }
   | { llm: Record<string, unknown> }
-  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть; first_name — имя нажавшего в Telegram. */
-  | { press: string | { button: string; from?: number; again?: boolean; first_name?: string } }
+  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть; first_name — имя нажавшего в Telegram; chat — только сообщение в этом чате (US-91: у каждого своё предложение). */
+  | { press: string | { button: string; from?: number; again?: boolean; first_name?: string; chat?: number } }
   /** Ответить (reply) на последний вопрос бота с ForceReply. */
   | { reply: { from: number; text: string } }
   /** url_contains — ответ открывает ссылку (t.me/<бот>?start=…, US-95); capture — запомнить кусок url как {{имя}}. */
@@ -732,6 +732,7 @@ async function runScenario(s: Scenario): Promise<void> {
       const calls = await allTelegramCalls();
       let target: { call: TelegramCall; data: string } | undefined;
       for (const c of [...calls].reverse()) {
+        if (p.chat !== undefined && String(c.body.chat_id) !== String(p.chat)) continue;
         const btn = (c.body.reply_markup?.inline_keyboard ?? []).flat().find((b) => b.text === p.button && b.callback_data);
         if (btn) {
           target = { call: c, data: btn.callback_data! };

@@ -83,6 +83,8 @@ export async function deleteUserData(db: D1Database, userId: string, telegramId:
     // Диспетчер (R1, пока пусто): своё — удалить, у чужого — снять ссылку на пользователя
     db.prepare("DELETE FROM event_meta WHERE created_by_user_id = ?1").bind(userId),
     db.prepare("UPDATE event_meta SET responsible_user_id = NULL WHERE responsible_user_id = ?1").bind(userId),
+    // Сообщения поручений ему (его чат) — до поручений, которые он создал (US-91)
+    db.prepare("DELETE FROM assignment_messages WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM assignments WHERE created_by = ?1").bind(userId),
     db.prepare("UPDATE assignments SET assignee_user_id = NULL WHERE assignee_user_id = ?1").bind(userId),
     db.prepare("DELETE FROM household_members WHERE user_id = ?1").bind(userId),

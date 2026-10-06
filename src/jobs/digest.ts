@@ -3,18 +3,19 @@
 // ставится следующая. Смена времени/пояса/выключение — reschedule. Раз в час ensureDigests добирает пользователей
 // без задачи (новые, после сбоев). Сильно опоздавшую сводку (сбой дольше MAX_LATE_MS) не шлём.
 
+import { familyLabeler } from "../bot/assign/family";
 import type { AppContext } from "../bot/context";
 import { appendFailedNote, formatEvents } from "../bot/format-events";
 import { type MessageKey, t } from "../bot/messages";
-import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { AuthRevoked, type CalendarInfo, type EventList } from "../calendar/model";
 import { type Day, localToUtc, utcToLocal } from "../dates/calendar";
 import { nextDailyAt, nextWeeklyAt, parseHhmm } from "../dates/daily";
-import { hasGoogleAccount, telegramChatOf } from "../db/accounts";
+import { telegramChatOf } from "../db/accounts";
 import { recordFeature } from "../db/features";
 import { DEFAULT_DIGEST_TIME } from "../db/settings";
 import { findUserById, type User } from "../db/users";
 import type { DueJob } from "../scheduler";
+import { assignmentsBlock, digestProvider, hasDigestSource } from "./family-digest";
 
 export const DIGEST_JOB = "digest";
 export const TOMORROW_DIGEST_JOB = "digest_tomorrow";
@@ -65,7 +66,7 @@ export async function rescheduleDigest(db: D1Database, userId: string, now: numb
     .bind(userId, ...DIGEST_KINDS)
     .run();
   const user = await findUserById(db, userId);
-  if (user && (await hasGoogleAccount(db, userId))) await scheduleDigest(db, user, now);
+  if (user && (await hasDigestSource(db, userId))) await scheduleDigest(db, user, now);
 }
 
 /** Кому вид нужен: «Сегодня» — всем, кроме выключивших (проверка в nextFireAt); остальные — только включившим. */
@@ -75,7 +76,7 @@ const WANTS: Record<DigestKind, string> = {
   [WEEK_DIGEST_JOB]: "json_extract(u.settings_json, '$.weekDigest') IS NOT NULL",
 };
 
-/** Страховка раз в час: у каждого подключённого пользователя со включённым дайджестом есть задача. */
+/** Страховка раз в час: у каждого подключённого пользователя и участника дома (US-93) со включённым дайджестом есть задача. */
 export async function ensureDigests(db: D1Database, now: number): Promise<void> {
   for (const kind of DIGEST_KINDS) {
     const { results } = await db
@@ -83,7 +84,7 @@ export async function ensureDigests(db: D1Database, now: number): Promise<void> 
         `SELECT u.id
          FROM users u
          WHERE ${WANTS[kind]}
-           AND EXISTS (SELECT 1 FROM provider_accounts a WHERE a.user_id = u.id)
+           AND (EXISTS (SELECT 1 FROM provider_accounts a WHERE a.user_id = u.id) OR EXISTS (SELECT 1 FROM household_members m WHERE m.user_id = u.id))
            AND NOT EXISTS (SELECT 1 FROM scheduled_jobs j WHERE j.user_id = u.id AND j.kind = ? AND j.status IN ('pending', 'queued', 'running'))`,
       )
       .bind(kind)
@@ -110,7 +111,7 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   const kind = (DIGEST_KINDS as readonly string[]).includes(job.kind) ? (job.kind as DigestKind) : DIGEST_JOB;
   const now = ctx.clock.now();
   const user = job.user_id ? await findUserById(ctx.db, job.user_id) : null;
-  if (!user || nextFireAt(kind, user, now) === null || !(await hasGoogleAccount(ctx.db, user.id))) return;
+  if (!user || nextFireAt(kind, user, now) === null || !(await hasDigestSource(ctx.db, user.id))) return;
   // Следующая — сразу: повтор этой задачи или сбой отправки не должны оставить пользователя без следующей
   await scheduleKind(ctx.db, kind, user, Math.max(now, job.fire_at));
   if (now - job.fire_at > MAX_LATE_MS) {
@@ -123,7 +124,9 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   const tz = user.home_tz;
   const today = utcToLocal(job.fire_at, tz).day;
   const period = digestPeriod(kind, user, today);
-  const provider = new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock);
+  // Участник дома без Google — общие календари дома через Google владельца (US-93)
+  const provider = await digestProvider(ctx, user);
+  if (!provider) return;
   let list: EventList;
   let calendars: CalendarInfo[];
   try {
@@ -136,14 +139,19 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   }
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const inPeriod = list.events.filter((e) => e.endDay >= period.from && e.startDay <= period.to);
+  // «📌 Ваши дела сегодня» (US-93) — только в утренней сводке «Сегодня»: срок поручения — сегодня
+  const tasks = kind === DIGEST_JOB ? await assignmentsBlock(ctx, user, today) : null;
   let parts: string[];
   if (inPeriod.length === 0 && period.empty) {
     // «Завтра встреч нет» (US-70 AC) — одной строкой, без заголовка
     parts = [t(period.empty, user.locale)];
   } else {
-    parts = formatEvents(list.events, period.from, period.to, today, user.locale, (id) => calendars.length > 1 && id !== defaultId);
+    // «Для кого / отводит» у событий (US-92, US-93) — во всех видах сводки
+    const family = await familyLabeler(ctx.db, user.id, inPeriod, user.locale);
+    parts = formatEvents(list.events, period.from, period.to, today, user.locale, (id) => calendars.length > 1 && id !== defaultId, family);
     parts[0] = `${t(period.title, user.locale)}\n\n${parts[0]}`;
   }
+  if (tasks) parts[parts.length - 1] += `\n\n${tasks}`;
   appendFailedNote(parts, list.failed, user.locale);
   for (const text of parts) await ctx.telegram.sendMessage(Number(chatId), text, undefined, { html: true });
   await recordFeature(ctx.db, user.id, "digest", ctx.clock.now());

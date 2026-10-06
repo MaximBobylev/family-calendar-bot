@@ -24,7 +24,7 @@ Telegram → POST /telegram/webhook (src/index.ts)
        → calendar/google-provider.ts → google/calendar-api.ts → Google   (access token — кеш в D1, 401 → обновить и повторить;
                                                                           GET — один повтор на 5xx/429, net/retry.ts)
        → telegram/api.ts → Telegram
-cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts, sync/*); раз в 5 мин — ops/alerts.ts (алерты владельцу);
+cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts, jobs/assign.ts, sync/*); раз в 5 мин — ops/alerts.ts (алерты владельцу);
                        раз в час — cleanup, ensureDigests, ensureCalendarSyncs (подписки календарей, ретеншн уведомлений)
 Google push → POST /google/push (sync/push.ts: канал + секрет) → задача cal_push → очередь → sync/engine.ts:syncCalendar
        (syncToken / 410 → полный синк окна) → applyEntries: снимки, напоминания US-71, уведомления US-72 (sync/notify.ts) — один batch
@@ -52,6 +52,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
 | Админка | `src/admin/*`, `docs/admin-console.md` |
 | Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
+| Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, расписание напоминаний — `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
 | Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
@@ -99,6 +100,11 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/inline/press.ts` | «📅 Добавить себе» от пользователя бота: с Google — карточка создания в личном чате, без — ссылки; чат не начат — deep link |
 | `bot/inline/guest.ts` | Токен (HMAC), кнопка, счётчик «Добавили себе», ссылки без OAuth; посторонние — нажатие и `/start add_<токен>` из `gate.ts`; `GET /ics/<токен>` |
 | `bot/household/scope.ts` | Чьи календари в разговоре (`CalendarScope`), «👤 Добавляет: …», запись автора в `event_meta` |
+| `bot/assign/logic.ts` | US-91/92, чистый: «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела», «…, отводит папа»; имена с падежами (`sameName`), ребёнок в скобках (`familyTitle`), расписание напоминаний (`planAssignmentJobs`); `assignOverride` — до `effectiveIntent` |
+| `bot/assign/start.ts` | Карточка поручения автору (кому, срок, событие — найти или «+ в календарь»), `confirmAssign` |
+| `bot/assign/answers.ts` | Кнопки `as:<id>:…` (Беру / Не могу / Сделано / отмена / Сделаю сам / Предложить другому), «мои дела», `shiftAssignmentsForEvent` / `cancelAssignmentsForEvent` (перенос и удаление события — через бота; `…ForProviderEvent` — из синка Google, `sync/engine.ts:applyEntries`) |
+| `bot/assign/notify.ts`, `view.ts` | Сообщения поручения по статусу и их обновление у всех получателей; подписи срока, кнопки |
+| `bot/assign/family.ts` | Дом с участниками и детьми (`loadHome`), подсказки «отводит / для кого» при создании, метки в списках (`familyLabeler`) |
 | `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
 | `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
@@ -112,7 +118,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
@@ -154,11 +160,11 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
 | **vision/** | `understand.ts` — US-66: картинка → видимый текст + `create_event`/`no_event` (Gemini из VOICE_CHAIN, `config.vision`) |
 | **ics/** | `parse.ts` — разбор `.ics` (RFC 5545: свёртка, TZID, DATE, DURATION, RRULE; чистый); `convert.ts` — событие файла → время в поясе пользователя |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `assignments.ts` (поручения, их сообщения, задачи напоминаний), `event-meta.ts` (ответственный и «для кого»), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
-| **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week` |
+| **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week`; `family-digest.ts` — US-93: чьи календари (участник без Google — общие календари дома), «Ваши дела сегодня»; `assign.ts` — US-91: напоминания, эскалация, «истекло» |
 | **sync/** | Синхронизация Google и то, что на ней держится (ADR-0005 §2) |
-| `sync/engine.ts` | Синк календаря провайдера: владелец, lease, `syncToken`/410/полный синк окна, каналы `events.watch` (открыть, продлить, остановить), цепочка опроса/сверки, `ensureCalendarSyncs`; `applyEntries` — снимки + напоминания + уведомления одним batch |
+| `sync/engine.ts` | Синк календаря провайдера: владелец, lease, `syncToken`/410/полный синк окна, каналы `events.watch` (открыть, продлить, остановить), цепочка опроса/сверки, `ensureCalendarSyncs`; `applyEntries` — снимки + напоминания + уведомления одним batch; перенос события мимо бота сдвигает поручения (US-91) |
 | `sync/push.ts` | `POST /google/push`: канал и секрет, задача синка — сразу в очередь |
 | `sync/bot-writes.ts` | Слушатель записей провайдера: журнал `bot_writes`, снимок по ответу Google (эхо), уведомление в другие чаты с автором |
 | `sync/notify.ts` | US-72: получатели, outbox `change_notices` (тихие часы → задача `notify_flush`), отправка по одному или сводкой |

@@ -1,0 +1,135 @@
+# US-91 × US-72: поручение, связанное с событием, следует за событием и при изменениях в Google мимо бота
+# (синхронизация: push → синк → перенос/удаление), а перенос/удаление через бота — ровно один раз вместе с уведомлением.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z). Дом: Иван 1001 (владелец, Google), Аня 2001 (без Google),
+# Дима 1002 (свой Google, тоже подключил «Семью»). Общий календарь «Семья» с «Плавание Вани» в сб 10:00.
+
+- id: assign-external-move-shifts-assignment
+  story: US-91
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              shared: true
+              events:
+                - { id: swim, summary: "Плавание Вани", start: { dateTime: "2026-10-10T10:00:00+03:00" }, end: { dateTime: "2026-10-10T11:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: owner, timeZone: Europe/Moscow, shared: true }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - press: { button: "✅ Семья", from: 1001 }
+      - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
+      - telegram: { from: 1001, text: "/home kid Ваня" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена, мама" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - llm:
+          "Кто-то должен отвезти Ваню на плавание в субботу": { tool: assign_task, args: { when: "в субботу", task: "отвезти Ваню на плавание" } }
+          "Перенеси плавание Вани на 12": { tool: modify_event, args: { event: "плавание Вани" } }
+          "Удали плавание Вани": { tool: delete_event, args: { event: "плавание Вани" } }
+      # Подписка на «Семью» и первый синк (снимки) — дальше изменения в Google видны как перенос/удаление
+      - hourly: true
+      - tick: true
+      - telegram: { from: 1001, text: "Кто-то должен отвезти Ваню на плавание в субботу" }
+      - press: { button: "Поручить", from: 1001 }
+      - press: { button: "Беру", chat: 2001, from: 2001 }
+      - expect_telegram_count: 18
+    - google_external: { calendar: family@group.calendar.google.com, move: { id: swim, start: { dateTime: "2026-10-10T12:00:00+03:00" }, end: { dateTime: "2026-10-10T13:00:00+03:00" } } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    # Взрослым с «Семьёй» — уведомление US-72 (автор неизвестен); исполнителю — новый срок, карточки обновлены
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
+    # Повторный push без изменений — ничего
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+    # Прежнее «за день» (пт 10:00) не приходит; новое — пт 12:00
+    - clock: "2026-10-09T07:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T09:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["🔔 Напоминание: Отвезти Ваню на плавание — завтра в 12:00"], buttons: ["Сделано"] }
+
+- id: assign-bot-move-shifts-once-with-notice
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Перенеси плавание Вани на 12" }
+    - press: { button: "Подтвердить", from: 1001, first_name: "Иван" }
+    # Сдвиг поручения — один раз (modify-event), уведомление US-72 — Диме (не в исходный чат), автор — Иван
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Плавание Вани", "12:00"], buttons: ["Подтвердить", "Отмена"] }
+        - { chat_id: 1002, text_contains: ["🔁 Перенесено: «Плавание Вани» — сб, 10 октября, 12:00–13:00 (было 10:00)", "👤 Иван"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Изменено"] }
+    # Push Google про эту же правку — эхо: ни второго сдвига, ни второго уведомления
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T09:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["🔔 Напоминание: Отвезти Ваню на плавание — завтра в 12:00"] }
+
+- id: assign-bot-delete-cancels-assignment
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Удали плавание Вани" }
+    - press: { button: "Удалить", from: 1001 }
+    # Событие удалено через бота — поручение отменено (автору — карточка, исполнителю — «Отменено»); US-72 — Диме
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Удалить?", "Плавание Вани"] }
+        - { chat_id: 1002, text_contains: ["❌ Отменено: «Плавание Вани»", "👤 Иван"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["🗑 Удалено"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Поручение отменено: Отвезти Ваню на плавание"] }
+        - { method: editMessageText, text_contains: ["Отменено: Отвезти Ваню на плавание"] }
+        - { method: editMessageText, text_contains: ["Отменено: Отвезти Ваню на плавание"] }
+        - { chat_id: 2001, text_contains: ["Отменено: Отвезти Ваню на плавание — сб, 10 октября в 10:00"] }
+    # Напоминания поручения сняты
+    - clock: "2026-10-09T07:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: assign-external-delete-cancels-assignment
+  story: US-91
+  steps:
+    - *home
+    - google_external: { calendar: family@group.calendar.google.com, delete: swim }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    # Удалено в Google мимо бота — то же: поручение отменено, исполнителю — «Отменено», уведомления US-72 взрослым
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Плавание Вани»"] }
+        - { chat_id: 1002, text_contains: ["❌ Отменено: «Плавание Вани»"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Поручение отменено: Отвезти Ваню на плавание"] }
+        - { method: editMessageText, text_contains: ["Отменено: Отвезти Ваню на плавание"] }
+        - { method: editMessageText, text_contains: ["Отменено: Отвезти Ваню на плавание"] }
+        - { chat_id: 2001, text_contains: ["Отменено: Отвезти Ваню на плавание — сб, 10 октября в 10:00"] }
+    - clock: "2026-10-09T07:00:00Z"
+    - tick: true
+    - expect_no_telegram: true

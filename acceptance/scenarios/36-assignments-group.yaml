@@ -1,0 +1,91 @@
+# US-91 + US-94: поручения в семейном групповом чате (-500). «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z).
+# Дом «Бобылевы»: Иван 1001 (владелец, Google), Аня 2001 (без Google; «жена»), Дима 1002 (свой Google). Чат привязан к дому.
+
+- id: assign-group-someone-any-adult-takes
+  story: US-91
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - telegram: { from: 1001, text: "/home name Иван, муж" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home link" }
+      - expect_telegram_count: 9
+      - llm:
+          "кто-то должен купить корм коту завтра": { tool: assign_task, args: { when: "завтра", task: "купить корм коту" } }
+          "Напомни жене полить цветы в 18": { tool: assign_task, args: { assignee: "жене", when: "в 18", task: "полить цветы" } }
+          "Кто-то должен забрать посылку в 18": { tool: assign_task, args: { when: "в 18", task: "забрать посылку" } }
+    # Участник без Google поручает в группе; «Поручить» может нажать любой взрослый дома — автор остаётся Аня
+    - telegram: { from: 2001, chat_id: -500, chat_type: group, text: "@cab_test_bot кто-то должен купить корм коту завтра" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Поручить?", "📌 Кто-то должен: Купить корм коту — завтра", "👥 Кому: кто первым возьмёт — Дима, Иван"], buttons: ["Поручить", "Отмена"] }
+    - press: { button: "Поручить", chat: -500, from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: -500, text_contains: ["✅ Предложено всем"], buttons: ["Беру", "Отменить поручение"] }
+        - { chat_id: 1002, text_contains: ["📌 Кто-то должен: Купить корм коту — завтра", "👤 От: Аня"], buttons: ["Беру", "Не могу"] }
+        - { chat_id: 1001, text_contains: ["📌 Кто-то должен: Купить корм коту — завтра"], buttons: ["Беру", "Не могу"] }
+    # Не участник дома в группе — кнопки не для него
+    - press: { button: "Беру", chat: -500, from: 999 }
+    - expect_callback_answer: { empty: true }
+    # Дима берёт прямо в группе
+    - press: { button: "Беру", chat: -500, from: 1002 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Дима взял(а): Купить корм коту — завтра"], buttons: ["Отменить поручение"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["✅ Вы взяли: Купить корм коту"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Взял(а): Дима"], buttons: [] }
+        - { chat_id: 2001, text_contains: ["👍 Дима взял(а): Купить корм коту"] }
+    # Отменить может только автор
+    - press: { button: "Отменить поручение", chat: -500, from: 1001 }
+    - expect_callback_answer: { text_contains: ["только автор"] }
+    - expect_no_telegram: true
+
+- id: assign-group-escalation
+  story: US-91
+  steps:
+    - *home
+    # Эскалация — автору и в семейный чат дома
+    - telegram: { from: 1001, text: "Напомни жене полить цветы в 18" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram_count: 3
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["⏳ Аня ещё не подтвердил(а): Полить цветы — сегодня в 18:00"] }
+        - { chat_id: -500, text_contains: ["⏳ Аня ещё не подтвердил(а): Полить цветы — сегодня в 18:00"], buttons: [] }
+
+- id: assign-group-escalation-someone-take-in-chat
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Кто-то должен забрать посылку в 18" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram_count: 4
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["⏳ Пока никто не взял: Забрать посылку — сегодня в 18:00"] }
+        - { chat_id: -500, text_contains: ["⏳ Пока никто не взял: Забрать посылку"], buttons: ["Беру"] }
+    # В чате — любой взрослый
+    - press: { button: "Беру", chat: -500, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Забрать посылку"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать посылку"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"], buttons: [] }
+        - { method: editMessageText, chat_id: -500, text_contains: ["👍 Аня взял(а): Забрать посылку"] }
+        - { chat_id: 1001, text_contains: ["👍 Аня взял(а)"] }

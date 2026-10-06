@@ -31,8 +31,24 @@ export interface FindEventIntent {
   next?: boolean;
 }
 
+/** Поручение другому участнику дома или «кому-то из нас» (US-91). Кому и что — ещё и из текста (bot/assign/logic.ts). */
+export interface AssignTaskIntent {
+  name: "assign_task";
+  /** Кому, как сказано: «мужу», «Ане». Нет — см. someone. */
+  assignee?: string;
+  /** «Кто-то должен …» — без исполнителя: предложить всем взрослым дома. */
+  someone?: boolean;
+  /** Что сделать, без дат и исполнителя: «забрать Машу из школы». */
+  task?: string;
+  /** Дата/время как сказано. */
+  when?: string;
+}
+
 export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
+  | AssignTaskIntent
+  /** «Мои дела», «что на мне завтра» (US-91) — только по тексту, не tool. */
+  | { name: "list_assignments" }
   | FindEventIntent
   | CreateEventIntent
   | ModifyEventIntent
@@ -143,6 +159,22 @@ export const TOOLS: ToolDefinition[] = [
       parameters: { type: "object", properties: {} },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "assign_task",
+      description:
+        "Give a task to ANOTHER family member or to anyone in the family: «напомни мужу забрать Машу из школы в 17», «пусть Аня завтра купит торт», «кто-то должен отвезти Ваню на плавание в субботу». Not for reminding the user themself.",
+      parameters: {
+        type: "object",
+        properties: {
+          assignee: str("Who should do it, exactly as said: «мужу», «Аня», «папе». Omit for «кто-то», «кто-нибудь» (anyone)."),
+          when: str("Date and time words verbatim: «сегодня в 17», «завтра», «в субботу». Omit if not said."),
+          task: str("What to do, in the infinitive, without date/time words and without the assignee: «забрать Машу из школы», «купить торт»."),
+        },
+      },
+    },
+  },
 ];
 
 // Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
@@ -171,7 +203,9 @@ Examples:
 "Сдвинь следующую встречу на час позже" → modify_event {"reference":"next"}
 "Переименуй её в Ревью дизайна" → modify_event {"reference":"last","new_title":"Ревью дизайна"}
 "Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)
-"Отмени встречу с Петей в пятницу" → delete_event {"event":"встречу с Петей"}`;
+"Отмени встречу с Петей в пятницу" → delete_event {"event":"встречу с Петей"}
+"Напомни мужу забрать Машу из школы в 17" → assign_task {"assignee":"мужу","when":"в 17","task":"забрать Машу из школы"}
+"Кто-то должен отвезти Ваню на плавание в субботу" → assign_task {"when":"в субботу","task":"отвезти Ваню на плавание"}`;
 
 export interface ParsedIntent {
   intent: Intent;
@@ -267,6 +301,20 @@ export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   if (call?.name === "delete_event") {
     const event = typeof call.arguments.event === "string" && call.arguments.event.trim() ? call.arguments.event.trim() : undefined;
     return { name: "delete_event", ...(event ? { event } : {}) };
+  }
+  if (call?.name === "assign_task") {
+    const a = call.arguments;
+    const opt = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? (a[k] as string).trim() : undefined);
+    const assignee = opt("assignee");
+    const someone = !assignee || /^(кто-?\s?(то|нибудь)|some(one|body)|anyone)$/i.test(assignee);
+    const task = opt("task");
+    const when = opt("when");
+    return {
+      name: "assign_task",
+      ...(someone ? { someone: true } : { assignee }),
+      ...(task ? { task } : {}),
+      ...(when ? { when } : {}),
+    } as AssignTaskIntent;
   }
   if (call?.name === "modify_event") {
     const a = call.arguments;

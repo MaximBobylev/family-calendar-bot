@@ -36,6 +36,7 @@ const TABLES = [
   "pending_actions",
   "dialog_state",
   "conversations",
+  "assignment_messages",
   "assignments",
   "event_meta",
   "household_calendars",

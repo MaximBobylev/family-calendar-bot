@@ -8,6 +8,7 @@ import { addMinutes, minutesBetween, utcToLocal, type Moment } from "../dates/ca
 import { attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
+import { shiftAssignmentsForEvent } from "./assign/answers";
 import type { AppContext } from "./context";
 import { locateEvent } from "./find-event";
 import { escapeHtml } from "./format";
@@ -185,6 +186,8 @@ export async function confirmModify(
     throw e;
   }
 
+  // Поручения, связанные с событием, сдвигаются вместе с ним (US-91); серия целиком — пока нет (экземпляры)
+  if (o.start && !wholeSeries) await shiftAssignmentsForEvent(ctx, p.ref, minutesBetween(o.start, p.oldStart) * 60_000, action.userId);
   const details = modifiedDetails(o, p, wholeSeries, today, locale);
   const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
   if (action.messageId) {
