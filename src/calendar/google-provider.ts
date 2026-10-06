@@ -226,6 +226,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
         ...(id ? { id } : {}),
         summary: e.title,
         ...(e.location ? { location: e.location } : {}),
+        ...(e.description ? { description: e.description } : {}),
         ...(e.recurrence ? { recurrence: e.recurrence } : {}),
         ...(e.reminders ? { reminders: { useDefault: false, overrides: e.reminders.map((minutes) => ({ method: "popup" as const, minutes })) } } : {}),
         ...time,

@@ -12,6 +12,10 @@ export interface UserSettings {
   digestOff?: boolean;
   /** Время дайджеста «ЧЧ:ММ» по поясу пользователя. Нет — 08:00. */
   digestTime?: string;
+  /** Вечерняя сводка «Завтра» в 21:00 (US-70, R1). По умолчанию — выключена. */
+  tomorrowDigest?: boolean;
+  /** Сводка «Неделя»: вс 20:00 или пн 08:00 (US-70, R1). Нет — выключена. */
+  weekDigest?: "sun" | "mon";
 }
 
 export const DEFAULT_DURATION_MIN = 60;

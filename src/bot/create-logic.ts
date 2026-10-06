@@ -20,6 +20,8 @@ export interface CreateDraft {
   allDay?: boolean;
   calendar?: string;
   location?: string;
+  /** Откуда событие: пересланное, фото (US-65, US-66) — пишется в описание. */
+  description?: string;
 }
 
 /** Разрешённый вариант события — хранится в карточке. */
@@ -35,6 +37,7 @@ export interface CreateOption {
   start?: Moment;
   end?: Moment;
   location?: string;
+  description?: string;
   series?: SeriesInfo;
 }
 
@@ -176,6 +179,7 @@ function optionBase(draft: CreateDraft, cal: CalendarInfo, tz: string, locale: s
     titleGiven: !!draft.title,
     tz,
     ...(draft.location ? { location: draft.location } : {}),
+    ...(draft.description ? { description: draft.description } : {}),
   };
 }
 

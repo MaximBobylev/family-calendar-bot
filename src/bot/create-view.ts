@@ -20,6 +20,8 @@ export function cardBody(o: CreateOption, today: Day, locale: string, showCalend
     lines.push(`🕒 ${whenLabel(o, today, locale)}`);
   }
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
+  // Источник из чужого контента (US-65…US-67) — первая строка описания
+  if (o.description) lines.push(`📝 ${escapeHtml(firstLine(o.description))}`);
   if (showCalendar) lines.push(`🗓 ${escapeHtml(o.calendarTitle)}`);
   return lines.join("\n");
 }
@@ -80,3 +82,8 @@ export function createCard(
   }
   return { text, buttons };
 }
+
+const firstLine = (s: string) => {
+  const line = s.split("\n")[0]!.trim();
+  return line.length > 120 ? `${line.slice(0, 120)}…` : line;
+};

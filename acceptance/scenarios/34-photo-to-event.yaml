@@ -1,0 +1,113 @@
+# US-66: фото / скриншот → событие. Gemini читает картинку (видимый текст + название и место), дату считает наш
+# парсер по видимому тексту; всегда карточка-подтверждение. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: photo-poster-to-event
+  story: US-66
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+    - photo:
+        from: 1001
+        content: "img-concert"
+        seen:
+          text: "Концерт хора «Весна»\n20 октября в 19:00\nДК Ленсовета, Каменноостровский пр., 42"
+          args: { title: "Концерт хора «Весна»", start: "20 октября в 19:00", location: "ДК Ленсовета, Каменноостровский пр., 42" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Концерт хора «Весна»</b>", "вт, 20 октября, 19:00–20:00", "📍 ДК Ленсовета, Каменноостровский пр., 42", "📝 Из изображения:"]
+          buttons: ["Создать", "Отмена"]
+    - expect_vision_requests: 1
+    # Текстовая LLM не нужна: всё дал один вызов Gemini
+    - expect_llm_requests: 0
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 1
+        events:
+          - summary: "Концерт хора «Весна»"
+            start: "2026-10-20T19:00:00+03:00"
+            end: "2026-10-20T20:00:00+03:00"
+            location: "ДК Ленсовета, Каменноостровский пр., 42"
+            description: "Из изображения:\n«Концерт хора «Весна» 20 октября в 19:00 ДК Ленсовета, Каменноостровский пр., 42»"
+
+- id: photo-time-from-text-not-from-model
+  story: US-66
+  steps:
+    - *setup
+    # Модель «исправила» время в поле start (синтетика голоса 2026-10-05) — дата берётся из дословного текста
+    - photo:
+        from: 1001
+        content: "img-doctor"
+        seen:
+          text: "Запись к врачу 15.10 в 8:30"
+          args: { title: "Врач", start: "15.10 в 20:30" }
+    - expect_telegram:
+        - { text_contains: ["<b>Врач</b>", "чт, 15 октября, 08:30–09:30"], text_not_contains: ["20:30"] }
+
+- id: photo-without-date-asks-when
+  story: US-66
+  steps:
+    - *setup
+    - photo:
+        from: 1001
+        content: "img-sale"
+        seen: { text: "Большая распродажа! Скидки на всё", args: { title: "Распродажа" } }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл в сообщении даты и времени. Когда поставить «Распродажа»?"] }
+    - telegram: { from: 1001, text: "в субботу в 12" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Распродажа</b>", "сб, 10 октября, 12:00–13:00", "Из изображения"] }
+
+- id: photo-caption-is-users-instruction
+  story: US-66
+  steps:
+    - *setup
+    # Подпись — слова пользователя: дата из неё; подпись уходит модели отдельной частью
+    - photo:
+        from: 1001
+        content: "img-workshop"
+        caption: "на субботу в 12"
+        seen: { text: "Мастер-класс по керамике. Запись по телефону", args: { title: "Мастер-класс по керамике" } }
+    - expect_telegram:
+        - { text_contains: ["<b>Мастер-класс по керамике</b>", "сб, 10 октября, 12:00–13:00"] }
+    - expect_vision_requests: { count: 1, caption_contains: "на субботу в 12" }
+
+- id: photo-no-event-and-errors
+  story: US-66
+  steps:
+    - *setup
+    - photo: { from: 1001, content: "img-cat", seen: { no_event: true, text: "" } }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл на изображении ничего похожего на событие"] }
+    - photo: { from: 1001, content: "img-broken", seen: { error: 500 } }
+    - expect_telegram:
+        - { text_contains: ["Не получилось прочитать изображение"] }
+    # Картинка файлом: слишком большая — без вызова модели; не тот формат — тоже
+    - photo: { from: 1001, content: "img-huge", as_document: "image/png", size: 6000000 }
+    - expect_telegram:
+        - { text_contains: ["Картинка слишком большая"] }
+    - photo: { from: 1001, content: "img-tiff", as_document: "image/tiff" }
+    - expect_telegram:
+        - { text_contains: ["JPEG, PNG и WebP"] }
+    - expect_vision_requests: 2
+
+- id: photo-as-png-document
+  story: US-66
+  steps:
+    - *setup
+    - photo:
+        from: 1001
+        content: "img-ticket"
+        as_document: "image/png"
+        seen: { text: "Поезд Москва — Казань\n12.10 в 21:15", args: { title: "Поезд в Казань" } }
+    - expect_telegram:
+        - { text_contains: ["<b>Поезд в Казань</b>", "пн, 12 октября, 21:15–22:15"] }

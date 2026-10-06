@@ -17,6 +17,7 @@ import { DISCONNECT_CARD } from "./disconnect";
 import { PICK_CARD } from "./find-event";
 import { escapeHtml } from "./format";
 import { FORWARD_CARD } from "./forwarded";
+import { ICS_CARD } from "./ingest";
 import { t } from "./messages";
 import { MODIFY_CARD } from "./modify-event";
 import { parseCommandIntent } from "./nlu-step";
@@ -37,6 +38,7 @@ export async function cancelCards(ctx: AppContext, user: User, conversationId: s
     DELETE_CARD,
     DISCONNECT_CARD,
     FORWARD_CARD,
+    ICS_CARD,
   ]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;

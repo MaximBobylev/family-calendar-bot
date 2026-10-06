@@ -1,12 +1,13 @@
 // Приём сообщения: текст, голосовое/аудио (→ распознавание), пересланное (→ карточка «Выполнить?», US-10),
-// прочее (фото, файлы) — «пока не умею». Дальше — диалоговый слой (dialog.ts).
+// фото и .ics (→ событие, ingest.ts), прочее — «пока не умею». Дальше — диалоговый слой (dialog.ts).
 
 import { ensureConversation } from "../../db/conversations";
 import type { User } from "../../db/users";
 import type { TgMessage } from "../../telegram/types";
 import type { AppContext } from "../context";
 import { cancelCards, runCommand } from "../dialog";
-import { proposeForwarded } from "../forwarded";
+import { forwardOrigin, proposeForwarded } from "../forwarded";
+import { handleAttachment } from "../ingest";
 import { t } from "../messages";
 import { withTyping } from "../with-typing";
 import { recognizeVoice } from "./voice";
@@ -23,15 +24,16 @@ export async function handleCommand(ctx: AppContext, user: User, message: TgMess
       const v = (message.voice ?? message.audio)!;
       voice = { fileId: v.file_id, durationSec: v.duration };
     }
+    // Фото/скриншот (US-66) и файл .ics (US-67) — материал для события, не команда
+    if (!text && (await handleAttachment(ctx, user, message, conversationId))) return;
     if (!text) {
-      // Фото, файлы и прочее — позже (US-66)
       await ctx.telegram.sendMessage(chatId, t("notImplemented", user.locale));
       return;
     }
     // Пересланное — чужой текст, не команда пользователя: только по кнопке «Выполнить» (US-10)
     if (message.forward_origin) {
       await cancelCards(ctx, user, conversationId);
-      await proposeForwarded(ctx, user, chatId, conversationId, text);
+      await proposeForwarded(ctx, user, chatId, conversationId, text, forwardOrigin(message.forward_origin));
       return;
     }
     await runCommand(ctx, user, chatId, conversationId, text, {

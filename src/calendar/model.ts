@@ -69,6 +69,8 @@ export interface NewEvent {
   start?: Moment;
   end?: Moment;
   location?: string;
+  /** Описание: источник события из чужого контента (US-65…US-67). */
+  description?: string;
   /** Правила повторения RFC 5545: ["RRULE:FREQ=WEEKLY;BYDAY=MO"] (US-32). */
   recurrence?: string[];
   /** Напоминания (popup), минуты до начала. Нет — как в Google (useDefault). */

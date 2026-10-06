@@ -78,7 +78,7 @@ function toResult(calls: ToolCall[], tokensIn: number, tokensOut: number): Voice
   return { noSpeech: false, transcript, intent: intentFromCalls(calls), tokensIn, tokensOut };
 }
 
-function base64(audio: ArrayBuffer): string {
+export function base64(audio: ArrayBuffer): string {
   const bytes = new Uint8Array(audio);
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
