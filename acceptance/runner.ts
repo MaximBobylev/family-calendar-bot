@@ -99,7 +99,11 @@ type Step =
   | { http_post: HttpCheck & { form?: Record<string, string> } }
   | { llm: Record<string, unknown> }
   /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть. */
-  | { press: string | { button: string; from?: number; again?: boolean } }
+  | {
+      press:
+        | string
+        | { button: string; from?: number; again?: boolean /** Только сообщение в этом чате (US-91: у каждого своё предложение). */; chat?: number };
+    }
   /** Ответить (reply) на последний вопрос бота с ForceReply. */
   | { reply: { from: number; text: string } }
   | { expect_callback_answer: { text_contains?: string[]; empty?: boolean } }
@@ -607,6 +611,7 @@ async function runScenario(s: Scenario): Promise<void> {
       const calls = await allTelegramCalls();
       let target: { call: TelegramCall; data: string } | undefined;
       for (const c of [...calls].reverse()) {
+        if (p.chat !== undefined && String(c.body.chat_id) !== String(p.chat)) continue;
         const btn = (c.body.reply_markup?.inline_keyboard ?? []).flat().find((b) => b.text === p.button && b.callback_data);
         if (btn) {
           target = { call: c, data: btn.callback_data! };

@@ -1,0 +1,117 @@
+# US-92: ответственный и «для кого» у события; перенос события сдвигает напоминания поручения (US-91).
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z). Дом «Бобылевы»: Иван 1001 (владелец, Google; «папа»), Аня 2001
+# (без Google; «мама»), Дима 1002 (свой Google). Дети — Маша и Ваня. Общий календарь — «Семья».
+
+- id: responsible-on-create-shown-in-lists
+  story: US-92
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              events:
+                - { id: swim, summary: "Плавание Вани", start: { dateTime: "2026-10-10T10:00:00+03:00" }, end: { dateTime: "2026-10-10T11:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - press: { button: "✅ Иван", from: 1001 }
+      - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
+      - telegram: { from: 1001, text: "/home kid Маша" }
+      - telegram: { from: 1001, text: "/home kid Ваня" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена, мама" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - expect_telegram_count: 11
+      - llm:
+          "Стоматолог Вани в четверг в 16 в семейном, отводит Дима":
+            { tool: create_event, args: { start: "в четверг в 16", calendar: "Семья", title: "Стоматолог Вани" } }
+          "Стоматолог Вани в четверг в 16 в семейном, отводит Петя":
+            { tool: create_event, args: { start: "в четверг в 16", calendar: "Семья", title: "Стоматолог Вани" } }
+          "что у меня в четверг?": { tool: list_events, args: { range: "в четверг" } }
+          "что у нас в четверг?": { tool: list_events, args: { range: "в четверг" } }
+          "Кто-то должен отвезти Ваню на плавание в субботу": { tool: assign_task, args: { when: "в субботу", task: "отвезти Ваню на плавание" } }
+          "Перенеси плавание Вани на 12": { tool: modify_event, args: { event: "плавание Вани" } }
+    - telegram: { from: 1001, text: "Стоматолог Вани в четверг в 16 в семейном, отводит Дима" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Создать событие?", "Стоматолог Вани", "чт, 8 октября, 16:00–17:00", "👤 Отводит: Дима", "🧒 Для: Ваня"], text_not_contains: ["отводит Дима"] }
+    - press: { button: "Создать", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Создано", "Стоматолог Вани", "👤 Отводит: Дима", "🧒 Для: Ваня"] }
+    # В Google — название как сказано; «для кого» и ответственный — у нас (EventMeta)
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Стоматолог Вани", start: "2026-10-08T16:00:00+03:00", end: "2026-10-08T17:00:00+03:00" }]
+    - telegram: { from: 1001, text: "что у меня в четверг?" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["10:00–11:00  Планёрка", "16:00–17:00  Стоматолог (Ваня) — отводит Дима"] }
+    # Участник без Google видит то же по общим календарям дома
+    - telegram: { from: 2001, text: "что у нас в четверг?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["16:00–17:00  Стоматолог (Ваня) — отводит Дима"], text_not_contains: ["Планёрка"] }
+
+- id: responsible-unknown-name
+  story: US-92
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Стоматолог Вани в четверг в 16 в семейном, отводит Петя" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Стоматолог Вани", "🧒 Для: Ваня", "⚠️ «Петя» не нашёл среди участников дома"], text_not_contains: ["Отводит:"] }
+    - press: { button: "Создать", from: 1001 }
+    - telegram: { from: 2001, text: "что у нас в четверг?" }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Создано"] }
+        - { chat_id: 2001, text_contains: ["16:00–17:00  Стоматолог (Ваня)"], text_not_contains: ["отводит"] }
+
+- id: event-move-shifts-assignment-reminders
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Кто-то должен отвезти Ваню на плавание в субботу" }
+    - press: { button: "Поручить", from: 1001 }
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram_count: 8
+    # Перенос события через бота — срок поручения и напоминания сдвигаются, исполнителю — «время изменилось»
+    - telegram: { from: 1001, text: "Перенеси плавание Вани на 12" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Плавание Вани", "12:00"], buttons: ["Подтвердить", "Отмена"] }
+    - press: { button: "Подтвердить", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание — сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание — сб, 10 октября в 12:00"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"] }
+        - { chat_id: 2001, text_contains: ["🕒 Время изменилось: Отвезти Ваню на плавание — теперь сб, 10 октября в 12:00"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Изменено"] }
+    # Прежнее «за день» (пт 10:00) не приходит; новое — пт 12:00
+    - clock: "2026-10-09T07:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T09:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["🔔 Напоминание: Отвезти Ваню на плавание — завтра в 12:00"], buttons: ["Сделано"] }
+    # В списке — новое время и ответственный
+    - llm:
+        "что у нас в субботу?": { tool: list_events, args: { range: "в субботу" } }
+    - telegram: { from: 2001, text: "что у нас в субботу?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["12:00–13:00  Плавание (Ваня) — отводит Аня"] }

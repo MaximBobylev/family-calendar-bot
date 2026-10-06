@@ -5,6 +5,7 @@ import { DAY_PART_BOUNDS } from "../dates/lexicon";
 import { formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { parseDateFragment, type ParseValue } from "../dates";
 import { mergeDialogState } from "../db/conversations";
+import { familyLabeler } from "./assign/family";
 import type { AppContext } from "./context";
 import { appendFailedNote, dayTitle, formatEvents } from "./format-events";
 import { orderForDisplay } from "./format";
@@ -105,7 +106,8 @@ export async function readEvents(
   );
   await mergeDialogState(ctx.db, args.conversationId, args.userId, { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() } }, ctx.clock.now());
   const defaultId = calendars.find((c) => c.isDefault)?.id;
-  const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId);
+  const family = await familyLabeler(ctx.db, args.userId, ordered, locale);
+  const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId, family);
   // Календарь не загрузился (удалён, нет доступа) — показываем остальное и честно говорим, чего нет (tech-debt #12)
   appendFailedNote(
     messages,

@@ -57,6 +57,14 @@ export async function membershipOf(db: D1Database, userId: string): Promise<Memb
   };
 }
 
+export async function getHousehold(db: D1Database, id: string): Promise<Household | null> {
+  const h = await db
+    .prepare("SELECT id, name, owner_user_id FROM households WHERE id = ?")
+    .bind(id)
+    .first<{ id: string; name: string | null; owner_user_id: string }>();
+  return h ? { id: h.id, name: h.name ?? "", ownerUserId: h.owner_user_id } : null;
+}
+
 /** Участник какого-либо дома по Telegram id — доступ к боту без allowlist (приглашённые, ADR-0001 дополнение 2026-10-06). */
 export async function isMemberByTelegramId(db: D1Database, telegramId: number): Promise<boolean> {
   const row = await db
@@ -240,6 +248,7 @@ export function dissolveStatements(db: D1Database, householdIdsSql: string, para
     db.prepare(`DELETE FROM household_invites WHERE household_id IN (${householdIdsSql})`).bind(param),
     db.prepare(`DELETE FROM household_calendars WHERE household_id IN (${householdIdsSql})`).bind(param),
     db.prepare(`DELETE FROM dependents WHERE household_id IN (${householdIdsSql})`).bind(param),
+    db.prepare(`DELETE FROM assignment_messages WHERE assignment_id IN (SELECT id FROM assignments WHERE household_id IN (${householdIdsSql}))`).bind(param),
     db.prepare(`DELETE FROM assignments WHERE household_id IN (${householdIdsSql})`).bind(param),
     db.prepare(`DELETE FROM household_members WHERE household_id IN (${householdIdsSql})`).bind(param),
   ];

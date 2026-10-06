@@ -2,6 +2,7 @@
 // Словарь разбит по областям в messages/*.ts (меньше конфликтов при параллельных правках); ключи не должны повторяться.
 
 import { accountMessages } from "./messages/account";
+import { assignMessages } from "./messages/assign";
 import { commonMessages } from "./messages/common";
 import { createMessages } from "./messages/create";
 import { deleteMessages } from "./messages/delete";
@@ -25,6 +26,7 @@ export const messages = {
   ...settingsMessages,
   ...inputMessages,
   ...householdMessages,
+  ...assignMessages,
 };
 
 export type MessageKey = keyof typeof messages;

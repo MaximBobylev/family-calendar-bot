@@ -5,6 +5,7 @@
 // Исполнитель должен быть идемпотентным по смыслу: при сбое после отправки задача может повториться.
 
 import type { AppContext } from "./bot/context";
+import { ASSIGN_JOB, runAssignJob } from "./jobs/assign";
 import { runDigestJob, DIGEST_JOB } from "./jobs/digest";
 import { errorClass, log } from "./log";
 
@@ -31,6 +32,7 @@ const JOBS_PER_SECOND = 20;
 type JobHandler = (ctx: AppContext, job: DueJob) => Promise<void>;
 const HANDLERS: Record<string, JobHandler> = {
   [DIGEST_JOB]: runDigestJob,
+  [ASSIGN_JOB]: runAssignJob,
 };
 
 export async function claimDueJobs(db: D1Database, now: number, limit = 500): Promise<DueJob[]> {

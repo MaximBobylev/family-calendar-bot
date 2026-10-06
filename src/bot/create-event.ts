@@ -21,6 +21,7 @@ import {
 } from "./create-logic";
 import { cardBody, createCard } from "./create-view";
 import { dateLabel, escapeHtml, hhmm } from "./format";
+import { familyCardLines, saveEventFamily } from "./assign/family";
 import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
@@ -76,7 +77,12 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     conversationId: a.conversationId,
     userId: user.id,
     kind: CREATE_CARD,
-    payload: { chatId, options: res.options, ...(namedByAlias(cal, a.draft.calendar) ? { viaAlias: true } : {}) } satisfies CreateCardPayload,
+    payload: {
+      chatId,
+      options: res.options,
+      ...(namedByAlias(cal, a.draft.calendar) ? { viaAlias: true } : {}),
+      ...(a.draft.family ? { family: a.draft.family } : {}),
+    } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
 
@@ -84,7 +90,9 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
   const { text, buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps);
   const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
-  const sent = await ctx.telegram.sendMessage(chatId, `${text}${by}`, { inline_keyboard: buttons }, { html: true });
+  // Ответственный и «для кого» (US-92) — строками под телом карточки
+  const fam = familyCardLines(a.draft.family, locale);
+  const sent = await ctx.telegram.sendMessage(chatId, `${text}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -154,6 +162,7 @@ export async function confirmCreate(
 
   // Автор — тот, кто попросил (в группе нажать «Создать» может любой взрослый дома, US-94)
   await noteCreator(ctx, created.ref, action.userId);
+  await saveEventFamily(ctx, created.ref, action.payload.family);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
   const body = cardBody(o, today, locale, calendarsCount > 1);
   const undo = await recordUndo(ctx, {
@@ -166,7 +175,8 @@ export async function confirmCreate(
   const row = [...(created.link ? [{ text: t("openInCalendar", locale), url: created.link }] : []), undo.button];
   if (action.messageId) {
     const by = await creatorNote(ctx, action.userId, "homeCreatedByDone", locale);
-    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}${by}`, { inline_keyboard: [row] }, { html: true });
+    const fam = familyCardLines(action.payload.family, locale);
+    await ctx.telegram.editMessageText(chatId, action.messageId, `${t("created", locale)}\n\n${body}${fam}${by}`, { inline_keyboard: [row] }, { html: true });
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());

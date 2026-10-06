@@ -1,0 +1,267 @@
+# US-91: поручения «Беру / Не могу» с напоминаниями и эскалацией. «Сейчас» — ср 7 октября 2026, 10:00 МСК (07:00Z).
+# Дом «Бобылевы»: Иван 1001 (владелец, Google; «муж, папа»), Аня 2001 (без Google; «жена, мама»), Дима 1002 (свой Google;
+# «брат»). Дети — Маша и Ваня. Общий календарь — «Семья» (в нём «Плавание Вани» в сб 10:00); личный «Иван» — не общий.
+
+- id: assign-accept-remind-done
+  story: US-91
+  steps:
+    - &home
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              events:
+                - { id: swim, summary: "Плавание Вани", start: { dateTime: "2026-10-10T10:00:00+03:00" }, end: { dateTime: "2026-10-10T11:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - press: { button: "✅ Иван", from: 1001 }
+      - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
+      - telegram: { from: 1001, text: "/home kid Маша" }
+      - telegram: { from: 1001, text: "/home kid Ваня" }
+      - telegram: { from: 1001, text: "/home invite Аня, жена, мама" }
+      - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - expect_telegram_count: 11
+      - llm:
+          "Напомни жене забрать Машу из школы в 17": { tool: assign_task, args: { assignee: "жене", when: "в 17", task: "забрать Машу из школы" } }
+          "Пусть Дима завтра купит торт": { tool: assign_task, args: { assignee: "Дима", when: "завтра", task: "купить торт" } }
+          "Напомни мужу купить хлеб": { tool: assign_task, args: { assignee: "мужу", task: "купить хлеб" } }
+          "Напомни папе купить хлеб": { tool: assign_task, args: { assignee: "папе", task: "купить хлеб" } }
+          "Напомни Пете купить хлеб": { tool: assign_task, args: { assignee: "Пете", task: "купить хлеб" } }
+          "Кто-то должен отвезти Ваню на плавание в субботу": { tool: assign_task, args: { when: "в субботу", task: "отвезти Ваню на плавание" } }
+          "Напомни Диме забрать посылку в 17": { tool: assign_task, args: { assignee: "Диме", when: "в 17", task: "забрать посылку" } }
+          "мои дела": { tool: unsupported }
+          "что на мне завтра?": { tool: list_events, args: { range: "завтра" } }
+          "что у нас в субботу?": { tool: list_events, args: { range: "в субботу" } }
+    # Автору — карточка: что, кому, когда, напоминания; события в календаре нет — можно добавить
+    - telegram: { from: 1001, text: "Напомни жене забрать Машу из школы в 17" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["Поручить?", "📌 Забрать Машу из школы — сегодня в 17:00", "👤 Кому: Аня", "🧒 Для: Маша", "Добавлю в календарь: Семья", "🔔 Напомню: за час; если за 2 часа до срока ответа не будет — скажу вам"]
+          buttons: ["Поручить", "Поручить + в календарь", "Отмена"]
+    - press: { button: "Поручить", from: 1001 }
+    # Исполнителю (без Google) — нейтрально, автор — в деталях
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Поручено. Ждём ответа.", "Забрать Машу из школы — сегодня в 17:00", "Кому: Аня"], buttons: ["Отменить поручение"] }
+        - { chat_id: 2001, text_contains: ["📌 Забрать Машу из школы — сегодня в 17:00", "🧒 Для: Маша", "👤 От: Иван"], text_not_contains: ["просил"], buttons: ["Беру", "Не могу"] }
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Забрать Машу из школы — сегодня в 17:00"], buttons: ["Отменить поручение"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Забрать Машу из школы — сегодня в 17:00"], buttons: ["Сделано"] }
+        - { chat_id: 1001, text_contains: ["👍 Аня взял(а): Забрать Машу из школы"] }
+    # «Мои дела» у исполнителя
+    - telegram: { from: 2001, text: "мои дела" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["📋 Ваши дела:", "• сегодня в 17:00 — Забрать Машу из школы"], text_not_contains: ["ждёт ответа"] }
+    - telegram: { from: 2001, text: "что на мне завтра?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["На завтра дел на вас нет"] }
+    # Взял — эскалации нет (15:00), напоминание за час (16:00)
+    - clock: "2026-10-07T12:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["🔔 Напоминание: Забрать Машу из школы — сегодня в 17:00"], buttons: ["Сделано"] }
+    - press: { button: "Сделано", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✔️ Сделано: Забрать Машу из школы (Аня)"], buttons: [] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✔️ Сделано: Забрать Машу из школы"], buttons: [] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✔️ Сделано: Забрать Машу из школы"], buttons: [] }
+        - { chat_id: 1001, text_contains: ["✔️ Сделано: Забрать Машу из школы (Аня)"] }
+    # Сделано — дальше ни напоминаний, ни «истекло»
+    - clock: "2026-10-07T21:30:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - press: { button: "Сделано", chat: 2001, from: 2001 }
+    - expect_callback_answer: { text_contains: ["Уже сделано"] }
+
+- id: assign-decline-offer-other-cancel
+  story: US-91
+  steps:
+    - *home
+    # Исполнитель с Google; срок — день без времени: напомню утром
+    - telegram: { from: 1001, text: "Пусть Дима завтра купит торт" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["📌 Купить торт — завтра", "👤 Кому: Дима", "🔔 Напомню: в день срока в 9:00; если за 2 часа"]
+          buttons: ["Поручить", "Отмена"]
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Поручено"] }
+        - { chat_id: 1002, text_contains: ["📌 Купить торт — завтра", "👤 От: Иван"], buttons: ["Беру", "Не могу"] }
+    - press: { button: "Не могу", chat: 1002, from: 1002 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Дима не сможет: Купить торт — завтра"], buttons: [] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Понял, передам: Купить торт — не на вас."], buttons: [] }
+        - { chat_id: 1001, text_contains: ["Дима не сможет: Купить торт — завтра"], buttons: ["Сделаю сам", "Предложить другому"] }
+    # Не автор — не может распоряжаться
+    - press: { button: "Предложить другому", from: 2001 }
+    - expect_callback_answer: { text_contains: ["только автор поручения"] }
+    - press: { button: "Предложить другому", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Кому предложить: Купить торт?"], buttons: ["Аня", "Всем"] }
+    - press: { button: "Аня", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Поручено. Ждём ответа."], buttons: [] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Поручено", "Кому: Аня"], buttons: ["Отменить поручение"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Передано: Аня"], buttons: [] }
+        - { chat_id: 2001, text_contains: ["📌 Купить торт — завтра"], buttons: ["Беру", "Не могу"] }
+    # Прежний исполнитель кнопкой из старого сообщения уже не возьмёт
+    - press: { button: "Беру", chat: 1002, from: 1002 }
+    - expect_callback_answer: { text_contains: ["не вам"] }
+    - expect_no_telegram: true
+    # Автор отменяет — исполнителю «Отменено», кнопки у всех убраны
+    - press: { button: "Отменить поручение", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Поручение отменено: Купить торт"], buttons: [] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Отменено: Купить торт — завтра"], buttons: [] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["Отменено: Купить торт — завтра"], buttons: [] }
+        - { chat_id: 2001, text_contains: ["Отменено: Купить торт — завтра"] }
+    # Утреннее напоминание отменённого поручения не приходит (только сводки)
+    - clock: "2026-10-08T06:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Доброе утро"] }
+        - { chat_id: 1002, text_contains: ["Доброе утро"] }
+
+- id: assign-member-without-google-and-do-it-myself
+  story: US-91
+  steps:
+    - *home
+    # Участник без Google поручает владельцу — через дом
+    - telegram: { from: 2001, text: "Напомни мужу купить хлеб" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["📌 Купить хлеб — без срока", "👤 Кому: Иван"], text_not_contains: ["Напомню"], buttons: ["Поручить", "Отмена"] }
+    - press: { button: "Поручить", from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Поручено"] }
+        - { chat_id: 1001, text_contains: ["📌 Купить хлеб — без срока", "👤 От: Аня"], buttons: ["Беру", "Не могу"] }
+    - press: { button: "Не могу", chat: 1001, from: 1001 }
+    - expect_telegram_count: 3
+    - press: { button: "Сделаю сам", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["👍 Аня взял(а): Купить хлеб"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["Взял(а): Аня"], buttons: [] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["Хорошо, это на вас: Купить хлеб — без срока"], buttons: ["Сделано"] }
+    - press: { button: "Сделано", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✔️ Сделано: Купить хлеб (Аня)"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✔️ Сделано: Купить хлеб"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✔️ Сделано: Купить хлеб"] }
+
+- id: assign-who-not-found-and-self
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Напомни Пете купить хлеб" }
+    - telegram: { from: 1001, text: "Напомни папе купить хлеб" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Не нашёл «Пете» среди участников дома (Аня, Дима)"] }
+        - { chat_id: 1001, text_contains: ["Это вы сами"] }
+
+- id: assign-someone-first-take-wins
+  story: US-91
+  steps:
+    - *home
+    # «Кто-то должен» — всем взрослым, кроме автора; событие «Плавание Вани» в субботу — связано, время берётся из него
+    - telegram: { from: 1001, text: "Кто-то должен отвезти Ваню на плавание в субботу" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains:
+            - "📌 Кто-то должен: Отвезти Ваню на плавание — сб, 10 октября в 10:00"
+            - "👥 Кому: кто первым возьмёт — Аня, Дима"
+            - "🧒 Для: Ваня"
+            - "📅 Событие: Плавание Вани, сб, 10 октября 10:00"
+            - "🔔 Напомню: за день, за час"
+          buttons: ["Поручить", "Отмена"]
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Предложено всем — кто первым возьмёт."] }
+        - { chat_id: 2001, text_contains: ["📌 Кто-то должен: Отвезти Ваню на плавание — сб, 10 октября в 10:00"], buttons: ["Беру", "Не могу"] }
+        - { chat_id: 1002, text_contains: ["📌 Кто-то должен: Отвезти Ваню на плавание"], buttons: ["Беру", "Не могу"] }
+    - telegram: { from: 1002, text: "мои дела" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Можно взять:", "• сб, 10 октября в 10:00 — Отвезти Ваню на плавание"], buttons: ["Беру: Отвезти Ваню на плавание"] }
+    # Аня — первая; у Димы кнопки убраны
+    - press: { button: "Беру", chat: 2001, from: 2001 }
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["👍 Аня взял(а): Отвезти Ваню на плавание"] }
+        - { method: editMessageText, chat_id: 2001, text_contains: ["✅ Вы взяли: Отвезти Ваню на плавание"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["Взял(а): Аня"], buttons: [] }
+        - { chat_id: 1001, text_contains: ["👍 Аня взял(а)"] }
+    # Дима нажал по старой кнопке (гонка) — уже взято
+    - press: { button: "Беру", chat: 1002, from: 1002 }
+    - expect_callback_answer: { text_contains: ["Уже взял(а) Аня"] }
+    - expect_no_telegram: true
+    # Связанное событие получило ответственного (US-92)
+    - telegram: { from: 1001, text: "что у нас в субботу?" }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["10:00–11:00  Плавание (Ваня) — отводит Аня"] }
+
+- id: assign-escalation-and-expiry
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Напомни Диме забрать посылку в 17" }
+    - press: { button: "Поручить", from: 1001 }
+    - expect_telegram_count: 3
+    - telegram: { from: 1002, text: "мои дела" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["• сегодня в 17:00 — Забрать посылку · ждёт ответа"], buttons: ["Беру: Забрать посылку"] }
+    # За 2 часа до срока ответа нет — автору (нейтрально)
+    - clock: "2026-10-07T12:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["⏳ Дима ещё не подтвердил(а): Забрать посылку — сегодня в 17:00"] }
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["🔔 Напоминание: Забрать посылку — сегодня в 17:00"], buttons: ["Беру", "Не могу"] }
+    # Срок прошёл без ответа — «истекло», без упрёков
+    - clock: "2026-10-07T21:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { method: editMessageText, chat_id: 1001, text_contains: ["⌛ Срок прошёл: Забрать посылку"], buttons: [] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["⌛ Срок прошёл: Забрать посылку"], buttons: ["Сделано"] }
+        - { method: editMessageText, chat_id: 1002, text_contains: ["⌛ Срок прошёл: Забрать посылку"], buttons: ["Сделано"] }
+    - press: { button: "Беру", chat: 1002, from: 1002 }
+    - expect_callback_answer: { text_contains: ["неактуально"] }
+    - telegram: { from: 1002, text: "мои дела" }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Дел на вас нет"] }
+
+- id: assign-with-new-calendar-event
+  story: US-91
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "Напомни жене забрать Машу из школы в 17" }
+    - press: { button: "Поручить + в календарь", from: 1001 }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["Поручить?"] }
+        - { method: editMessageText, chat_id: 1001, text_contains: ["✅ Поручено", "📅 Событие: Забрать Машу из школы, сегодня в 17:00"] }
+        - { chat_id: 2001, text_contains: ["📅 Событие: Забрать Машу из школы"], buttons: ["Беру", "Не могу"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        events: [{ summary: "Забрать Машу из школы", start: "2026-10-07T17:00:00+03:00", end: "2026-10-07T18:00:00+03:00" }]
+    # У события — ответственный и «для кого»
+    - llm:
+        "что у нас сегодня?": { tool: list_events, args: { range: "сегодня" } }
+    - telegram: { from: 2001, text: "что у нас сегодня?" }
+    - expect_telegram:
+        - { chat_id: 2001, text_contains: ["17:00–18:00  Забрать из школы (Маша) — отводит Аня"] }

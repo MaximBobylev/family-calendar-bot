@@ -6,6 +6,7 @@ import type { CalendarProvider } from "../calendar/model";
 import { claimCard, ensureConversation, finishCard, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
 import type { TgCallbackQuery } from "../telegram/types";
+import { ASSIGN_CARD, type AssignCardPayload, confirmAssign } from "./assign/start";
 import type { AppContext } from "./context";
 import { CREATE_CARD, confirmCreate, type CreateCardPayload } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete } from "./delete-event";
@@ -97,6 +98,18 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
     await finishCard(ctx.db, action.id, "done");
     // Выполняем от имени нажавшего — как если бы он сам написал это (US-10)
     if (text) await withTyping(ctx, chatId, () => runCommand(ctx, user, chatId, action.conversationId, text));
+    return;
+  }
+  if (action.kind === ASSIGN_CARD) {
+    // Поручение (US-91): календарь нужен только для «+ в календарь» — ошибки календаря внутри (withCalendar)
+    try {
+      await confirmAssign(ctx, user, action as PendingAction<AssignCardPayload>, parsed.choice);
+      await finishCard(ctx.db, action.id, "done");
+    } catch (e) {
+      console.error("assign failed", e instanceof Error ? e.message : e);
+      await finishCard(ctx.db, action.id, "failed");
+      if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale)).catch(() => undefined);
+    }
     return;
   }
   if (action.kind === DISCONNECT_CARD) {

@@ -8,6 +8,7 @@ import { durationToMinutes } from "../dates/duration";
 import { parseDateFragment, type ParseValue, type Recurrence } from "../dates";
 import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
 import type { CreateEventIntent } from "../nlu/intents";
+import type { EventFamily } from "./assign/logic";
 import { t } from "./messages";
 
 /** Черновик создания: то, что сказал пользователь (фрагменты), — до разрешения дат. */
@@ -20,6 +21,8 @@ export interface CreateDraft {
   allDay?: boolean;
   calendar?: string;
   location?: string;
+  /** Ответственный и «для кого» (US-92) — в event_meta после создания. */
+  family?: EventFamily;
 }
 
 /** Разрешённый вариант события — хранится в карточке. */
@@ -54,6 +57,8 @@ export interface CreateCardPayload {
   options: CreateOption[];
   /** Календарь назван другим именем (алиасом), а не названием — учёт функций (US-64). */
   viaAlias?: boolean;
+  /** Ответственный и «для кого» (US-92). */
+  family?: EventFamily;
 }
 
 /** Календарь найден по алиасу: по одним названиям (без алиасов) это имя его не находит. */

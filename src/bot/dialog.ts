@@ -12,6 +12,7 @@ import { BARE_CANCEL, UNDO_PHRASE } from "../nlu/modify-hints";
 import { isNotRight, NOT_RIGHT_WINDOW_MS, REPEAT_WINDOW_MS, similarTranscripts } from "../voice/signals";
 import type { AppContext } from "./context";
 import { CREATE_CARD, startCreate, TITLE_QUESTION, type CreateDraft, type TitleQuestionPayload } from "./create-event";
+import { ASSIGN_CARD } from "./assign/start";
 import { DELETE_CARD } from "./delete-event";
 import { DISCONNECT_CARD } from "./disconnect";
 import { PICK_CARD } from "./find-event";
@@ -37,6 +38,7 @@ export async function cancelCards(ctx: AppContext, user: User, conversationId: s
     DELETE_CARD,
     DISCONNECT_CARD,
     FORWARD_CARD,
+    ASSIGN_CARD,
   ]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;

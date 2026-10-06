@@ -10,6 +10,10 @@ import { detailHints } from "../nlu/detail-hints";
 import { effectiveIntent, lookupQuery, NEXT_WORD } from "../nlu/intent-overrides";
 import type { Intent } from "../nlu/intents";
 import { MASS_DELETE, modifyHints, modifyQuery } from "../nlu/modify-hints";
+import { listAssignments } from "./assign/answers";
+import { familyHints } from "./assign/family";
+import { assignOverride } from "./assign/logic";
+import { assignmentApplies, startAssign } from "./assign/start";
 import type { AppContext } from "./context";
 import { draftFromIntent, startCreate, type CreateDraft } from "./create-event";
 import { startDelete } from "./delete-event";
@@ -23,7 +27,9 @@ import { withCalendar } from "./with-calendar";
 /** Интент → действие. Общий путь для текста, голоса и переслушанного голосового. */
 export async function routeIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, parsedIntent: Intent): Promise<void> {
   // Сильные слова в тексте важнее выбора LLM: глаголы изменения/удаления, «когда …?» (замер Qwen3, 2026-10-04)
-  const intent = effectiveIntent(text, parsedIntent);
+  // Поручения (US-91): «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела» — по тексту, до остальных поправок
+  const assign = assignOverride(text, parsedIntent);
+  const intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
   // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
   const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
   switch (intent.name) {
@@ -33,15 +39,24 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
     case "multiple":
       await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
       return;
+    case "assign_task":
+      await startAssign(ctx, user, chatId, conversationId, text, intent);
+      return;
+    case "list_assignments":
+      await listAssignments(ctx, user, chatId, text);
+      return;
     case "create_event": {
+      // Ответственный и «для кого» (US-92): «…, отводит папа» — не часть названия и не дата
+      const fam = await familyHints(ctx, user.id, text);
+      const famText = fam.remove.reduce((s, r) => s.replace(r, " "), text);
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
-      const rec = extractRecurrenceSpan(text, localNow, user.home_tz);
-      const spans = extractDateSpans(rec ? rec.rest : text, localNow, user.home_tz, "point");
+      const rec = extractRecurrenceSpan(famText, localNow, user.home_tz);
+      const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.home_tz, "point");
       const startText = rec ? undefined : (spans.point ?? (intent.start || undefined));
       const durationText = spans.duration ?? intent.duration;
       const title = cleanTitle(
         intent.title,
-        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, durationText].filter((x): x is string => !!x),
+        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, durationText, ...fam.remove].filter((x): x is string => !!x),
       );
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
@@ -49,7 +64,8 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
         recurrenceText: rec?.span,
         title,
         durationText,
-        allDay: intent.allDay || looksAllDay(text) || undefined,
+        allDay: intent.allDay || looksAllDay(famText) || undefined,
+        family: fam.family,
       };
       for (const k of Object.keys(draft) as (keyof CreateDraft)[]) if (draft[k] === undefined) delete draft[k];
       await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));

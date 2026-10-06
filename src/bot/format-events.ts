@@ -3,6 +3,7 @@
 
 import type { CalendarEvent } from "../calendar/model";
 import { parts, type Day } from "../dates/calendar";
+import type { FamilyLabel } from "./assign/logic";
 import { escapeHtml, hhmm, orderForDisplay } from "./format";
 import { t } from "./messages";
 
@@ -23,7 +24,7 @@ export function dayTitle(day: Day, today: Day, locale: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: string): string {
+function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: string, family?: FamilyLabel): string {
   let time: string;
   if (e.allDay) {
     time = t("allDay", locale);
@@ -35,7 +36,10 @@ function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: st
     time = `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}`;
     if (e.end!.day > e.start!.day) time += ` (${t("nextDayShort", locale)})`;
   }
-  let line = `• ${time}  ${escapeHtml(e.title)}`;
+  // «Для кого» и ответственный (US-92): «Стоматолог (Ваня) — отводит Дима»
+  const fam = family?.(e);
+  let line = `• ${time}  ${escapeHtml(fam?.title ?? e.title)}`;
+  if (fam?.note) line += ` — ${escapeHtml(fam.note)}`;
   if (showCalendar) line += ` · ${escapeHtml(e.calendarTitle)}`;
   if (e.free) line += ` · ${t("free", locale)}`;
   if (e.location) line += `\n   📍 ${escapeHtml(e.location)}`;
@@ -61,6 +65,7 @@ export function formatEvents(
   today: Day,
   locale: string,
   showCalendarFor: (calendarId: string) => boolean,
+  family?: FamilyLabel,
 ): string[] {
   const byDay = new Map<Day, CalendarEvent[]>();
   for (const e of events) {
@@ -79,7 +84,7 @@ export function formatEvents(
     .sort((a, b) => a - b)
     .map((day) => {
       const list = orderForDisplay(byDay.get(day)!, fromDay);
-      return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale))].join("\n");
+      return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale, family))].join("\n");
     });
 
   // Разбиение по лимиту Telegram; дни не режем

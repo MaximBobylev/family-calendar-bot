@@ -23,9 +23,9 @@ LLM получает текст + контекст (текущие дата/вр
 | `refresh_calendars` | — | — | нет | MVP |
 | `undo` | — | — | нет | MVP |
 | `provide_title` | `title` | `title` | нет | MVP, доступен **только** при ожидании названия (US-30) |
-| `assign` | `title`, `assignee` (имя/алиас или «кто-то»), `due`, `event_ref?`, `reminders?` | `title`, `due` | да | R1 |
-| `set_responsible` | `event_ref`, `responsible?`, `for_whom?`, `scope?` | `event_ref` | по режиму | R1 |
-| `assignment_status` | `assignment_ref`, `status` (`done` / `cancel`) | оба | нет | R1 |
+| `assign` | `title`, `assignee` (имя/алиас или «кто-то»), `due`, `event_ref?`, `reminders?` | `title`, `due` | да | R1 — реализован как tool `assign_task` (`assignee?`, `when?`, `task?`); кому, что и когда — ещё и из текста детерминированно («напомни/попроси/поручи X …», «пусть X …», «кто-то должен …» — `src/bot/assign/logic.ts`, поправка `assignOverride` раньше `effectiveIntent`); срок необязателен; событие — само по названию в день срока; «мои дела», «что на мне завтра» — `list_assignments` только по тексту |
+| `set_responsible` | `event_ref`, `responsible?`, `for_whom?`, `scope?` | `event_ref` | по режиму | R1 — при создании: «…, отводит папа» и ребёнок в названии разбираются из текста (`familyHints`); у существующего события — через поручение («кто-то должен отвезти Ваню на плавание»); отдельной команды пока нет |
+| `assignment_status` | `assignment_ref`, `status` (`done` / `cancel`) | оба | нет | R1 — кнопками «Сделано» / «Отменить поручение», не текстом |
 | `free_slots` | `range`, `duration` | `range` | нет | P2 |
 | `invite` | `event_ref`, `attendees[]` | оба | всегда | stretch |
 | `extract_events` | `source` (`forward` / `image` / `file`), `instruction?` (комментарий пользователя), `events[]` (поля как у `create_event` + `quotes`), `looks_like_change?` | `events[]` (может быть пустым) | всегда | R1 |

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { messages, t } from "../src/bot/messages";
 import { accountMessages } from "../src/bot/messages/account";
+import { assignMessages } from "../src/bot/messages/assign";
 import { commonMessages } from "../src/bot/messages/common";
 import { createMessages } from "../src/bot/messages/create";
 import { deleteMessages } from "../src/bot/messages/delete";
@@ -14,6 +15,7 @@ import { undoMessages } from "../src/bot/messages/undo";
 
 const parts = [
   accountMessages,
+  assignMessages,
   commonMessages,
   createMessages,
   deleteMessages,

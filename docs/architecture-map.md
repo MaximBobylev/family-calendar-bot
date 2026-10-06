@@ -21,7 +21,7 @@ Telegram → POST /telegram/webhook (src/index.ts)
        → calendar/google-provider.ts → google/calendar-api.ts → Google   (access token — кеш в D1, 401 → обновить и повторить;
                                                                           GET — один повтор на 5xx/429, net/retry.ts)
        → telegram/api.ts → Telegram
-cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в 5 мин — ops/alerts.ts (алерты владельцу);
+cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts, jobs/assign.ts); раз в 5 мин — ops/alerts.ts (алерты владельцу);
                        раз в час — cleanup, ensureDigests
 GET /health → ops/health.ts (D1 + возраст последнего cron; 503 — для внешнего монитора)
 ```
@@ -45,6 +45,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
 | Админка | `src/admin/*`, `docs/admin-console.md` |
 | Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
+| Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, расписание напоминаний — `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
@@ -83,6 +84,11 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/household/menu.ts` | Экран `/home` и кнопки `hm:*` (пригласить, календари дома, убрать участника/ребёнка, выйти, распустить); `dissolveWithNotice` |
 | `bot/household/group.ts` | Групповой чат: `/home link`/`unlink`, команды участников по календарям дома, нажатия карточек любым участником (от имени автора) |
 | `bot/household/scope.ts` | Чьи календари в разговоре (`CalendarScope`), «👤 Добавляет: …», запись автора в `event_meta` |
+| `bot/assign/logic.ts` | US-91/92, чистый: «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела», «…, отводит папа»; имена с падежами (`sameName`), ребёнок в скобках (`familyTitle`), расписание напоминаний (`planAssignmentJobs`); `assignOverride` — до `effectiveIntent` |
+| `bot/assign/start.ts` | Карточка поручения автору (кому, срок, событие — найти или «+ в календарь»), `confirmAssign` |
+| `bot/assign/answers.ts` | Кнопки `as:<id>:…` (Беру / Не могу / Сделано / отмена / Сделаю сам / Предложить другому), «мои дела», `shiftAssignmentsForEvent` (перенос события) |
+| `bot/assign/notify.ts`, `view.ts` | Сообщения поручения по статусу и их обновление у всех получателей; подписи срока, кнопки |
+| `bot/assign/family.ts` | Дом с участниками и детьми (`loadHome`), подсказки «отводит / для кого» при создании, метки в списках (`familyLabeler`) |
 | `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
 | `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
@@ -96,7 +102,7 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык) |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
@@ -134,9 +140,9 @@ GET /health → ops/health.ts (D1 + возраст последнего cron; 50
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `assignments.ts` (поручения, их сообщения, задачи напоминаний), `event-meta.ts` (ответственный и «для кого»), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
-| **jobs/** | `digest.ts` — US-70 утренний дайджест |
+| **jobs/** | `digest.ts` — US-70 утренний дайджест; `family-digest.ts` — US-93: чьи календари, «Ваши дела сегодня»; `assign.ts` — US-91: напоминания, эскалация, «истекло» |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
 | **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
 | **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
