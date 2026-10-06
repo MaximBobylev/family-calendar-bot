@@ -1,0 +1,281 @@
+# Исследовательские сценарии продуктового ревью R1 (docs/research/product-review-r1.md). НЕ часть приёмки:
+# раннер читает только acceptance/scenarios/. Ожиданий почти нет — сценарий проходит путь семьи, а ответы бота
+# смотрим дампом фейкового Telegram (GET /__fake/telegram/calls). Запуск по одному id:
+#   cp acceptance/explore/r1-journeys.yaml acceptance/scenarios/99-explore.yaml
+#   docker compose run --rm -T -e SCENARIO=explore-onboarding acceptance
+#   docker compose exec -T fakes node -e "fetch('http://localhost:9100/__fake/telegram/calls').then(r=>r.json()).then(c=>console.log(JSON.stringify(c,null,1)))"
+#   rm acceptance/scenarios/99-explore.yaml
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК. Иван 1001 (allowlist, Google), Аня 2001 (жена, НЕ в allowlist, без Google).
+
+# 1. Владелец: первый /start → Google → что дальше? → дом → приглашение. Жена: первый опыт без Google.
+- id: explore-onboarding
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - google_account:
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - id: family@group.calendar.google.com
+            summary: "Семья"
+            accessRole: writer
+            timeZone: Europe/Moscow
+            events:
+              - { id: f1, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+          - { id: holidays@group.v.calendar.google.com, summary: "Праздники", accessRole: reader }
+    - llm:
+        "/help": { tool: unsupported }
+        "что ты умеешь?": { tool: unsupported }
+        "Привет": { tool: unsupported }
+        "Аня": { tool: unsupported }
+        "Что у нас завтра?": { tool: list_events, args: { range: "завтра" } }
+        "мои дела": { tool: unsupported }
+        "напоминай мне за 15 минут до встреч": { tool: unsupported }
+    - telegram: { from: 1001, first_name: "Иван", text: "/start" }
+    - oauth: { consent: ivan@gmail.com }
+    - telegram: { from: 1001, first_name: "Иван", text: "/start" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/help" }
+    - telegram: { from: 1001, first_name: "Иван", text: "что ты умеешь?" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home" }
+    - telegram: { from: 1001, first_name: "Иван", text: "Создай дом \"Бобылевы\"" }
+    - press: "Готово"
+    - telegram: { from: 1001, first_name: "Иван", text: "/home" }
+    - press: "➕ Пригласить"
+    - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
+    # Жена до приглашения пишет боту (её добавили в семейный чат, она нажала на бота)
+    - telegram: { from: 2001, first_name: "Аня", text: "/start" }
+    # По ссылке
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
+    # Пишет имя не ответом (reply), а просто сообщением
+    - telegram: { from: 2001, first_name: "Аня", text: "Аня" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/help" }
+    - telegram: { from: 2001, first_name: "Аня", text: "Что у нас завтра?" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/settings" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/home" }
+    - telegram: { from: 2001, first_name: "Аня", text: "мои дела" }
+    - telegram: { from: 2001, first_name: "Аня", text: "напоминай мне за 15 минут до встреч" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/settings" }
+
+# 2. Группа, поручения, эскалация, напоминания, «Не могу», дайджест жены без Google, изменения в Google.
+- id: explore-family-day
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - id: family@group.calendar.google.com
+            summary: "Семья"
+            accessRole: writer
+            timeZone: Europe/Moscow
+            events:
+              - { id: swim, summary: "Плавание Вани", start: { dateTime: "2026-10-10T10:00:00+03:00" }, end: { dateTime: "2026-10-10T11:00:00+03:00" } }
+              - { id: din, summary: "Ужин у бабушки", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T21:00:00+03:00" } }
+    - llm:
+        "привет": { tool: unsupported }
+        "Напомни жене забрать Машу из школы в 17": { tool: assign_task, args: { assignee: "жене", when: "в 17", task: "забрать Машу из школы" } }
+        "Напомни мужу купить хлеб": { tool: assign_task, args: { assignee: "мужу", task: "купить хлеб" } }
+        "кто-то должен купить корм коту завтра": { tool: assign_task, args: { when: "завтра", task: "купить корм коту" } }
+        "что у нас на выходных?": { tool: list_events, args: { range: "на выходных" } }
+        "Беру": { tool: unsupported }
+        "мои дела": { tool: unsupported }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+    - press: { button: "✅ Иван", from: 1001 }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home invite Аня, жена, мама" }
+    - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home kid Маша" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home kid Ваня" }
+    # Бот добавлен в семейный чат; первое обращение до привязки, потом привязка
+    - telegram: { from: 1001, first_name: "Иван", chat_id: -500, chat_type: group, text: "@cab_test_bot привет" }
+    - telegram: { from: 1001, first_name: "Иван", chat_id: -500, chat_type: group, text: "/home link" }
+    - telegram: { from: 2001, first_name: "Аня", chat_id: -500, chat_type: group, text: "@cab_test_bot что у нас на выходных?" }
+    - telegram: { from: 2001, first_name: "Аня", chat_id: -500, chat_type: group, text: "/help@cab_test_bot" }
+    # Поручение жене; она не отвечает
+    - telegram: { from: 1001, first_name: "Иван", text: "Напомни жене забрать Машу из школы в 17" }
+    - press: { button: "Поручить", from: 1001 }
+    # Жена пишет «Беру» текстом вместо кнопки
+    - telegram: { from: 2001, first_name: "Аня", text: "Беру" }
+    - clock: "2026-10-07T12:00:00Z"
+    - tick: true
+    - clock: "2026-10-07T13:00:00Z"
+    - tick: true
+    - clock: "2026-10-07T21:00:00Z"
+    - tick: true
+    # Жена поручает мужу — у Ивана «других имён» нет (его никто не спрашивал); он задаёт их, жена повторяет; он «Не может»
+    - telegram: { from: 2001, first_name: "Аня", text: "Напомни мужу купить хлеб" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home name Иван, муж, папа" }
+    - telegram: { from: 2001, first_name: "Аня", text: "Напомни мужу купить хлеб" }
+    - press: { button: "Поручить", chat: 2001, from: 2001 }
+    - press: { button: "Не могу", chat: 1001, from: 1001 }
+    # «Кто-то должен» из семейного чата
+    - telegram: { from: 2001, first_name: "Аня", chat_id: -500, chat_type: group, text: "@cab_test_bot кто-то должен купить корм коту завтра" }
+    - press: { button: "Поручить", chat: -500, from: 2001 }
+    # Изменение «мимо бота»: Иван в Google переносит ужин — кто узнает? (жена без Google, группа)
+    - hourly: true
+    - tick: true
+    - google_external:
+        calendar: family@group.calendar.google.com
+        move: { id: din, start: { dateTime: "2026-10-08T20:00:00+03:00" }, end: { dateTime: "2026-10-08T22:00:00+03:00" } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    # Утро четверга: сводки
+    - hourly: true
+    - clock: "2026-10-08T05:00:00Z"
+    - tick: true
+    - telegram: { from: 2001, first_name: "Аня", text: "мои дела" }
+
+# 3. Пересланное объявление школы и фото афиши — от жены без Google и от Ивана.
+- id: explore-ingest
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home invite Аня, жена" }
+    - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+    - llm:
+        "Уважаемые родители! В пятницу 9 октября в 18:30 родительское собрание 3«Б» класса, каб. 21. Просьба не опаздывать.":
+          { tool: create_event, args: { start: "в пятницу 9 октября в 18:30", title: "Родительское собрание 3Б" } }
+    - telegram:
+        from: 2001
+        first_name: "Аня"
+        text: "Уважаемые родители! В пятницу 9 октября в 18:30 родительское собрание 3«Б» класса, каб. 21. Просьба не опаздывать."
+        forwarded: true
+        forward_from: "Классный руководитель"
+        forward_date: "2026-10-06T15:00:00Z"
+    - press: { button: "📅 Создать событие из этого", from: 2001 }
+    - press: { button: "Создать", from: 2001 }
+    # Фото афиши от жены
+    - photo:
+        from: 2001
+        content: "poster-theatre"
+        seen: { text: "Кукольный театр «Буратино». 17 октября, 12:00. ДК Ленина", tool: create_event, args: { title: "Кукольный театр «Буратино»", start: "17 октября 12:00", location: "ДК Ленина" } }
+    - press: { button: "Создать", from: 2001 }
+    # Иван пересылает то же объявление — дубликат?
+    - telegram:
+        from: 1001
+        first_name: "Иван"
+        text: "Уважаемые родители! В пятницу 9 октября в 18:30 родительское собрание 3«Б» класса, каб. 21. Просьба не опаздывать."
+        forwarded: true
+        forward_from: "Классный руководитель"
+        forward_date: "2026-10-06T15:00:00Z"
+    - press: { button: "📅 Создать событие из этого", from: 1001 }
+    # Фото без события
+    - photo: { from: 1001, content: "img-cat", seen: { no_event: true, text: "" } }
+    # Фото в семейном чате
+    - telegram: { from: 1001, first_name: "Иван", chat_id: -500, chat_type: group, text: "/home link" }
+
+# 4. Inline-карточка в чате друзей; жена без Google жмёт «Добавить себе»; посторонний друг.
+- id: explore-inline
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home invite Аня, жена" }
+    - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+    - inline_query: { from: 1001, query: "в субботу в 14 шашлыки у Пети" }
+    - inline_query: { from: 1001, query: "шашлыки в субботу" }
+    - inline_query: { from: 1001, query: "в 7 пробежка" }
+    - inline_query: { from: 2001, query: "завтра в 19 родительское собрание" }
+    - inline_query: { from: 1001, query: "в субботу в 14 шашлыки" }
+    - inline_press: { from: 2001 }
+    - inline_press: { from: 999 }
+    - expect_callback_answer: { capture: { token: "start=add_([0-9a-f]+)" } }
+    - telegram: { from: 999, first_name: "Петя", text: "/start add_{{token}}" }
+    - telegram: { from: 999, first_name: "Петя", text: "/start" }
+    - inline_press: { from: 1001 }
+    - press: { button: "Создать", from: 1001 }
+
+# 5. Английский интерфейс: владелец с language_code=en.
+- id: explore-english
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - google_account:
+        email: john@gmail.com
+        calendars:
+          - { id: john@gmail.com, summary: "John", accessRole: owner, primary: true, timeZone: Europe/Berlin }
+          - { id: fam@group.calendar.google.com, summary: "Family", accessRole: writer, timeZone: Europe/Berlin }
+    - llm:
+        "Remind my wife to pick up Masha at 5pm": { tool: assign_task, args: { assignee: "wife", when: "at 5pm", task: "pick up Masha" } }
+        "/help": { tool: unsupported }
+        "Create household \"Smiths\"": { tool: unsupported }
+    - telegram: { from: 1002, first_name: "John", language: en, text: "/start" }
+    - oauth: { consent: john@gmail.com }
+    # Язык по умолчанию — русский при любом language_code; английский — только в /settings
+    - telegram: { from: 1002, language: en, text: "/settings" }
+    - press: "🗣 English"
+    - telegram: { from: 1002, language: en, text: "/start" }
+    - telegram: { from: 1002, language: en, text: "/help" }
+    - telegram: { from: 1002, language: en, text: "/home" }
+    - telegram: { from: 1002, language: en, text: "Create household \"Smiths\"" }
+    - telegram: { from: 1002, language: en, text: "/home create Smiths" }
+    - press: "Done"
+    - telegram: { from: 1002, language: en, text: "/home invite Kate, wife" }
+    - capture_telegram: { kate: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2002, first_name: "Kate", language: en, text: "/start home_{{kate}}" }
+    - telegram: { from: 1002, language: en, text: "Remind my wife to pick up Masha at 5pm" }
+    - press: { button: "Assign", from: 1002 }
+    - press: { button: "Can't", chat: 2002, from: 2002 }
+    - telegram: { from: 1002, language: en, text: "/settings" }
+
+# 6. Напоминания в Telegram и уведомления об изменениях у жены без Google (US-71, US-72): настройка есть — работает ли?
+- id: explore-member-reminders
+  story: EXPLORE
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+          - id: family@group.calendar.google.com
+            summary: "Семья"
+            accessRole: writer
+            timeZone: Europe/Moscow
+            events:
+              - { id: doc, summary: "Врач Маши", start: { dateTime: "2026-10-07T12:00:00+03:00" }, end: { dateTime: "2026-10-07T13:00:00+03:00" } }
+    - llm:
+        "Перенеси врача Маши на 12:30": { tool: modify_event, args: { event: "врача Маши" } }
+        "Плавание Маши в субботу в 10, отводит папа": { tool: create_event, args: { start: "в субботу в 10", title: "Плавание Маши" } }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home create Бобылевы" }
+    - press: { button: "✅ Иван", from: 1001 }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home name Иван, муж, папа" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home kid Маша" }
+    - telegram: { from: 1001, first_name: "Иван", text: "/home invite Аня, жена" }
+    - capture_telegram: { anya: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{anya}}" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/settings" }
+    - press: { button: "📣 Уведомления", chat: 2001, from: 2001 }
+    - press: { button: "за 15 мин", chat: 2001, from: 2001 }
+    - telegram: { from: 1001, first_name: "Иван", text: "/settings" }
+    - press: { button: "📣 Уведомления", chat: 1001, from: 1001 }
+    - press: { button: "за 15 мин", chat: 1001, from: 1001 }
+    - hourly: true
+    - tick: true
+    # Иван переносит через бота — узнает ли жена?
+    - telegram: { from: 1001, first_name: "Иван", text: "Перенеси врача Маши на 12:30" }
+    - press: { button: "Подтвердить", chat: 1001, from: 1001 }
+    - clock: "2026-10-07T09:15:00Z"
+    - tick: true
+    # Жена создаёт событие с ответственным
+    - telegram: { from: 2001, first_name: "Аня", text: "Плавание Маши в субботу в 10, отводит папа" }
+    - press: { button: "Создать", chat: 2001, from: 2001 }

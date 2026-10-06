@@ -31,6 +31,7 @@
 | [admin-console.md](admin-console.md) | Админка: функции по этапам, приватность и доступ, алерты, «из ошибки — в тест» (предложение) |
 | [research/commercial-viability.md](research/commercial-viability.md) | Сводка независимых оценок коммерческого потенциала |
 | [research/pivot-options.md](research/pivot-options.md) | Как подкрутить идею: сводка 4 независимых оценок |
+| [research/product-review-r1.md](research/product-review-r1.md) | Продуктовое ревью R1 перед показом семье: пути пользователя, проблемы, справка и онбординг, метрики пробного запуска |
 | [research/date-parser-baseline.md](research/date-parser-baseline.md) | Замер chrono-node на золотом корпусе дат — почему свой парсер (ADR-0005 п.8) |
 | [research/llm-intents-eval.md](research/llm-intents-eval.md) | Замер разбора интентов: варианты промпта × модели Workers AI, решение и оставшиеся ошибки (2026-10-05) |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
