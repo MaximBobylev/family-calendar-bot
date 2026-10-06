@@ -209,3 +209,15 @@
     - press: { button: "👩 wife, mom", from: 2002 }
     - expect_telegram:
         - { chat_id: 2002, text_contains: ["Got it: Kate (also: wife, mom)"] }
+
+- id: member-settings-without-google-shows-what-works
+  story: US-04
+  steps:
+    - *home
+    # Участнику без Google — только то, что действует (ревью R1 #17): сводки, напоминания и уведомления, пояс, язык
+    - telegram: { from: 2001, text: "/settings" }
+    - expect_telegram:
+        - chat_id: 2001
+          text_contains: ["Об изменениях", "общие календари дома"]
+          text_not_contains: ["Календарь по умолчанию", "как в Google"]
+          buttons: ["🌍 Пояс", "☀️ Сводка", "🗣 English", "📣 Уведомления", "🔗 Подключить свой Google"]

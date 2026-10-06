@@ -81,5 +81,10 @@ export const settingsMessages = {
   reminderBefore: { ru: "за {value}", en: "{value} before" },
   reminderDayBefore: { ru: "накануне в {time}", en: "the day before at {time}" },
   reminderDaysBefore: { ru: "за {days} дн. в {time}", en: "{days} days before at {time}" },
+  settingsMemberHint: {
+    ru: "Календари — общие календари дома. Свой Google Календарь можно подключить кнопкой ниже; удалить свои данные — /disconnect.",
+    en: "Calendars are the household's shared calendars. You can connect your own Google Calendar below; delete your data — /disconnect.",
+  },
+  settingsConnectOwnButton: { ru: "🔗 Подключить свой Google", en: "🔗 Connect my Google" },
   settingsDisconnectHint: { ru: "Отключить календарь и удалить данные — /disconnect.", en: "Disconnect the calendar and delete your data: /disconnect." },
 } as const satisfies Messages;

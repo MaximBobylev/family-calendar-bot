@@ -45,6 +45,9 @@ const rows = <T>(items: T[], size: number): T[][] => Array.from({ length: Math.c
 export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[]): Screen {
   const l = user.locale;
   const s = user.settings;
+  // Без своего Google (участник дома): только то, что действует, — сводки, напоминания и уведомления в Telegram, пояс,
+  // язык; календари, длительность и напоминания Google — не его (ревью R1 #17, QA-25)
+  if (calendars.length === 0) return memberScreen(ctx, user);
   const def = calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable);
   const text = [
     t("settingsTitle", l),
@@ -72,6 +75,33 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
       [btn(t("settingsAllDayButton", l), "rad"), btn(t("settingsDigestButton", l), "dig")],
       [btn(t("settingsLanguageButton", l), `lang:${l === "en" ? "ru" : "en"}`), btn(t("settingsGoogleButton", l), "conn")],
       [btn(t("settingsNotifyButton", l), "ntf")],
+    ],
+  };
+}
+
+/** Главный экран участника без своего Google. */
+function memberScreen(ctx: AppContext, user: User): Screen {
+  const l = user.locale;
+  const s = user.settings;
+  const text = [
+    t("settingsTitle", l),
+    "",
+    t("settingsTz", l, { value: user.home_tz, time: nowIn(ctx, user.home_tz) }),
+    s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
+    t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
+    t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
+    t("settingsLanguage", l),
+    s.changeNotifyOff ? t("settingsNotifyOff", l) : t("settingsNotifyOn", l),
+    s.tgReminderMin ? t("settingsTgReminderOn", l, { minutes: String(s.tgReminderMin) }) : t("settingsTgReminderOff", l),
+    "",
+    `<i>${t("settingsMemberHint", l)}</i>`,
+  ].join("\n");
+  return {
+    text,
+    buttons: [
+      [btn(t("settingsTzButton", l), "tz"), btn(t("settingsDigestButton", l), "dig")],
+      [btn(t("settingsLanguageButton", l), `lang:${l === "en" ? "ru" : "en"}`), btn(t("settingsNotifyButton", l), "ntf")],
+      [btn(t("settingsConnectOwnButton", l), "conn")],
     ],
   };
 }
