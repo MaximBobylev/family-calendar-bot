@@ -10,6 +10,7 @@ import { ingestMessages } from "../src/bot/messages/ingest";
 import { inlineMessages } from "../src/bot/messages/inline";
 import { inputMessages } from "../src/bot/messages/input";
 import { modifyMessages } from "../src/bot/messages/modify";
+import { notifyMessages } from "../src/bot/messages/notify";
 import { readMessages } from "../src/bot/messages/read";
 import { settingsMessages } from "../src/bot/messages/settings";
 import { undoMessages } from "../src/bot/messages/undo";
@@ -24,6 +25,7 @@ const parts = [
   inlineMessages,
   inputMessages,
   modifyMessages,
+  notifyMessages,
   readMessages,
   settingsMessages,
   undoMessages,

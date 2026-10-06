@@ -70,6 +70,9 @@ export async function deleteUserData(db: D1Database, userId: string, telegramId:
     db.prepare("DELETE FROM dialog_state WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM conversations WHERE channel = 'telegram' AND chat_id = ?1 AND kind = 'private'").bind(String(telegramId)),
     db.prepare("DELETE FROM scheduled_jobs WHERE user_id = ?1").bind(userId),
+    // Синхронизация (US-72): исходящие уведомления ему и его имя в журнале записей бота
+    db.prepare("DELETE FROM change_notices WHERE user_id = ?1 OR chat_id = ?2").bind(userId, String(telegramId)),
+    db.prepare("DELETE FROM bot_writes WHERE author_user_id = ?1").bind(userId),
     db.prepare("DELETE FROM usage_events WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM feature_usage WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM entitlements WHERE user_id = ?1").bind(userId),

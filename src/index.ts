@@ -22,6 +22,8 @@ import { handlePage } from "./pages";
 import { handleTestRoute } from "./testing/routes";
 import { handleInlineQuery } from "./bot/inline/query";
 import { serveIcs } from "./bot/inline/guest";
+import { ensureCalendarSyncs } from "./sync/engine";
+import { handleGooglePush } from "./sync/push";
 
 async function context(env: Env): Promise<AppContext> {
   const config = loadConfig(env);
@@ -90,6 +92,18 @@ export default {
     if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
     // Файл события inline-карточки (US-95)
     if (request.method === "GET" && url.pathname.startsWith("/ics/")) return serveIcs(ctx, url.pathname);
+    // Push Google о календаре (ADR-0005 §2): задача синка — сразу в очередь (в TEST_MODE её выполнит tick)
+    if (url.pathname === "/google/push") {
+      return handleGooglePush(
+        ctx,
+        request,
+        ctx.config.testMode
+          ? undefined
+          : async (jobId) => {
+              await env.INBOX.send({ jobId } satisfies JobMessage);
+            },
+      );
+    }
     if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) return handleAdmin(ctx, request, url);
     // Fail-closed: тестовые маршруты никогда не работают на публичном https-адресе
     if (ctx.config.testMode && !ctx.config.publicBaseUrl.startsWith("https://") && url.pathname.startsWith("/__test/")) {
@@ -134,6 +148,7 @@ export default {
     if (new Date(ctx.clock.now()).getUTCMinutes() === 7) {
       await cleanup(ctx.db, ctx.clock.now());
       await ensureDigests(ctx.db, ctx.clock.now());
+      await ensureCalendarSyncs(ctx.db, ctx.clock.now());
       await setOpsState(ctx.db, OPS_LAST_HOURLY, "", ctx.clock.now());
     }
   },

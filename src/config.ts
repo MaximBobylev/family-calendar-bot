@@ -29,6 +29,8 @@ export interface Config {
   /** Куда слать алерты (src/ops/alerts.ts): OPS_CHAT_ID, иначе первый из ALLOWED_TELEGRAM_IDS; null — некуда. */
   opsChatId: string | null;
   testMode: boolean;
+  /** Push Google (events.watch → /google/push, ADR-0005 §2); выключен — только опрос по расписанию. */
+  googlePushEnabled: boolean;
   admin: { user: string; password: string };
   /** Цепочка LLM: основной → запасные (LLM_CHAIN; без него — один Workers AI из LLM_BASE/LLM_MODEL). */
   llm: LlmConfig[];
@@ -86,6 +88,7 @@ export function loadConfig(env: Env): Config {
     allowedTelegramIds: new Set(allowed),
     opsChatId: env.OPS_CHAT_ID?.trim() || allowed[0] || null,
     testMode: env.TEST_MODE === "true",
+    googlePushEnabled: env.GOOGLE_PUSH_ENABLED === "true",
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
     llm: parseChain<LlmConfig>(env.LLM_CHAIN, "LLM_CHAIN") ?? [{ name: "workers-ai", baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL }],
     // Тот же API-токен Cloudflare, что и для LLM

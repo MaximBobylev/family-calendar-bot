@@ -11,6 +11,7 @@ import type { AppContext } from "../context";
 import { escapeHtml, hhmm } from "../format";
 import { t } from "../messages";
 import { allDayRemindersLabel, durationLabel, remindersLabel } from "./labels";
+import { TG_REMINDER_PRESETS } from "../../sync/reminders";
 
 export const DURATIONS = [15, 30, 45, 60, 90, 120];
 export const DIGEST_TIMES = ["06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00"];
@@ -57,6 +58,8 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
     t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
     t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
     t("settingsLanguage", l),
+    s.changeNotifyOff ? t("settingsNotifyOff", l) : t("settingsNotifyOn", l),
+    s.tgReminderMin ? t("settingsTgReminderOn", l, { minutes: String(s.tgReminderMin) }) : t("settingsTgReminderOff", l),
     "",
     `<i>${t("settingsHint", l)}</i>`,
     `<i>${t("settingsDisconnectHint", l)}</i>`,
@@ -68,6 +71,7 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
       [btn(t("settingsDurationButton", l), "dur"), btn(t("settingsRemindersButton", l), "rem")],
       [btn(t("settingsAllDayButton", l), "rad"), btn(t("settingsDigestButton", l), "dig")],
       [btn(t("settingsLanguageButton", l), `lang:${l === "en" ? "ru" : "en"}`), btn(t("settingsGoogleButton", l), "conn")],
+      [btn(t("settingsNotifyButton", l), "ntf")],
     ],
   };
 }
@@ -145,5 +149,17 @@ export function digestScreen(user: User): Screen {
       ],
       back(l),
     ],
+  };
+}
+
+/** «Уведомления»: об изменениях в календарях (US-72) и напоминания в Telegram за N минут (US-71). */
+export function notifyScreen(user: User): Screen {
+  const l = user.locale;
+  const s = user.settings;
+  const toggle = btn(t(s.changeNotifyOff ? "settingsNotifyToggleOff" : "settingsNotifyToggleOn", l), "ntfchg");
+  const mins = TG_REMINDER_PRESETS.map((m) => btn(mark(s.tgReminderMin === m, t("settingsTgReminderMin", l, { minutes: String(m) })), `ntfrem:${m}`));
+  return {
+    text: t("settingsChooseNotify", l),
+    buttons: [[toggle], ...rows(mins, 3), [btn(mark(!s.tgReminderMin, t("settingsTgReminderNone", l)), "ntfrem:0")], back(l)],
   };
 }

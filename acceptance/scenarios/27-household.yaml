@@ -108,7 +108,9 @@
     - expect_telegram:
         - { chat_id: 2001, text_contains: ["Создать событие?", "Плавание Маши", "сб, 10 октября, 10:00–11:00", "👤 Добавляет: Аня"] }
     - press: "Создать"
+    # Владелец видит календарь в своём личном чате — ему уведомление об изменении (US-72), автор — имя в доме
     - expect_telegram:
+        - { chat_id: 1001, text_contains: ["➕ Новое: «Плавание Маши»", "👤 Аня"] }
         - { method: editMessageText, text_contains: ["✅ Создано", "Плавание Маши", "👤 Добавил(а): Аня"] }
     # Запись — через Google владельца, в общий календарь
     - expect_google_events:
@@ -118,6 +120,7 @@
     # «Отмени последнее» — и у участника (через тот же Google владельца)
     - telegram: { from: 2001, text: "Отмени последнее" }
     - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Плавание Маши»", "👤 Аня"] }
         - { method: editMessageText, chat_id: 2001, text_contains: ["↩ Отменено", "Плавание Маши"] }
     - expect_google_events: { email: ivan@gmail.com, calendar: family@group.calendar.google.com, events: [], count: 1 }
 

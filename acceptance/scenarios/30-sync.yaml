@@ -1,0 +1,197 @@
+# ADR-0005 §2, US-72: синхронизация Google — push (events.watch), syncToken, 410, продление каналов, опрос без push.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК. Иван (1001) и Мария (1002) — общий календарь «Семья» (один на двоих у Google).
+# Синк запускает часовая страховка (hourly) — первая полная синхронизация запоминает события, ничего не рассылая.
+
+- id: sync-push-external-move-notifies-all-chats
+  story: US-72
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - id: family@group.calendar.google.com
+              summary: "Семья"
+              accessRole: writer
+              timeZone: Europe/Moscow
+              shared: true
+              events:
+                - id: f1
+                  summary: "Ужин у мамы"
+                  htmlLink: "https://calendar.google.com/event?eid=f1"
+                  start: { dateTime: "2026-10-09T18:00:00+03:00" }
+                  end: { dateTime: "2026-10-09T20:00:00+03:00" }
+                - { id: f2, summary: "Бассейн", start: { dateTime: "2026-10-10T11:00:00+03:00" }, end: { dateTime: "2026-10-10T12:00:00+03:00" } }
+      - connected_user:
+          from: 1002
+          email: maria@gmail.com
+          calendars:
+            - { id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: owner, timeZone: Europe/Moscow, shared: true }
+      - hourly: true
+      - tick: true
+      - expect_no_telegram: true
+    # Одна подписка на общий календарь, а не по одной на каждого (ADR-0005 §2)
+    - expect_google_channels: { calendar: family@group.calendar.google.com, active: 1 }
+    - expect_google_channels: { calendar: maria@gmail.com, active: 1 }
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, full: 1 }
+    # Мария перенесла ужин прямо в Google Календаре — уведомление в оба чата
+    - google_external:
+        calendar: family@group.calendar.google.com
+        move: { id: f1, start: { dateTime: "2026-10-10T19:00:00+03:00" }, end: { dateTime: "2026-10-10T21:00:00+03:00" } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    # Push только ставит задачу — синк делает планировщик
+    - expect_no_telegram: true
+    - tick: true
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["🔁 Перенесено: «Ужин у мамы» — сб, 10 октября, 19:00–21:00 (было пт, 9 октября, 18:00)"]
+          text_not_contains: ["👤"]
+          buttons: ["Открыть в календаре"]
+        - chat_id: 1002
+          text_contains: ["🔁 Перенесено: «Ужин у мамы» — сб, 10 октября, 19:00–21:00 (было пт, 9 октября, 18:00)"]
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, full: 1, incremental: 1 }
+    # Повторный push без изменений — тишина
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_no_telegram: true
+
+- id: sync-push-checks-channel-token
+  story: US-72
+  steps:
+    - *setup
+    - google_external: { calendar: family@group.calendar.google.com, delete: f2 }
+    # Чужой секрет канала — 403, синка нет; «sync» (канал открыт) — 200, синка нет
+    - google_push: { calendar: family@group.calendar.google.com, token: "forged", expect_status: 403 }
+    - google_push: { calendar: family@group.calendar.google.com, state: sync }
+    - tick: true
+    - expect_no_telegram: true
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, incremental: 0 }
+    - http_post: { path: "/google/push", expect_status: 404 }
+
+- id: sync-410-full-resync
+  story: US-72
+  steps:
+    - *setup
+    # Токен синхронизации потерян (410), пока бассейн удалили: полная пересинхронизация окна сверяет со снимками
+    - google_external: { calendar: family@group.calendar.google.com, delete: f2 }
+    - google_expire_sync_tokens: family@group.calendar.google.com
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Бассейн» — сб, 10 октября, 11:00–12:00"] }
+        - { chat_id: 1002, text_contains: ["❌ Отменено: «Бассейн»"] }
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, full: 2, expired: 1 }
+    # Дальше — снова инкрементально по новому токену
+    - google_external: { calendar: family@group.calendar.google.com, move: { id: f1, start: { dateTime: "2026-10-09T19:00:00+03:00" }, end: { dateTime: "2026-10-09T21:00:00+03:00" } } }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Ужин у мамы» — пт, 9 октября, 19:00–21:00 (было 18:00)"] }
+        - { chat_id: 1002, text_contains: ["(было 18:00)"] }
+    - expect_google_syncs: { calendar: family@group.calendar.google.com, full: 2, expired: 1, incremental: 1 }
+
+- id: sync-channel-renewed-before-expiry
+  story: US-72
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - hourly: true
+    - tick: true
+    - expect_google_channels: { calendar: ivan@gmail.com, active: 1, stopped: 0 }
+    # Канал — на неделю (до 14 окт 07:00Z); за сутки до конца открывается новый, старый останавливается
+    - clock: "2026-10-12T07:00:00Z"
+    - tick: true
+    - expect_google_channels: { calendar: ivan@gmail.com, active: 1, stopped: 0 }
+    - clock: "2026-10-13T07:00:00Z"
+    - tick: true
+    - expect_google_channels: { calendar: ivan@gmail.com, active: 1, stopped: 1 }
+    - expect_telegram:
+        - { text_contains: ["☀️ Доброе утро!"] }
+    - clock: "2026-10-13T08:00:00Z"
+    - tick: true
+    - expect_google_channels: { calendar: ivan@gmail.com, active: 1, stopped: 1 }
+    # Новый канал работает: событие, добавленное в Google, приходит уведомлением владельцу
+    - google_external:
+        calendar: ivan@gmail.com
+        create: { id: x1, summary: "Врач", start: { dateTime: "2026-10-15T09:00:00+03:00" }, end: { dateTime: "2026-10-15T09:30:00+03:00" } }
+    - google_push: { calendar: ivan@gmail.com, channels: 1 }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["➕ Новое: «Врач» — чт, 15 октября, 09:00–09:30"] }
+
+- id: sync-polling-when-push-unavailable
+  story: US-72
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events: [{ id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }]
+    # Google не принимает адрес push (домен, сертификат) — бот остаётся на опросе тем же синком
+    - provider_outage: { provider: google-watch, status: 400 }
+    - hourly: true
+    - tick: true
+    - expect_google_channels: { calendar: ivan@gmail.com, active: 0 }
+    - google_external: { calendar: ivan@gmail.com, move: { id: e1, start: { dateTime: "2026-10-08T12:00:00+03:00" }, end: { dateTime: "2026-10-08T13:00:00+03:00" } } }
+    # Опрос: календарь без недавних изменений — раз в 15 минут
+    - clock: "2026-10-07T07:14:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-07T07:15:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔁 Перенесено: «Планёрка» — чт, 8 октября, 12:00–13:00 (было 10:00)"] }
+    # Изменения были — следующий опрос через 5 минут
+    - google_external: { calendar: ivan@gmail.com, delete: e1 }
+    - clock: "2026-10-07T07:20:00Z"
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Планёрка»"] }
+    - expect_google_syncs: { calendar: ivan@gmail.com, full: 1, incremental: 2 }
+
+- id: sync-disconnect-stops-channels
+  story: US-72
+  steps:
+    - *setup
+    - telegram: { from: 1002, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram_count: 2
+    # Канал личного календаря Марии остановлен; общий читается токеном Ивана и продолжает работать
+    - expect_google_channels: { calendar: maria@gmail.com, active: 0, stopped: 1 }
+    - expect_google_channels: { calendar: family@group.calendar.google.com, active: 1 }
+    - tick: true
+    - google_external: { calendar: family@group.calendar.google.com, delete: f2 }
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["❌ Отменено: «Бассейн»"] }
+
+- id: sync-owner-disconnects-shared-calendar-moves-to-other
+  story: US-72
+  steps:
+    - *setup
+    # Общий календарь читался токеном Ивана; он отключается — его каналы остановлены, синк переходит к Марии
+    - telegram: { from: 1001, text: "/disconnect" }
+    - press: "Отключить и удалить"
+    - expect_telegram_count: 2
+    - expect_google_channels: { calendar: family@group.calendar.google.com, active: 0, stopped: 2 }
+    - tick: true
+    - expect_google_channels: { calendar: family@group.calendar.google.com, active: 1 }
+    - expect_no_telegram: true
+    - google_external: { calendar: family@group.calendar.google.com, delete: f2 }
+    - google_push: { calendar: family@group.calendar.google.com, channels: 1 }
+    - tick: true
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["❌ Отменено: «Бассейн»"] }

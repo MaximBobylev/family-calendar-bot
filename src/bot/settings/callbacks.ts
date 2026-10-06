@@ -10,6 +10,7 @@ import type { User } from "../../db/users";
 import type { AppContext } from "../context";
 import { t } from "../messages";
 import { calendarsOf, sendReconnect, setDigest } from "./common";
+import { rescheduleUserReminders, TG_REMINDER_PRESETS } from "../../sync/reminders";
 import {
   ALL_DAY_PRESETS,
   allDayScreen,
@@ -20,6 +21,7 @@ import {
   DURATIONS,
   durationScreen,
   mainScreen,
+  notifyScreen,
   REMINDER_PRESETS,
   remindersScreen,
   type Screen,
@@ -191,6 +193,30 @@ export async function handleSettingsCallback(
       );
       await ctx.telegram.sendMessage(chatId, t("settingsAskDigestTime", l));
       return undefined;
+    // US-72, US-71: уведомления об изменениях и напоминания в Telegram
+    case "ntf":
+      screen = notifyScreen(u);
+      break;
+    case "ntfchg": {
+      const off = !u.settings.changeNotifyOff;
+      await updateSettings(ctx.db, user.id, { changeNotifyOff: off || undefined });
+      u = { ...u, settings: { ...u.settings, changeNotifyOff: off } };
+      screen = notifyScreen(u);
+      saved = true;
+      break;
+    }
+    case "ntfrem": {
+      const m = Number(cb.value);
+      if (m === 0 || TG_REMINDER_PRESETS.includes(m)) {
+        await updateSettings(ctx.db, user.id, { tgReminderMin: m || undefined });
+        const { tgReminderMin: _m, ...rest } = u.settings;
+        u = { ...u, settings: m ? { ...rest, tgReminderMin: m } : rest };
+        await rescheduleUserReminders(ctx.db, user.id, ctx.clock.now());
+        screen = notifyScreen(u);
+        saved = true;
+      }
+      break;
+    }
     case "lang":
       if (cb.value === "ru" || cb.value === "en") {
         await setLocale(ctx.db, user.id, cb.value);

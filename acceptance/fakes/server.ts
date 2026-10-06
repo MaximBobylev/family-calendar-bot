@@ -44,6 +44,18 @@
 //                                     ответ Gemini на картинку (inlineData image/*), US-66
 //   GET  /__fake/vision/requests    — запросы чтения картинок: [{content, mimeType, caption?}]
 //   POST /__fake/reset              — сброс состояния
+//
+// Синхронизация и push Google (ADR-0005 §2, US-72):
+//   events.list с syncToken — изменения с момента токена (удалённые — status=cancelled); токен — st:<календарь>:<номер изменения>:<поколение>;
+//     с syncToken нельзя timeMin/timeMax/orderBy (400), просроченный токен — 410; без syncToken — ещё и nextSyncToken
+//   POST …/calendars/<id>/events/watch, POST …/channels/stop — каналы push (outage google-watch — watch отвечает ошибкой)
+//   Календарь с shared: true — общий: у аккаунтов с тем же id календаря одни и те же события (общий календарь семьи)
+//   POST /__fake/google/push        — {calendar, state?, token?}: Google шлёт уведомление в каждый канал календаря → {sent: [{id, status}]}
+//   POST /__fake/google/external    — {calendar, create?: событие, move?: {id, start, end}, update?: {id, …поля}, delete?: id}:
+//                                     изменение «не через бота» (человек в Google Календаре)
+//   POST /__fake/google/expire-sync-tokens — {calendar}: все выданные syncToken календаря → 410
+//   GET  /__fake/google/channels    — {active: [{id, calendar, address, expiration}], stopped: [{id, resourceId}]}
+//   GET  /__fake/google/sync-requests — запросы синхронизации: [{calendar, mode: full | incremental | expired}]
 
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -67,6 +79,8 @@ interface GoogleEvent {
 
 interface GoogleCalendar {
   id: string;
+  /** Общий календарь: события — одни на все аккаунты с этим id. */
+  shared?: boolean;
   summary: string;
   accessRole: string;
   primary?: boolean;
@@ -111,6 +125,35 @@ let visionRequests: { content: string; mimeType: string; caption?: string }[] = 
 let outages = new Map<string, number>();
 let revocations: { token: string; status: number }[] = [];
 let revokeFailStatus = 0;
+
+// --- Синхронизация и push ---
+/** Номер последнего изменения событий (для syncToken). */
+let changeSeq = 0;
+/** Календарь → поколение syncToken: токены прежних поколений просрочены (410). */
+let syncTokenGen = new Map<string, number>();
+const syncTokenOf = (calId: string) => `st:${calId}:${changeSeq}:${syncTokenGen.get(calId) ?? 0}`;
+/** События общих календарей по id календаря. */
+let sharedEvents = new Map<string, GoogleEvent[]>();
+let channels: { id: string; token?: string; address: string; resourceId: string; calendar: string; expiration?: number }[] = [];
+let stoppedChannels: { id: string; resourceId: string }[] = [];
+let syncRequests: { calendar: string; mode: string }[] = [];
+
+/** Событие изменилось — новый номер изменения и updated (для syncToken). */
+function bump(e: GoogleEvent): void {
+  e._seq = ++changeSeq;
+  e.updated = new Date().toISOString();
+}
+
+/** Календарь по id у любого аккаунта (для внешних изменений и push). */
+function findCalendar(id: string): GoogleCalendar | undefined {
+  for (const acc of googleAccounts.values()) {
+    const cal = acc.calendars.find((c) => c.id === id);
+    if (cal) return cal;
+  }
+  return undefined;
+}
+
+const publicEvent = ({ _seq: _s, ...e }: GoogleEvent) => e;
 
 /** Полночь даты `date` в поясе `tz`, мс UTC — для событий на весь день. */
 function zonedMidnight(date: string, tz: string): number {
@@ -237,6 +280,12 @@ const server = createServer(async (req, res) => {
       etagSeq = 1;
       patches = [];
       deletes = [];
+      changeSeq = 0;
+      syncTokenGen = new Map();
+      sharedEvents = new Map();
+      channels = [];
+      stoppedChannels = [];
+      syncRequests = [];
       revocations = [];
       revokeFailStatus = 0;
       accessSeq = 0;
@@ -246,7 +295,19 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/__fake/telegram/calls") return send(res, 200, telegramCalls);
     if (url.pathname === "/__fake/google/accounts" && req.method === "POST") {
       const body = (await readJson(req)) as { email: string; calendars: GoogleCalendar[] };
-      for (const c of body.calendars) for (const e of c.events ?? []) e.etag ??= newEtag();
+      for (const c of body.calendars) {
+        // Общий календарь уже заведён другим аккаунтом — те же события
+        const known = c.shared ? sharedEvents.get(c.id) : undefined;
+        if (known) c.events = known;
+        else {
+          for (const e of c.events ?? []) {
+            e.etag ??= newEtag();
+            bump(e);
+          }
+          c.events ??= [];
+          if (c.shared) sharedEvents.set(c.id, c.events);
+        }
+      }
       googleAccounts.set(body.email, { calendars: body.calendars });
       return send(res, 200, { ok: true });
     }
@@ -381,8 +442,82 @@ const server = createServer(async (req, res) => {
         .get(email)
         ?.calendars.find((c) => c.id === calendar)
         ?.events?.find((e) => e.id === id);
-      if (ev) ev.etag = newEtag();
+      if (ev) {
+        ev.etag = newEtag();
+        bump(ev);
+      }
       return send(res, 200, { ok: !!ev });
+    }
+    if (url.pathname === "/__fake/google/external" && req.method === "POST") {
+      const b = (await readJson(req)) as {
+        calendar: string;
+        create?: GoogleEvent;
+        move?: { id: string; start: GoogleEvent["start"]; end: GoogleEvent["end"] };
+        update?: { id: string } & Record<string, unknown>;
+        delete?: string;
+      };
+      const cal = findCalendar(b.calendar);
+      if (!cal) return send(res, 404, { ok: false, error: "no calendar" });
+      cal.events ??= [];
+      const tz = cal.timeZone ?? "UTC";
+      if (b.create) {
+        const ev = normalizeTimes({ status: "confirmed", htmlLink: `https://calendar.google.com/event?eid=${b.create.id}`, ...b.create, etag: newEtag() }, tz);
+        bump(ev);
+        cal.events.push(ev);
+      }
+      const target = (id: string) => cal.events!.find((e) => e.id === id);
+      if (b.move) {
+        const ev = target(b.move.id);
+        if (!ev) return send(res, 404, { ok: false });
+        Object.assign(ev, normalizeTimes({ ...ev, start: b.move.start, end: b.move.end }, tz), { etag: newEtag() });
+        bump(ev);
+      }
+      if (b.update) {
+        const ev = target(b.update.id);
+        if (!ev) return send(res, 404, { ok: false });
+        Object.assign(ev, b.update, { etag: newEtag() });
+        bump(ev);
+      }
+      if (b.delete) {
+        const ev = target(b.delete);
+        if (!ev) return send(res, 404, { ok: false });
+        for (const e of cal.events) {
+          if (e.id === ev.id || e.recurringEventId === ev.id) {
+            e.status = "cancelled";
+            e.etag = newEtag();
+            bump(e);
+          }
+        }
+      }
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/google/expire-sync-tokens" && req.method === "POST") {
+      const { calendar } = (await readJson(req)) as { calendar: string };
+      syncTokenGen.set(calendar, (syncTokenGen.get(calendar) ?? 0) + 1);
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/google/channels") return send(res, 200, { active: channels, stopped: stoppedChannels });
+    if (url.pathname === "/__fake/google/sync-requests") return send(res, 200, syncRequests);
+    if (url.pathname === "/__fake/google/push" && req.method === "POST") {
+      const b = (await readJson(req)) as { calendar: string; state?: string; token?: string };
+      const sent: { id: string; status: number }[] = [];
+      for (const ch of channels.filter((c) => c.calendar === b.calendar)) {
+        const token = b.token ?? ch.token;
+        const r = await fetch(ch.address, {
+          method: "POST",
+          headers: {
+            "x-goog-channel-id": ch.id,
+            "x-goog-message-number": String(sent.length + 2),
+            "x-goog-resource-id": ch.resourceId,
+            "x-goog-resource-state": b.state ?? "exists",
+            "x-goog-resource-uri": `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(ch.calendar)}/events`,
+            ...(token ? { "x-goog-channel-token": token } : {}),
+          },
+        });
+        await r.body?.cancel();
+        sent.push({ id: ch.id, status: r.status });
+      }
+      return send(res, 200, { sent });
     }
     if (url.pathname === "/__fake/google/events") {
       const acc = googleAccounts.get(url.searchParams.get("email") ?? "");
@@ -476,7 +611,47 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/google/calendar/v3/users/me/calendarList") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
-      return send(res, 200, { kind: "calendar#calendarList", items: account.calendars.map(({ events: _e, list_error: _l, list_error_times: _t, ...c }) => c) });
+      return send(res, 200, {
+        kind: "calendar#calendarList",
+        items: account.calendars.map(({ events: _e, list_error: _l, list_error_times: _t, shared: _s, ...c }) => c),
+      });
+    }
+    const watch = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/watch$/.exec(url.pathname);
+    if (watch && req.method === "POST") {
+      const account = googleAccountByToken(req);
+      if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const outage = outages.get("google-watch");
+      if (outage) return send(res, outage, { error: { code: outage, message: "fake watch outage" } });
+      const calId = decodeURIComponent(watch[1]!);
+      if (!account.calendars.some((c) => c.id === calId)) return send(res, 404, { error: { code: 404, message: "Not Found" } });
+      const b = (await readJson(req)) as { id: string; type: string; address: string; token?: string; expiration?: number };
+      if (b.type !== "web_hook" || !b.id || !b.address) return send(res, 400, { error: { code: 400, message: "bad channel" } });
+      const ch = {
+        id: b.id,
+        address: b.address,
+        resourceId: `res-${calId}`,
+        calendar: calId,
+        ...(b.token ? { token: b.token } : {}),
+        ...(b.expiration ? { expiration: Number(b.expiration) } : {}),
+      };
+      channels.push(ch);
+      return send(res, 200, {
+        kind: "api#channel",
+        id: ch.id,
+        resourceId: ch.resourceId,
+        resourceUri: `https://www.googleapis.com/calendar/v3/calendars/${calId}/events`,
+        ...(ch.expiration ? { expiration: String(ch.expiration) } : {}),
+      });
+    }
+    if (url.pathname === "/google/calendar/v3/channels/stop" && req.method === "POST") {
+      if (!googleAccountByToken(req)) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
+      const b = (await readJson(req)) as { id: string; resourceId: string };
+      const i = channels.findIndex((c) => c.id === b.id && c.resourceId === b.resourceId);
+      if (i < 0) return send(res, 404, { error: { code: 404, message: "Channel not found" } });
+      channels.splice(i, 1);
+      stoppedChannels.push({ id: b.id, resourceId: b.resourceId });
+      res.writeHead(204);
+      return res.end();
     }
     const evOne = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/([^/]+)$/.exec(url.pathname);
     if (evOne && req.method === "DELETE") {
@@ -492,7 +667,12 @@ const server = createServer(async (req, res) => {
       if (ifMatch && ifMatch !== ev.etag) return send(res, 412, { error: { code: 412, message: "Precondition Failed" } });
       deletes.push({ calendar: cal.id, id: ev.id, sendUpdates: url.searchParams.get("sendUpdates") });
       // Удаление серии убирает и её экземпляры
-      for (const e of cal.events ?? []) if (e.id === ev.id || e.recurringEventId === ev.id) e.status = "cancelled";
+      for (const e of cal.events ?? []) {
+        if (e.id === ev.id || e.recurringEventId === ev.id) {
+          e.status = "cancelled";
+          bump(e);
+        }
+      }
       res.writeHead(204);
       return res.end();
     }
@@ -502,7 +682,7 @@ const server = createServer(async (req, res) => {
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
       const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
       if (!cal || !ev || ev.status === "cancelled") return send(res, 404, { error: { code: 404, message: "Not Found" } });
-      if (req.method === "GET") return send(res, 200, ev);
+      if (req.method === "GET") return send(res, 200, publicEvent(ev));
       const outage = outages.get("google-write");
       if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
@@ -511,7 +691,8 @@ const server = createServer(async (req, res) => {
       const body = await readJson(req);
       patches.push({ calendar: cal.id, id: ev.id, sendUpdates: url.searchParams.get("sendUpdates"), body });
       Object.assign(ev, normalizeTimes({ ...ev, ...body } as GoogleEvent, cal.timeZone ?? "UTC"), { etag: newEtag() });
-      return send(res, 200, ev);
+      bump(ev);
+      return send(res, 200, publicEvent(ev));
     }
 
     const evList = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events$/.exec(url.pathname);
@@ -532,9 +713,10 @@ const server = createServer(async (req, res) => {
         { ...input, id, status: "confirmed", etag: newEtag(), htmlLink: `https://calendar.google.com/event?eid=${id}` },
         cal.timeZone ?? "UTC",
       );
+      bump(ev);
       cal.events ??= [];
       cal.events.push(ev);
-      return send(res, 200, ev);
+      return send(res, 200, publicEvent(ev));
     }
     if (evList && req.method === "GET") {
       const account = googleAccountByToken(req);
@@ -546,6 +728,24 @@ const server = createServer(async (req, res) => {
         cal.list_error_times--;
         return send(res, 503, { error: { code: 503, message: "fake transient error" } });
       }
+      // Синхронизация по syncToken: только изменения (и удалённые), окно и порядок с ним не принимаются
+      const syncToken = url.searchParams.get("syncToken");
+      if (syncToken) {
+        if (["timeMin", "timeMax", "orderBy", "updatedMin", "q"].some((k) => url.searchParams.has(k)))
+          return send(res, 400, { error: { code: 400, message: "syncToken cannot be combined with these parameters" } });
+        const m = /^st:(.+):(\d+):(\d+)$/.exec(syncToken);
+        if (!m || m[1] !== cal.id) return send(res, 400, { error: { code: 400, message: "Invalid sync token" } });
+        const since = Number(m[2]);
+        if (Number(m[3]) !== (syncTokenGen.get(cal.id) ?? 0)) {
+          syncRequests.push({ calendar: cal.id, mode: "expired" });
+          return send(res, 410, { error: { code: 410, message: "Sync token is no longer valid, a full sync is required." } });
+        }
+        syncRequests.push({ calendar: cal.id, mode: "incremental" });
+        const changed = (cal.events ?? []).filter((e) => (e._seq as number) > since).map(publicEvent);
+        return send(res, 200, { kind: "calendar#events", items: changed, nextSyncToken: syncTokenOf(cal.id) });
+      }
+      // Без orderBy — полный список синхронизации (чтение расписания ботом всегда с orderBy=startTime)
+      if (!url.searchParams.has("orderBy")) syncRequests.push({ calendar: cal.id, mode: "full" });
       const tz = url.searchParams.get("timeZone") ?? cal.timeZone ?? "UTC";
       const min = Date.parse(url.searchParams.get("timeMin") ?? "1970-01-01T00:00:00Z");
       const max = Date.parse(url.searchParams.get("timeMax") ?? "2100-01-01T00:00:00Z");
@@ -556,7 +756,8 @@ const server = createServer(async (req, res) => {
           return s < max && en > min;
         })
         .sort((a, b) => eventBounds(a, tz)[0] - eventBounds(b, tz)[0]);
-      return send(res, 200, { kind: "calendar#events", timeZone: tz, items });
+      // Как у Google: полный список — с токеном для следующих инкрементальных запросов
+      return send(res, 200, { kind: "calendar#events", timeZone: tz, items: items.map(publicEvent), nextSyncToken: syncTokenOf(cal.id) });
     }
 
     const tg = /^\/telegram\/bot([^/]+)\/(\w+)$/.exec(url.pathname);

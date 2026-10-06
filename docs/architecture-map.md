@@ -24,8 +24,11 @@ Telegram → POST /telegram/webhook (src/index.ts)
        → calendar/google-provider.ts → google/calendar-api.ts → Google   (access token — кеш в D1, 401 → обновить и повторить;
                                                                           GET — один повтор на 5xx/429, net/retry.ts)
        → telegram/api.ts → Telegram
-cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts); раз в 5 мин — ops/alerts.ts (алерты владельцу);
-                       раз в час — cleanup, ensureDigests
+cron (каждую минуту) → scheduler.ts:tick → очередь → runQueuedJob (jobs/digest.ts, sync/*); раз в 5 мин — ops/alerts.ts (алерты владельцу);
+                       раз в час — cleanup, ensureDigests, ensureCalendarSyncs (подписки календарей, ретеншн уведомлений)
+Google push → POST /google/push (sync/push.ts: канал + секрет) → задача cal_push → очередь → sync/engine.ts:syncCalendar
+       (syncToken / 410 → полный синк окна) → applyEntries: снимки, напоминания US-71, уведомления US-72 (sync/notify.ts) — один batch
+запись бота в календарь → GoogleCalendarProvider(onWrite) → sync/bot-writes.ts → applyEntries (сразу, в другие чаты; эхо push — по etag)
 GET /health → ops/health.ts (D1 + возраст последнего cron; 503 — для внешнего монитора)
 GET /ics/<токен> → bot/inline/guest.ts (файл события inline-карточки, US-95)
 ```
@@ -53,6 +56,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
 | Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
 | Inline-карточка «📅 Добавить себе» (US-95) | `src/bot/inline/*`: разбор запроса, текст карточки, шаблон Google Calendar, `.ics` — `logic.ts` (чистый, `test/inline-logic.test.ts`); inline-запрос — `query.ts` (из webhook, без inbox); нажатие и `/start add_<токен>` — `press.ts` (зарегистрированные) и `guest.ts` (посторонние — из `gate.ts`, `/ics/<токен>`); SQL — `src/db/inline.ts` |
+| Синхронизация Google, push, опрос, каналы | `src/sync/engine.ts` (задачи `cal_sync`/`cal_push`/`watch_renew`, `applyEntries`), `src/sync/push.ts`, SQL — `src/db/sync.ts`; требования Google — `docs/research/google-push.md` |
+| Уведомления об изменениях (US-72), напоминания в Telegram (US-71) | «что изменилось», окно, тихие часы, пачка, тексты — `src/sync/logic.ts` (чистый, `test/sync-logic.test.ts`); рассылка — `src/sync/notify.ts`; «календарь → чаты» — `db/sync.ts:chatsForCalendar`; напоминания — `src/sync/reminders.ts` |
 | Поведение для приёмочного теста | `acceptance/scenarios/NN-*.yaml`, шаги — тип `Step` в `acceptance/runner.ts`, фейки — `acceptance/fakes/server.ts` |
 
 ## src/
@@ -107,9 +112,9 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
-| `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык) |
+| `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
 | `bot/settings/screens.ts` | Экраны меню (текст + кнопки), пресеты значений |
 | `bot/settings/common.ts` | Показ меню, список календарей, смена сводки, «Подключить» (`sendReconnect`) |
@@ -142,7 +147,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `calendar/match.ts` | Сопоставление описания с названиями (падежи) |
 | `calendar/sync.ts` | Синхронизация списка календарей при переподключении |
 | **google/** | HTTP к Google |
-| `google/calendar-api.ts`, `auth.ts`, `oauth.ts`, `errors.ts` | Calendar API (GET — с одним повтором); access token; OAuth-ссылка, обмен кода, отзыв; ошибки |
+| `google/calendar-api.ts`, `auth.ts`, `oauth.ts`, `errors.ts` | Calendar API (GET — с одним повтором; `syncEvents`, `watchEvents`, `stopChannel`); access token; OAuth-ссылка, обмен кода, отзыв; ошибки |
 | `google/token-cache.ts` | Срок кеша access token: годен до 5 мин до истечения (чистый, `test/google-reliability.test.ts`) |
 | **telegram/** | `api.ts` — клиент Bot API (таймауты, `retry_after`); `types.ts` — минимальные типы |
 | **stt/** | `whisper.ts` — цепочка STT (Groq OpenAI-совместимый → Workers AI) |
@@ -152,6 +157,13 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week` |
+| **sync/** | Синхронизация Google и то, что на ней держится (ADR-0005 §2) |
+| `sync/engine.ts` | Синк календаря провайдера: владелец, lease, `syncToken`/410/полный синк окна, каналы `events.watch` (открыть, продлить, остановить), цепочка опроса/сверки, `ensureCalendarSyncs`; `applyEntries` — снимки + напоминания + уведомления одним batch |
+| `sync/push.ts` | `POST /google/push`: канал и секрет, задача синка — сразу в очередь |
+| `sync/bot-writes.ts` | Слушатель записей провайдера: журнал `bot_writes`, снимок по ответу Google (эхо), уведомление в другие чаты с автором |
+| `sync/notify.ts` | US-72: получатели, outbox `change_notices` (тихие часы → задача `notify_flush`), отправка по одному или сводкой |
+| `sync/reminders.ts` | US-71: задачи `tg_reminder` на горизонт 3 дня, пересчёт при изменении события и настройки, срабатывание со сверкой |
+| `sync/logic.ts` | Чистое: снимок события, `diffEvent`, окно 30 дней, тихие часы, план пачки, момент напоминания, тексты |
 | **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
 | **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
 | **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
@@ -162,7 +174,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Путь | Что |
 |---|---|
 | `acceptance/runner.ts` | Раннер YAML-сценариев (чёрный ящик по HTTP); фильтр `SCENARIO=…`, `--list` |
-| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth), LLM, STT, Gemini (голос и картинки — по `mimeType`); управление `/__fake/*` |
+| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth, `syncToken`/410, `events.watch`/`channels.stop`, push, общие календари, внешние изменения), LLM, STT, Gemini; управление `/__fake/*`; Gemini (голос и картинки — по `mimeType`) |
 | `acceptance/scenarios/NN-*.yaml` | Сценарии; поле `story:` связывает с `docs/user-stories.md` |
 | `test/*.test.ts` | Vitest: чистая логика и адаптеры переносимых наборов (`dates.corpus`, `extract`, `rrule`) |
 | `testdata/` | Переносимые наборы: `dates/` (золотой корпус), `extract/`, `recurrence/`, `nlu/` (только для живых замеров) |

@@ -16,6 +16,10 @@ export interface UserSettings {
   tomorrowDigest?: boolean;
   /** Сводка «Неделя»: вс 20:00 или пн 08:00 (US-70, R1). Нет — выключена. */
   weekDigest?: "sun" | "mon";
+  /** Уведомления об изменениях в календарях выключены (US-72). По умолчанию — включены. */
+  changeNotifyOff?: boolean;
+  /** Напоминать в Telegram за столько минут до встреч (US-71). Нет — не напоминать. */
+  tgReminderMin?: number;
 }
 
 export const DEFAULT_DURATION_MIN = 60;

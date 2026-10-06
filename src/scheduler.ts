@@ -7,6 +7,9 @@
 import type { AppContext } from "./bot/context";
 import { runDigestJob, DIGEST_JOB, TOMORROW_DIGEST_JOB, WEEK_DIGEST_JOB } from "./jobs/digest";
 import { errorClass, log } from "./log";
+import { PUSH_SYNC_JOB, runPushSyncJob, runSyncJob, runWatchRenewJob, SYNC_JOB, WATCH_RENEW_JOB } from "./sync/engine";
+import { NOTIFY_FLUSH_JOB, runNotifyFlushJob } from "./sync/notify";
+import { runReminderJob, TG_REMINDER_JOB } from "./sync/reminders";
 
 export interface DueJob {
   id: string;
@@ -34,6 +37,12 @@ const HANDLERS: Record<string, JobHandler> = {
   // US-70, R1: «Завтра» и «Неделя» — тот же исполнитель, период по виду задачи
   [TOMORROW_DIGEST_JOB]: runDigestJob,
   [WEEK_DIGEST_JOB]: runDigestJob,
+  // Синхронизация Google, уведомления об изменениях, напоминания в Telegram (ADR-0005 §2, US-72, US-71)
+  [SYNC_JOB]: runSyncJob,
+  [PUSH_SYNC_JOB]: runPushSyncJob,
+  [WATCH_RENEW_JOB]: runWatchRenewJob,
+  [NOTIFY_FLUSH_JOB]: runNotifyFlushJob,
+  [TG_REMINDER_JOB]: runReminderJob,
 };
 
 export async function claimDueJobs(db: D1Database, now: number, limit = 500): Promise<DueJob[]> {

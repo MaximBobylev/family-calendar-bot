@@ -87,7 +87,9 @@
     - expect_google_events: { email: ivan@gmail.com, calendar: family@group.calendar.google.com, events: [], count: 1 }
     # Любой взрослый дома — может; автор события — тот, кто попросил
     - press: { button: "Создать", from: 1001 }
+    # Личный чат владельца — другой чат календаря: уведомление об изменении (US-72)
     - expect_telegram:
+        - { chat_id: 1001, text_contains: ["➕ Новое: «Плавание Маши»", "👤 Аня"] }
         - { method: editMessageText, chat_id: -500, text_contains: ["✅ Создано", "Плавание Маши", "👤 Добавил(а): Аня"] }
     - expect_google_events:
         email: ivan@gmail.com
