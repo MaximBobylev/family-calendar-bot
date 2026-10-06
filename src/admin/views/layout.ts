@@ -42,6 +42,8 @@ export const badge = (level: Level) => `<span class="badge ${level}">${LEVEL_TEX
 
 const NAV: [string, string][] = [
   ["/admin", "Здоровье"],
+  ["/admin/sync", "Синхронизация"],
+  ["/admin/households", "Дома"],
   ["/admin/journal", "Журнал"],
   ["/admin/usage", "Расход"],
   ["/admin/audit", "Аудит"],

@@ -181,11 +181,13 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
   const provider = new GoogleCalendarProvider(ctx.config, ctx.db, owner.userId, ctx.clock);
   try {
     let page: SyncPage | undefined;
+    let expired = false;
     if (row.syncToken) {
       try {
         page = await provider.syncEvents(pcid, { syncToken: row.syncToken });
       } catch (e) {
         if (!(e instanceof SyncTokenExpired)) throw e;
+        expired = true;
         log("calendar_sync", { outcome: "token_expired" });
       }
     }
@@ -206,6 +208,8 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
         last_sync_at: now,
         baseline_at: row.baselineAt ?? now,
         last_change_at: changed ? now : row.lastChangeAt,
+        last_outcome: "ok",
+        ...(expired ? { last_resync_at: now } : {}),
       }),
       ...pruneStatements(ctx.db, pcid, now),
     ]);
@@ -215,7 +219,12 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
     return "ok";
   } catch (e) {
     // Календарь удалён/недоступен владельцу или доступ отозван — не повторяем задачей; сверка попробует снова
-    if (e instanceof AuthRevoked || e instanceof PermissionDenied || e instanceof EventGone) {
+    const unavailable = e instanceof AuthRevoked || e instanceof PermissionDenied || e instanceof EventGone;
+    // Для админки и алерта sync_stale (миграция 0016): только класс ошибки, без текста ответа
+    await updateSyncRow(ctx.db, pcid, { last_outcome: unavailable ? "unavailable" : "error", last_error_at: now, last_error: errorClass(e) })
+      .run()
+      .catch(() => undefined);
+    if (unavailable) {
       log("calendar_sync", { outcome: "unavailable", error: errorClass(e) });
       return "unavailable";
     }

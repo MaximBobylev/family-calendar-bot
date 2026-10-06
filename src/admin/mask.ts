@@ -16,8 +16,17 @@ export async function pseudonymKey(secret: string): Promise<CryptoKey> {
 /** Стабильный псевдоним: 6 hex — без коллизий на сотнях пользователей (4 hex дали бы их уже к бете). */
 export async function pseudonym(key: CryptoKey, userId: string | null): Promise<string> {
   if (!userId) return "u-удалён";
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(userId)));
-  return `u-${[...mac.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `u-${await hmac6(key, userId)}`;
+}
+
+/** Групповой чат (id Telegram) — c-xxxxxx: другое пространство HMAC, с псевдонимами пользователей не совпадает. */
+export async function chatPseudonym(key: CryptoKey, chatId: string): Promise<string> {
+  return `c-${await hmac6(key, `chat:${chatId}`)}`;
+}
+
+async function hmac6(key: CryptoKey, value: string): Promise<string> {
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+  return [...mac.slice(0, 3)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 const maskWord = (w: string) => w.replace(/[\p{L}\p{N}]/gu, MASK_CHAR);

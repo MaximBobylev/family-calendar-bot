@@ -1,10 +1,24 @@
 // Панель «здоровье» — главная страница админки: всё ли живо за 10 секунд (docs/admin-console.md #1).
 // Пороги — общие с алертами владельцу (src/ops/alert-rules.ts): светофор и алерт краснеют одинаково.
 
-import type { DigestDelivery, InboxFailure, InboxHealth, JobsGroup, JobsLag, OpsValue, ProblemJob, Totals, UpdatesDay } from "../queries";
+import type {
+  DigestDelivery,
+  InboxFailure,
+  InboxHealth,
+  JobsGroup,
+  JobsLag,
+  KindStats,
+  NoticeStats,
+  OpsValue,
+  ProblemJob,
+  Totals,
+  UpdatesDay,
+} from "../queries";
+import { type SyncSummary, syncLevel } from "../../ops/sync-health";
 import type { WebhookStatus } from "../webhook";
 import { INBOX_FAILED_HOUR, INBOX_STUCK_MS, JOBS_OVERDUE_MS, WEBHOOK_ERROR_WINDOW_MS, WEBHOOK_PENDING_MAX } from "../../ops/alert-rules";
 import { badge, esc, fmtAge, fmtTime, type Level, raw, table } from "./layout";
+import { failedDay } from "./sync";
 
 const MIN_MS = 60_000;
 
@@ -22,6 +36,8 @@ export interface HealthView {
   lastHourly?: OpsValue;
   totals: Totals;
   byDay: UpdatesDay[];
+  /** Сводка синхронизации — подробно на /admin/sync. */
+  sync: { summary: SyncSummary; notices: NoticeStats; jobs: KindStats[] };
 }
 
 export function webhookLevel(v: HealthView): Level {
@@ -83,6 +99,7 @@ export function healthBody(v: HealthView): string {
     ["Задачи планировщика", jobsLevel(v.lag, v.now), "#jobs"],
     ["Дайджесты", digestLevel(v.digests), "#digests"],
     ["Cron", cronLevel(v.lastTick, v.now), "#cron"],
+    ["Синхронизация Google", syncLevel(v.sync.summary, v.sync.notices.overdue, failedDay(v.sync.jobs)), "/admin/sync"],
   ];
   const i = v.inbox;
   const jobsTable = table(
@@ -146,6 +163,9 @@ ${table(
     ],
   ],
 )}
+
+<h2 id="sync">Синхронизация Google ${badge(levels[5]![1])}</h2>
+<p>Календарей под синком: ${v.sync.summary.total} (push ${v.sync.summary.push}, опрос ${v.sync.summary.poll}); устарели: <span class="${v.sync.summary.stale ? "err" : ""}">${v.sync.summary.stale}</span>; уведомлений ждут тихих часов: ${v.sync.notices.quiet}, просрочено: ${v.sync.notices.overdue}. <a href="/admin/sync">Подробно →</a></p>
 
 <h2>Объём</h2>
 <div class="cards">

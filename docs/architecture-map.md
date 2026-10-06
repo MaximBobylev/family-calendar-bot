@@ -50,8 +50,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
 | Внешние URL, лимиты, цены | `src/config.ts` |
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
-| Админка | `src/admin/*`, `docs/admin-console.md` |
-| Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
+| Админка | `src/admin/*`, `docs/admin-console.md`; дома — `views/households.ts`, синхронизация / уведомления / напоминания — `views/sync.ts`, контент → событие и inline — `views/usage.ts`; подписи функций US-64 — `src/admin/labels.ts` (`test/admin-r1.test.ts`) |
+| Алерты владельцу, `/health`, структурные логи | правила и пороги — `src/ops/alert-rules.ts` (чистый, `test/alert-rules.test.ts`), здоровье синхронизации и порог `sync_stale` — `src/ops/sync-health.ts` (чистый, `test/admin-r1.test.ts`), сбор и отправка — `src/ops/alerts.ts`, `alert_state` — `src/db/alert-state.ts`; `log()` — `src/log.ts` |
 | Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, расписание напоминаний — `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
@@ -170,8 +170,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `sync/notify.ts` | US-72: получатели, outbox `change_notices` (тихие часы → задача `notify_flush`), отправка по одному или сводкой |
 | `sync/reminders.ts` | US-71: задачи `tg_reminder` на горизонт 3 дня, пересчёт при изменении события и настройки, срабатывание со сверкой |
 | `sync/logic.ts` | Чистое: снимок события, `diffEvent`, окно 30 дней, тихие часы, план пачки, момент напоминания, тексты |
-| **admin/** | `/admin`: `index.ts` (маршруты), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts`, `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
-| **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
+| **admin/** | `/admin`: `index.ts` (маршруты: здоровье, `/admin/sync`, `/admin/households[/:id]`, журнал, расход, аудит), `auth.ts`, `queries.ts` (весь SQL админки), `mask.ts` (маски, псевдонимы `u-`/`c-`), `labels.ts` (русские подписи, чистый), `webhook.ts`, `yaml-snippet.ts` («В тест»), `views/*` |
+| **ops/** | Эксплуатация: `alert-rules.ts` (правила, пороги — общие со светофором `/admin`, дедупликация, тексты), `sync-health.ts` (сводка `calendar_sync`, «устарел», светофор `/admin/sync`), `alerts.ts` (cron раз в 5 мин → Telegram владельцу), `health.ts` (`GET /health`) |
 | **net/** | `fetch.ts` — fetch с таймаутом; `retry.ts` — когда и через сколько повторить GET (5xx/429, Retry-After, бюджет времени; чистый) |
 | **testing/** | `routes.ts` — `/__test/{clock,tick,hourly,alerts,drain,retry,reset}` (только TEST_MODE и не https) |
 

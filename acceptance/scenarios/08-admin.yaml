@@ -128,3 +128,189 @@
         basic_auth: "admin:test-admin-password"
         text_contains: ["Расход AI", "{{user}}", "fake-model", "create_event", "/ 60", "/ 300"]
         text_not_contains: ["Петей", "Созвон"]
+
+# --- Итерация 3 (R1): дома, синхронизация, контент → событие ---------------------------------------------------
+# Только псевдонимы и счётчики: ни названия дома, ни имён, ни кодов приглашений, ни id чатов и календарей (почта).
+
+- id: admin-r1-pages-require-auth
+  story: US-13
+  steps:
+    - http_get: { path: "/admin/sync", expect_status: 401 }
+    - http_get: { path: "/admin/households", expect_status: 401, basic_auth: "admin:wrong" }
+    - http_get: { path: "/admin/households/x", expect_status: 401 }
+
+- id: admin-households-masked
+  story: US-90
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+    - http_get:
+        path: "/admin/households"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["Дома", "домов нет"]
+    - telegram: { from: 1001, text: "/home create Бобылевы" }
+    - press: "➕ Пригласить"
+    - capture_telegram: { invite: "start=home_([A-Za-z0-9_-]+)" }
+    - telegram: { from: 2001, first_name: "Аня", text: "/start home_{{invite}}" }
+    - reply: { from: 2001, text: "Аня, жена, мама" }
+    # Второе приглашение — не использовано
+    - press: { button: "➕ Пригласить", from: 1001 }
+    - capture_telegram: { invite2: "start=home_([A-Za-z0-9_-]+)" }
+    - expect_telegram_count: 7
+    - telegram: { from: 1001, chat_id: -500, chat_type: group, text: "/home@cab_test_bot link" }
+    - expect_telegram:
+        - { chat_id: -500, text_contains: ["Чат привязан к дому «Бобылевы»"] }
+    - http_get:
+        path: "/admin/households"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - "Домов<b>1</b>"
+          - "Участников<b>2</b>"
+          - "Без Google<b>1</b>"
+          - "Групповых чатов<b>1</b>"
+          - "<td>2</td><td>1 / 1</td><td>0</td><td>1</td><td>2</td><td>1</td>"
+        text_not_contains: ["Бобылевы", "Аня", "жена", "Иван", "{{invite}}", "{{invite2}}", "home_", "-500", "ivan@gmail.com"]
+        capture: { home: 'href="/admin/households/([0-9a-f-]{36})"', owner: 'href="/admin/households/[0-9a-f-]{36}">(u-[0-9a-f]{6})<' }
+    - http_get:
+        path: "/admin/households/{{home}}"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - "Дом владельца {{owner}}"
+          - "Участники"
+          - "<td>владелец</td><td>да</td>"
+          - "<td>взрослый</td><td>нет</td>"
+          - "Приглашения"
+          - "<td>1</td><td>1</td><td>0</td>"
+          - "Коды приглашений не показываются"
+          - "Групповые чаты"
+          - "<td>c-"
+        text_not_contains: ["Бобылевы", "Аня", "жена", "мама", "Иван", "{{invite}}", "{{invite2}}", "home_", "-500", "ivan@gmail.com", "Семья"]
+    # Приглашение истекло (48 ч) — в счётчике «истекли»
+    - clock: "2026-10-09T07:01:00Z"
+    - http_get:
+        path: "/admin/households/{{home}}"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["<td>0</td><td>1</td><td>1</td>"]
+    - http_get:
+        path: "/admin/households/00000000-0000-0000-0000-000000000000"
+        basic_auth: "admin:test-admin-password"
+        expect_status: 404
+        text_contains: ["Дом не найден"]
+
+- id: admin-sync-panel-and-stale-alert
+  story: US-72
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+          - id: family@group.calendar.google.com
+            summary: "Семья"
+            accessRole: writer
+            timeZone: Europe/Moscow
+            shared: true
+            events:
+              - { id: f1, summary: "Ужин у мамы", start: { dateTime: "2026-10-09T18:00:00+03:00" }, end: { dateTime: "2026-10-09T20:00:00+03:00" } }
+              - { id: f2, summary: "Бассейн", start: { dateTime: "2026-10-08T11:00:00+03:00" }, end: { dateTime: "2026-10-08T12:00:00+03:00" } }
+    - connected_user:
+        from: 1002
+        email: maria@gmail.com
+        calendars:
+          - { id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: owner, timeZone: Europe/Moscow, shared: true }
+    - http_get:
+        path: "/admin/sync"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["Синхронизация", "Календарей под синком<b>0</b>", "задач нет"]
+    - hourly: true
+    - tick: true
+    # Напоминания US-71 у Ивана: «за 10 мин»
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "📣 Уведомления"
+    - press: "за 10 мин"
+    - expect_telegram_count: 3
+    # Токен синхронизации потерян (410) — полная пересинхронизация, счётчик за сутки
+    - google_expire_sync_tokens: family@group.calendar.google.com
+    - google_push: { calendar: family@group.calendar.google.com }
+    - tick: true
+    - http_get:
+        path: "/admin/sync"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - 'Синхронизация <span class="badge ok">OK</span>'
+          - "Календарей под синком<b>3</b>"
+          - "Push / опрос<b>3 / 0</b>"
+          - 'Устарели<b class="">0</b>'
+          - "Пересинхронизация (410) за 24 ч<b>1</b>"
+          - "плановый синк (сверка / опрос)"
+          - "синк по push"
+          - "Уведомления об изменениях (US-72)"
+          - "Ждут конца тихих часов<b>0</b>"
+          - "Напоминания в Telegram (US-71)"
+          - "Пользователей с напоминаниями<b>1</b>"
+          - "Запланировано<b>2</b>"
+        text_not_contains: ["ivan@gmail.com", "maria@gmail.com", "family@group", "Ужин", "Бассейн", "Семья"]
+    - http_get:
+        path: "/admin"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["Синхронизация Google", 'Календарей под синком: 3 (push 3, опрос 0); устарели: <span class="">0</span>']
+        text_not_contains: ["family@group"]
+    # Сутки с лишним без синка (cron стоял): календари устарели — алерт владельцу, вместе с просроченными задачами
+    - clock: "2026-10-08T10:05:00Z"
+    - alerts: { expect_sent: ["jobs:fire", "sync_stale:fire"] }
+    - expect_telegram:
+        - { chat_id: 1001, text_contains: ["🔴 Алерт: задачи планировщика"] }
+        - chat_id: 1001
+          text_contains: ["🔴 Алерт: синхронизация календарей", "устарели: 3, старейший синк 27 ч 5 мин назад", "http://dev:8787/admin"]
+          text_not_contains: ["gmail", "family", "Семья"]
+    - http_get:
+        path: "/admin/sync"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ['<span class="badge crit">СБОЙ</span>', 'Устарели<b class="err">3</b>']
+    # Cron ожил: сверка прошла — восстановлено
+    - tick: true
+    - alerts: { expect_sent: ["jobs:resolve", "sync_stale:resolve"] }
+
+- id: admin-usage-ingest-and-inline
+  story: US-66
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }]
+    - photo:
+        from: 1001
+        content: "img-concert"
+        seen:
+          text: "Концерт хора «Весна»\n20 октября в 19:00"
+          args: { title: "Концерт хора «Весна»", start: "20 октября в 19:00" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"] }
+    - photo: { from: 1001, content: "img-broken", seen: { error: 500 } }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено."] }
+        - { text_contains: ["Не получилось прочитать изображение"] }
+    - inline_query: { from: 1001, query: "завтра 19:00 футбол" }
+    - inline_press: { from: 1001 }
+    - http_get:
+        path: "/admin/usage"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - "Контент → событие (US-65–67)"
+          - "<td>Событие из фото (US-66)</td><td>1</td><td>1</td>"
+          - "<td>Событие из пересланного (US-65)</td><td>0</td><td>0</td>"
+          - "<td>Импорт .ics (US-67)</td><td>0</td><td>0</td>"
+          - '<td>фото → vision (US-66)</td><td>2</td><td><span class="err">1</span></td>'
+          - "Inline-карточки (US-95)"
+          - "Карточек за 7 дней<b>1</b>"
+          - "«Добавить себе» за 7 дней<b>1</b>"
+          - "<code>image_event</code>"
+        text_not_contains: ["Концерт", "Весна", "футбол", "Футбол"]

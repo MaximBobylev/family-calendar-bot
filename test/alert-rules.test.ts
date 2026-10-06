@@ -16,6 +16,7 @@ function inputs(over: Partial<AlertInputs> = {}): AlertInputs {
     jobs: { overdue: 0, oldestOverdueAt: null, failedHour: 0 },
     digestFailedDay: 0,
     ai: { calls: 0, errors: 0 },
+    sync: { stale: 0, oldestStaleAt: null },
     ...over,
   };
 }
@@ -28,7 +29,7 @@ const firing = (i: AlertInputs) =>
 describe("evaluateRules", () => {
   it("all quiet", () => {
     const rs = evaluateRules(inputs());
-    expect(rs.map((r) => r.key)).toEqual(["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors"]);
+    expect(rs.map((r) => r.key)).toEqual(["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale"]);
     expect(rs.every((r) => r.firing === false)).toBe(true);
   });
 
@@ -52,8 +53,15 @@ describe("evaluateRules", () => {
     ["ai errors 2/2 — too few", { ai: { calls: 2, errors: 2 } }, []],
     ["ai errors 3/20 — low rate", { ai: { calls: 20, errors: 3 } }, []],
     ["ai errors 4/20 — 20%", { ai: { calls: 20, errors: 4 } }, ["ai_errors"]],
+    ["sync stale", { sync: { stale: 1, oldestStaleAt: NOW - 27 * 60 * MIN } }, ["sync_stale"]],
   ])("%s", (_, over, keys) => {
     expect(firing(inputs(over))).toEqual(keys);
+  });
+
+  it("sync stale detail — counters only", () => {
+    const r = evaluateRules(inputs({ sync: { stale: 2, oldestStaleAt: NOW - 27 * 60 * MIN } })).find((x) => x.key === "sync_stale");
+    expect(r).toEqual({ key: "sync_stale", firing: true, detail: "устарели: 2, старейший синк 27 ч назад" });
+    expect(evaluateRules(inputs()).find((x) => x.key === "sync_stale")?.detail).toBe("устарели: 0");
   });
 
   it("webhook unknown when getWebhookInfo failed", () => {

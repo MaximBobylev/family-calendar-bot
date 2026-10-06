@@ -3,19 +3,28 @@
 //   GET  /admin/journal               — журнал распознанного, замаскированный; фильтры u, kind, outcome, intent
 //   GET  /admin/journal/:id           — запись: маска, replay дат, «В тест»
 //   POST /admin/journal/:id/reveal    — показать текст строки: причина обязательна, запись в admin_audit
-//   GET  /admin/usage                 — расход AI по псевдонимам, против лимитов
+//   GET  /admin/sync                  — синхронизация Google, уведомления US-72, напоминания US-71 (итерация 3)
+//   GET  /admin/households            — дома: псевдонимы и счётчики (итерация 3)
+//   GET  /admin/households/:id        — дом: участники, приглашения (счётчики), групповые чаты (c-xxxxxx)
+//   GET  /admin/usage                 — расход AI по псевдонимам, против лимитов; контент → событие, inline
 //   GET  /admin/audit                 — журнал действий операторов
 // Вход — HTTP Basic (auth.ts); без JS, CSP default-src 'none'.
 
 import type { AppContext } from "../bot/context";
 import { OPS_LAST_HOURLY, OPS_LAST_TICK } from "../db/ops-state";
 import { adminOperator, sameOrigin, unauthorized } from "./auth";
-import { intentOf, maskError, maskResult, maskText, pseudonym, pseudonymKey } from "./mask";
+import { NOTIFY_FLUSH_JOB } from "../sync/notify";
+import { PUSH_SYNC_JOB, SYNC_JOB, WATCH_RENEW_JOB } from "../sync/engine";
+import { TG_REMINDER_JOB } from "../sync/reminders";
+import { summarizeSync } from "../ops/sync-health";
+import { chatPseudonym, intentOf, maskError, maskResult, maskText, pseudonym, pseudonymKey } from "./mask";
 import * as q from "./queries";
 import { auditBody } from "./views/audit";
 import { healthBody } from "./views/health";
+import { householdDetailBody, householdsBody } from "./views/households";
 import { type JournalDetailView, journalDetailBody, journalListBody, REVEAL_REASONS } from "./views/journal";
 import { page } from "./views/layout";
+import { syncBody } from "./views/sync";
 import { usageBody } from "./views/usage";
 import { webhookStatus } from "./webhook";
 import { datesSnippet, extractSnippet, localNow, replay } from "./yaml-snippet";
@@ -23,6 +32,8 @@ import { datesSnippet, extractSnippet, localNow, replay } from "./yaml-snippet";
 const JOURNAL_PAGE = 50;
 /** Поля интентов с фрагментами дат, как их вырезала LLM, — для сравнения с извлечением сейчас. */
 const DATE_SLOTS = ["start", "range", "duration"];
+/** Задачи панели «Синхронизация». */
+const SYNC_KINDS = [SYNC_JOB, PUSH_SYNC_JOB, WATCH_RENEW_JOB, NOTIFY_FLUSH_JOB, TG_REMINDER_JOB];
 
 type Pseudo = (userId: string | null) => Promise<string>;
 
@@ -63,6 +74,14 @@ export async function handleAdmin(ctx: AppContext, request: Request, url: URL): 
     if (!row) return render("Нет записи", "/admin/journal", `<h1>Запись не найдена</h1><p>Возможно, удалена вместе с пользователем.</p>`, 404);
     return render("Запись журнала", "/admin/journal", journalDetailBody(await detailView(row, pseudo, null)));
   }
+  if (path === "/admin/sync") return render("Синхронизация", "/admin/sync", syncBody(await sync(ctx, now)));
+  if (path === "/admin/households") return render("Дома", "/admin/households", await householdList(ctx, now, pseudo));
+  const home = /^\/admin\/households\/([^/]+)$/.exec(path);
+  if (home) {
+    const body = await householdDetail(ctx, decodeURIComponent(home[1]!), now, pseudo);
+    if (!body) return render("Нет дома", "/admin/households", `<h1>Дом не найден</h1><p>Возможно, распущен.</p>`, 404);
+    return render("Дом", "/admin/households", body);
+  }
   if (path === "/admin/usage") return render("Расход", "/admin/usage", await usage(ctx, now, pseudo));
   if (path === "/admin/audit") return render("Аудит", "/admin/audit", await audit(ctx, pseudo));
   return new Response("Not found", { status: 404 });
@@ -72,7 +91,7 @@ export async function handleAdmin(ctx: AppContext, request: Request, url: URL): 
 
 async function health(ctx: AppContext, now: number, pseudo: Pseudo) {
   const db = ctx.db;
-  const [webhook, inbox, failures, jobs, lag, problems, digests, ops, totals, byDay] = await Promise.all([
+  const [webhook, inbox, failures, jobs, lag, problems, digests, ops, totals, byDay, syncRows, notices, syncJobs] = await Promise.all([
     webhookStatus(ctx),
     q.inboxHealth(db, now),
     q.inboxFailures(db),
@@ -83,6 +102,9 @@ async function health(ctx: AppContext, now: number, pseudo: Pseudo) {
     q.opsState(db, [OPS_LAST_TICK, OPS_LAST_HOURLY]),
     q.totals(db),
     q.updatesByDay(db, now),
+    q.syncCalendars(db),
+    q.noticeStats(db, now),
+    q.jobKindStats(db, now, SYNC_KINDS),
   ]);
   return {
     now,
@@ -98,7 +120,47 @@ async function health(ctx: AppContext, now: number, pseudo: Pseudo) {
     lastHourly: ops.get(OPS_LAST_HOURLY),
     totals,
     byDay,
+    sync: { summary: summarizeSync(syncRows, now), notices, jobs: syncJobs },
   };
+}
+
+// --- Синхронизация и дома (итерация 3) -------------------------------------------------------------------
+
+async function sync(ctx: AppContext, now: number) {
+  const [rows, errors, jobs, notices, reminderUsers] = await Promise.all([
+    q.syncCalendars(ctx.db),
+    q.syncErrorClasses(ctx.db, now),
+    q.jobKindStats(ctx.db, now, SYNC_KINDS),
+    q.noticeStats(ctx.db, now),
+    q.reminderUsersCount(ctx.db),
+  ]);
+  return { now, pushEnabled: ctx.config.googlePushEnabled, summary: summarizeSync(rows, now), errors, jobs, notices, reminderUsers };
+}
+
+async function householdList(ctx: AppContext, now: number, pseudo: Pseudo): Promise<string> {
+  const rows = await q.households(ctx.db, now);
+  return householdsBody(await Promise.all(rows.map(async (h) => ({ ...h, owner: await pseudo(h.owner_user_id) }))));
+}
+
+async function householdDetail(ctx: AppContext, id: string, now: number, pseudo: Pseudo): Promise<string | null> {
+  const h = await q.household(ctx.db, id, now);
+  if (!h) return null;
+  const [members, invites, chats, key] = await Promise.all([
+    q.householdMembers(ctx.db, id),
+    q.householdInvites(ctx.db, id, now),
+    q.householdChats(ctx.db, id),
+    pseudonymKey(ctx.config.tokenEncryptionKey),
+  ]);
+  return householdDetailBody({
+    household: { ...h, owner: await pseudo(h.owner_user_id) },
+    members: await Promise.all(
+      members.map(async (m) => ({ user: await pseudo(m.user_id), role: m.role, hasGoogle: m.has_google === 1, joinedAt: m.joined_at })),
+    ),
+    invites,
+    chats: await Promise.all(chats.map((c) => chatPseudonym(key, c))),
+    // US-91/92/93 (поручения): секция со счётчиками assignments по статусам — сюда
+    sections: [],
+  });
 }
 
 // --- Журнал -------------------------------------------------------------------------------------------
@@ -229,12 +291,14 @@ async function reveal(
 
 async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<string> {
   const dayStart = now - (now % 86_400_000);
-  const [byUser, byModel, intents, cards, features] = await Promise.all([
+  const [byUser, byModel, intents, cards, features, bySource, inline] = await Promise.all([
     q.usageByUser(ctx.db, now, dayStart),
     q.usageByModel(ctx.db, now),
     q.intentCounts(ctx.db, now),
     q.cardCounts(ctx.db, now),
     q.featureUsage(ctx.db),
+    q.llmBySource(ctx.db, now),
+    q.inlineStats(ctx.db, now),
   ]);
   return usageBody({
     byUser: await Promise.all(byUser.map(async (u) => ({ ...u, user: await pseudo(u.user_id) }))),
@@ -242,6 +306,8 @@ async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<stri
     intents,
     cards,
     features,
+    bySource,
+    inline,
     limits: ctx.config.limits,
   });
 }

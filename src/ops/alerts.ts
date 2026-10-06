@@ -2,20 +2,23 @@
 // (в TEST_MODE — POST /__test/alerts) собрать счётчики, оценить правила (alert-rules.ts) и отправить переходы.
 // Никогда не бросает: сбой алертов не должен ронять cron.
 
-import { inboxHealth, jobsLag } from "../admin/queries";
+import { inboxHealth, jobsLag, syncCalendars } from "../admin/queries";
 import { webhookStatus } from "../admin/webhook";
 import type { AppContext } from "../bot/context";
 import { alertCounts, loadAlertStates, saveAlertState } from "../db/alert-state";
 import { errorClass, log } from "../log";
 import { AI_WINDOW_MS, type AlertInputs, alertText, decide, evaluateRules } from "./alert-rules";
+import { summarizeSync } from "./sync-health";
 
 export async function collectAlertInputs(ctx: AppContext, now: number): Promise<AlertInputs> {
-  const [webhook, inbox, lag, counts] = await Promise.all([
+  const [webhook, inbox, lag, counts, syncRows] = await Promise.all([
     webhookStatus(ctx),
     inboxHealth(ctx.db, now),
     jobsLag(ctx.db, now),
     alertCounts(ctx.db, now, AI_WINDOW_MS),
+    syncCalendars(ctx.db),
   ]);
+  const sync = summarizeSync(syncRows, now);
   return {
     now,
     expectedWebhookUrl: `${ctx.config.publicBaseUrl}/telegram/webhook`,
@@ -24,6 +27,7 @@ export async function collectAlertInputs(ctx: AppContext, now: number): Promise<
     jobs: { overdue: lag.overdue, oldestOverdueAt: lag.oldestOverdueAt, failedHour: counts.jobsFailedHour },
     digestFailedDay: counts.digestFailedDay,
     ai: { calls: counts.aiCalls, errors: counts.aiErrors },
+    sync: { stale: sync.stale, oldestStaleAt: sync.oldestStaleAt },
   };
 }
 

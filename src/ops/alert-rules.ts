@@ -41,9 +41,11 @@ export interface AlertInputs {
   digestFailedDay: number;
   /** Вызовы цепочек LLM/STT за AI_WINDOW_MS: всего и с outcome = error. */
   ai: { calls: number; errors: number };
+  /** Календари с получателями, не синхронизированные дольше порога режима (sync-health.ts: isSyncStale). */
+  sync: { stale: number; oldestStaleAt: number | null };
 }
 
-export const ALERT_KEYS = ["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors"] as const;
+export const ALERT_KEYS = ["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale"] as const;
 export type AlertKey = (typeof ALERT_KEYS)[number];
 
 export const ALERT_TITLES: Record<AlertKey, string> = {
@@ -53,6 +55,7 @@ export const ALERT_TITLES: Record<AlertKey, string> = {
   jobs: "задачи планировщика",
   digest_failed: "дайджесты не доставлены",
   ai_errors: "ошибки LLM/STT",
+  sync_stale: "синхронизация календарей",
 };
 
 export interface RuleResult {
@@ -103,6 +106,14 @@ export function evaluateRules(i: AlertInputs): RuleResult[] {
     key: "ai_errors",
     firing: errors >= AI_ERRORS_MIN && errors >= calls * AI_ERROR_RATE,
     detail: `ошибок ${errors} из ${calls} за ${minutes(AI_WINDOW_MS)} мин`,
+  });
+
+  // Пороги — в sync-health.ts (с push сверка раз в сутки, без — опрос); счётчик уже посчитан по ним
+  const { stale, oldestStaleAt } = i.sync;
+  out.push({
+    key: "sync_stale",
+    firing: stale > 0,
+    detail: `устарели: ${stale}${oldestStaleAt === null ? "" : `, старейший синк ${duration(now - oldestStaleAt)} назад`}`,
   });
   return out;
 }
