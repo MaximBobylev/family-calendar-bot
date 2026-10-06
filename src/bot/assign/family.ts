@@ -10,7 +10,7 @@ import { type Day, localToUtc, type Moment, utcToLocal } from "../../dates/calen
 import { dateLabel, escapeHtml, hhmm } from "../format";
 import { notifyMember } from "./notify";
 import { t } from "../messages";
-import { type EventFamily, type FamilyLabel, familyTitle, findMentioned, matchNamed, type Named, responsibleClause } from "./logic";
+import { type EventFamily, type FamilyLabel, familyTitle, findMentioned, householdResponsible, type Named } from "./logic";
 
 export type { EventFamily, FamilyLabel };
 
@@ -59,23 +59,26 @@ export const memberName = (home: Home, userId: string | null): string => home.me
  * `remove` — кусок про ответственного: убрать из названия и из текста для дат. Не в доме — ничего.
  */
 export async function familyHints(ctx: AppContext, userId: string, text: string): Promise<{ family?: EventFamily; remove: string[] }> {
-  const clause = responsibleClause(text);
   const home = await loadHome(ctx.db, userId);
   if (!home) return { remove: [] };
   const family: EventFamily = {};
-  if (clause) {
-    const found = matchNamed(clause.who, home.members);
-    if (found.length === 1) {
-      family.responsibleUserId = found[0]!.userId;
-      family.responsibleName = found[0]!.displayName;
-    } else family.unknownWho = clause.who;
+  const resp = householdResponsible(text, home.members, home.dependents);
+  if (resp) {
+    if (resp.found.length === 1) {
+      family.responsibleUserId = resp.found[0]!.userId;
+      family.responsibleName = resp.found[0]!.displayName;
+    } else family.unknownWho = resp.who;
   }
-  const kid = findMentioned(clause ? text.replace(clause.clause, " ") : text, home.dependents);
+  const remove = resp?.remove ?? [];
+  const kid = findMentioned(
+    remove.reduce((s, r) => s.replace(r, " "), text),
+    home.dependents,
+  );
   if (kid) {
     family.forDependentId = kid.id;
     family.forName = kid.name;
   }
-  return { ...(Object.keys(family).length ? { family } : {}), remove: clause ? [clause.clause] : [] };
+  return { ...(Object.keys(family).length ? { family } : {}), remove };
 }
 
 /** Строки карточки создания: «👤 Отводит: Дима», «🧒 Для: Ваня». */

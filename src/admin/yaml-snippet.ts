@@ -31,7 +31,7 @@ export interface Replay {
 
 export function replay(text: string, now: string, tz: string, intent: string | null): Replay {
   const kind = intent === "list_events" ? "range" : "point";
-  const { usedWords: _u, ...spans } = extractDateSpans(text, now, tz, kind);
+  const { usedWords: _u, pointParts: _p, ...spans } = extractDateSpans(text, now, tz, kind);
   const fragments: ReplayFragment[] = [];
   for (const field of ["point", "range", "duration"] as const) {
     const fragment = spans[field];

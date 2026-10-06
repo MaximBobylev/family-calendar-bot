@@ -57,7 +57,9 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       const durationText = spans.duration ?? intent.duration;
       const title = cleanTitle(
         intent.title,
-        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, durationText, ...fam.remove].filter((x): x is string => !!x),
+        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, ...(spans.pointParts ?? []), durationText, ...fam.remove].filter(
+          (x): x is string => !!x,
+        ),
       );
       const draft: CreateDraft = {
         ...draftFromIntent(intent),

@@ -24,7 +24,7 @@ import { callbackData } from "../keyboards";
 import { t } from "../messages";
 import { withCalendar } from "../with-calendar";
 import { type Home, loadHome } from "./family";
-import { findMentioned, matchNamed, parseAssignPhrase, planAssignmentJobs, roleAlias, taskTitle } from "./logic";
+import { findMentioned, matchNamed, parseAssignPhrase, pickAssignee, planAssignmentJobs, roleAlias, taskTitle } from "./logic";
 import { sendOffers, statusMarkup } from "./notify";
 import { type AssignView, assignmentText, dueLabel, remindersLine } from "./view";
 
@@ -198,7 +198,8 @@ export async function startAssign(
 
   // Кому: по тексту (детерминированно), иначе — как поняла LLM; имена — по другим именам участников с падежами
   const phrase = parseAssignPhrase(text);
-  const who = phrase && "assignee" in phrase ? phrase.assignee : intent.someone ? undefined : intent.assignee;
+  // Имя из текста не нашлось, а исполнитель от LLM нашёлся («Tell Anya …» → «Аня») — берём его (QA R1 NLU, B)
+  const who = phrase && "someone" in phrase ? undefined : pickAssignee(phrase, intent.someone ? undefined : intent.assignee, home.members);
   let assigneeUserId: string | null = null;
   if (forcedAssignee) assigneeUserId = forcedAssignee;
   else if (who) {
@@ -214,7 +215,7 @@ export async function startAssign(
   const spans = extractDateSpans(body, formatMoment(utcToLocal(now, tz)), tz, "point");
   const due = resolveDue(spans.point ?? intent.when, now, tz);
   if (due === "past") return void (await say(t("assignInPast", locale)));
-  const title = taskTitle(intent.task ?? body, [spans.point ?? "", intent.when ?? "", ...(who && intent.task ? [who] : [])]);
+  const title = taskTitle(intent.task ?? body, [spans.point, ...(spans.pointParts ?? []), intent.when, ...(who && intent.task ? [who] : [])]);
   if (!title) return void (await say(t("assignNoTask", locale)));
   const kid = findMentioned(title, home.dependents);
 

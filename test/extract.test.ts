@@ -14,7 +14,7 @@ const doc = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "
 
 describe("extractDateSpans", () => {
   it.each(doc.cases.map((c) => [c.text, c] as const))("%s", (_t, c) => {
-    const { usedWords: _u, ...got } = extractDateSpans(c.text, doc.defaults.now, doc.defaults.tz, c.kind);
+    const { usedWords: _u, pointParts: _p, ...got } = extractDateSpans(c.text, doc.defaults.now, doc.defaults.tz, c.kind);
     expect(got).toEqual(c.expect);
   });
 });
@@ -25,6 +25,15 @@ describe("cleanTitle", () => {
     expect(cleanTitle("встречу", [])).toBeUndefined();
     expect(cleanTitle("Созвон с Петей завтра в 15:30", ["завтра в 15:30"])).toBe("Созвон с Петей");
     expect(cleanTitle("день рождения мамы", [])).toBe("День рождения мамы");
+  });
+  it("куски даты не подряд вырезаются по одному (QA R1 NLU, класс G)", () => {
+    const text = "Пусть Дима в субботу отвезёт Соню на танцы к 11";
+    const spans = extractDateSpans(text, "2026-10-07T10:00", "Europe/Moscow", "point");
+    expect(spans.point).toBe("в субботу к 11");
+    expect(spans.pointParts).toEqual(["в субботу", "к 11"]);
+    expect(cleanTitle("отвезти Соню на танцы к 11", [spans.point!, ...spans.pointParts!])).toBe("Отвезти Соню на танцы");
+    // Кусок, уже вырезанный в составе целого, повторно не ищется: второе «в 15» в названии остаётся
+    expect(cleanTitle("Обзор в 15 завтра в 15", ["завтра в 15", "завтра", "в 15"])).toBe("Обзор в 15");
   });
 });
 

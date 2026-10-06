@@ -54,7 +54,8 @@ export type Intent =
   | ModifyEventIntent
   | { name: "delete_event"; event?: string }
   | { name: "unsupported" }
-  | { name: "multiple" };
+  /** Несколько команд (US-12). parts — разбор каждой: «…, отводит папа» как create + assign — на деле одно событие (QA R1 NLU, A). */
+  | { name: "multiple"; parts?: Intent[] };
 
 const str = (description: string) => ({ type: "string", description });
 
@@ -170,7 +171,9 @@ export const TOOLS: ToolDefinition[] = [
         properties: {
           assignee: str("Who should do it, exactly as said: «мужу», «Аня», «папе». Omit for «кто-то», «кто-нибудь» (anyone)."),
           when: str("Date and time words verbatim: «сегодня в 17», «завтра», «в субботу». Omit if not said."),
-          task: str("What to do, in the infinitive, without date/time words and without the assignee: «забрать Машу из школы», «купить торт»."),
+          task: str(
+            "What to do, in the infinitive, without date/time words and without the assignee: «забрать Машу из школы», «купить торт». In the user's language — never translate.",
+          ),
         },
       },
     },
@@ -205,7 +208,10 @@ Examples:
 "Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)
 "Отмени встречу с Петей в пятницу" → delete_event {"event":"встречу с Петей"}
 "Напомни мужу забрать Машу из школы в 17" → assign_task {"assignee":"мужу","when":"в 17","task":"забрать Машу из школы"}
-"Кто-то должен отвезти Ваню на плавание в субботу" → assign_task {"when":"в субботу","task":"отвезти Ваню на плавание"}`;
+"Кто-то должен отвезти Ваню на плавание в субботу" → assign_task {"when":"в субботу","task":"отвезти Ваню на плавание"}
+"Кто отвезёт Машу к стоматологу в четверг в 15?" → assign_task {"when":"в четверг в 15","task":"отвезти Машу к стоматологу"}   (asking who will do it = a task for anyone)
+"Стоматолог Вани в четверг в 16, отводит папа" → create_event {"start":"в четверг в 16","title":"Стоматолог Вани"}   (who takes the child is part of the event, not a separate task)
+"Tell Anya to buy milk" → assign_task {"assignee":"Anya","task":"buy milk"}   (task stays in the user's language)`;
 
 export interface ParsedIntent {
   intent: Intent;
@@ -274,7 +280,7 @@ export class LlmChainError extends Error {
 /** Вызовы tools → интент (отдельно — чтобы замеры могли переоценить сохранённые ответы без новых вызовов). */
 export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   // В MVP — одна команда на сообщение (US-12)
-  if (toolCalls.length > 1) return { name: "multiple" };
+  if (toolCalls.length > 1) return { name: "multiple", parts: toolCalls.map((c) => intentFromCalls([c])) };
   const call = toolCalls[0];
   if (call?.name === "list_events" && typeof call.arguments.range === "string" && call.arguments.range.trim()) {
     const calendar = typeof call.arguments.calendar === "string" && call.arguments.calendar.trim() ? call.arguments.calendar : undefined;

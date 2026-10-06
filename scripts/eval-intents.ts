@@ -20,7 +20,7 @@ import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from
 import { parseDateFragment } from "../src/dates";
 import { intentFromCalls, parseIntent, type Intent } from "../src/nlu/intents";
 import { safeParse, LlmHttpError } from "../src/nlu/llm";
-import { assignOverride, findMentioned, matchNamed, parseAssignPhrase, responsibleClause, taskTitle } from "../src/bot/assign/logic";
+import { assignOverride, findMentioned, matchNamed, householdResponsible, parseAssignPhrase, pickAssignee, taskTitle } from "../src/bot/assign/logic";
 import { detailHints } from "../src/nlu/detail-hints";
 import { effectiveIntent, lookupQuery, NEXT_WORD } from "../src/nlu/intent-overrides";
 import { VARIANTS } from "./nlu-variants";
@@ -172,7 +172,9 @@ function resolvePoint(text: string | undefined): string | null {
 /** Как startAssign: кому (по тексту, иначе от LLM), срок из текста после исполнителя, название, ребёнок. */
 function assignOutcome(text: string, intent: Extract<Intent, { name: "assign_task" }>, out: Outcome): void {
   const phrase = parseAssignPhrase(text);
-  const who = phrase && "assignee" in phrase ? phrase.assignee : intent.someone ? undefined : intent.assignee;
+  const llmWho = intent.someone ? undefined : intent.assignee;
+  const who =
+    phrase && "someone" in phrase ? undefined : HOME ? pickAssignee(phrase, llmWho, HOME.members) : phrase && "assignee" in phrase ? phrase.assignee : llmWho;
   if (!who) out.assignee = null;
   else if (!HOME) out.assignee = `?${who}`;
   else {
@@ -182,7 +184,7 @@ function assignOutcome(text: string, intent: Extract<Intent, { name: "assign_tas
   const body = phrase?.rest ?? text;
   const spans = extractDateSpans(body, now, tz, "point");
   out.due = resolvePoint(spans.point ?? intent.when);
-  out.task = taskTitle(intent.task ?? body, [spans.point ?? "", intent.when ?? "", ...(who && intent.task ? [who] : [])]);
+  out.task = taskTitle(intent.task ?? body, [spans.point, ...(spans.pointParts ?? []), intent.when, ...(who && intent.task ? [who] : [])]);
   out.forWhom = (out.task && HOME && findMentioned(out.task, HOME.dependents)?.name) || null;
 }
 
@@ -211,11 +213,11 @@ function downstream(c: Case, intent: Intent): Outcome {
   if (eff.name === "create_event") {
     // US-92: «…, отводит папа» — ответственный; ребёнок в тексте — «для кого» (как familyHints)
     // Не в доме — familyHints ничего не делает (как в боте)
-    const clause = HOME ? responsibleClause(c.text) : null;
-    const famText = clause ? c.text.replace(clause.clause, " ") : c.text;
+    const resp = HOME ? householdResponsible(c.text, HOME.members, HOME.dependents) : null;
+    const famRemove = resp?.remove ?? [];
+    const famText = famRemove.reduce((s, r) => s.replace(r, " "), c.text);
     if (HOME) {
-      const who = clause ? matchNamed(clause.who, HOME.members) : [];
-      out.responsible = clause ? (who.length === 1 ? who[0]!.name : `?${clause.who}`) : null;
+      out.responsible = resp ? (resp.found.length === 1 ? resp.found[0]!.name : `?${resp.who}`) : null;
       out.forWhom = findMentioned(famText, HOME.dependents)?.name ?? null;
     }
     const rec = extractRecurrenceSpan(famText, now, tz);
@@ -226,7 +228,7 @@ function downstream(c: Case, intent: Intent): Outcome {
     out.start = rec ? null : resolvePoint(startText);
     out.title = cleanTitle(
       eff.title,
-      [rec?.span, ...(rec?.remove ?? []), rec ? eff.start : undefined, startText, durationText, ...(clause ? [clause.clause] : [])].filter(
+      [rec?.span, ...(rec?.remove ?? []), rec ? eff.start : undefined, startText, ...(spans.pointParts ?? []), durationText, ...famRemove].filter(
         (x): x is string => !!x,
       ),
     );

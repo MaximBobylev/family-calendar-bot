@@ -41,3 +41,20 @@ describe("lookupQuery", () => {
     expect(lookupQuery(text)).toBe(expected);
   });
 });
+
+describe("effectiveIntent: «следующий X» без даты — поиск, а не создание (QA R1 NLU, класс I)", () => {
+  const create = (start: string): Intent => ({ name: "create_event", start });
+  it.each([
+    ["Next call with Petya", create("Next call")],
+    ["Следующий созвон с Петей", create("")],
+  ] as const)("%s → find_event", (text, intent) => {
+    expect(effectiveIntent(text, intent)).toEqual({ name: "find_event", next: true });
+  });
+  it.each([
+    ["Следующий созвон с Петей в пятницу в 15", create("в пятницу в 15")],
+    ["Поставь следующую встречу с Петей", create("")],
+    ["Созвон с Петей на следующей неделе", create("на следующей неделе")],
+  ] as const)("%s — создание", (text, intent) => {
+    expect(effectiveIntent(text, intent)).toEqual(intent);
+  });
+});

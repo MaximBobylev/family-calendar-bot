@@ -62,3 +62,11 @@ describe("detailHints: место и описание (US-41)", () => {
     expect(detailHints("Перенеси планёрку на 11")).toEqual({ rest: "Перенеси планёрку на 11" });
   });
 });
+
+describe("detailHints: «напоминай / напоминать» (QA R1 NLU, класс D)", () => {
+  it("тоже напоминание у события", () => {
+    expect(detailHints("Напоминай про танцы Сони за час").reminders).toEqual({ overrides: [{ method: "popup", minutes: 60 }] });
+    expect(isDetailChange("Напоминать о встрече за 15 минут")).toBe(true);
+    expect(isDetailChange("Напоминай мужу каждый день выносить мусор")).toBe(false);
+  });
+});

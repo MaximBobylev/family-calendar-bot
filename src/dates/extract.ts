@@ -10,6 +10,9 @@ import type { ParseResult, ValueKind } from "./types";
 export interface ExtractedSpans {
   /** Все куски-моменты по порядку, склеенные: «в пятницу» + «в 15» → «в пятницу в 15». */
   point?: string;
+  /** Куски, из которых собран point, по отдельности: в тексте они могут стоять не подряд («в субботу … к 11») —
+   * из названия их вырезают по одному (QA R1 NLU, класс G). */
+  pointParts?: string[];
   /** Период для чтения расписания. */
   range?: string;
   duration?: string;
@@ -64,9 +67,12 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
   const out: ExtractedSpans = { usedWords: used };
   // Склейка нескольких кусков должна разбираться целиком, иначе берём первый
   if (joined) {
-    const value = parses(joined, kind) ? joined : points[0]!;
-    if (kind === "point") out.point = value;
-    else out.range = value;
+    const whole = parses(joined, kind);
+    const value = whole ? joined : points[0]!;
+    if (kind === "point") {
+      out.point = value;
+      out.pointParts = whole ? points : [points[0]!];
+    } else out.range = value;
   }
   if (duration) out.duration = duration;
   return out;
@@ -98,10 +104,26 @@ export function looksAllDay(text: string): boolean {
 /** Название без слов, ушедших в даты; пустое или служебное («встреча») — нет названия. */
 const GENERIC_TITLES = new Set(["встреча", "встречу", "событие", "мероприятие", "meeting", "event", "напоминание"]);
 
+/**
+ * Вырезать куски дат из текста, каждый по отдельности (первое вхождение, без регистра). Кусок, который уже вошёл в
+ * вырезанный ранее («в субботу» после «в субботу к 11»), пропускаем — не задеть такое же слово в другом месте.
+ */
+export function removeFragments(text: string, fragments: (string | undefined)[]): string {
+  let t = text;
+  const removed: string[] = [];
+  for (const f of fragments) {
+    if (!f?.trim() || removed.some((r) => r.toLowerCase().includes(f.toLowerCase()))) continue;
+    const re = new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (!re.test(t)) continue;
+    t = t.replace(re, " ");
+    removed.push(f);
+  }
+  return t;
+}
+
 export function cleanTitle(title: string | undefined, dateFragments: string[]): string | undefined {
   if (!title) return undefined;
-  let t = title;
-  for (const f of dateFragments) t = t.replace(new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), " ");
+  let t = removeFragments(title, dateFragments);
   t = t
     .replace(/\s+/g, " ")
     .trim()
