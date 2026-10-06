@@ -34,8 +34,11 @@ const VOICE_TIMEOUT_MS = 25_000;
 
 const VOICE_RULES = `
 The user's message is a VOICE recording (audio). In EVERY tool call fill "transcript" with the exact verbatim transcript of what was said:
-same language, every word as heard, numbers as heard, do not convert or normalize dates/times, do not fix grammar.
-If nothing intelligible was said (silence, noise, music), call no_speech.`;
+same language, every word as heard, do not fix grammar.
+Times and dates: keep them EXACTLY in the form spoken — words stay words («полвосьмого», «в три часа дня», «без четверти пять»), digits only if the speaker clearly said digits; never convert or "correct" a time.
+Never translate: an English phrase is transcribed in English, a Russian one in Russian.
+If a word is unclear, write how it sounds; never invent words, names or whole phrases.
+If speech is unintelligible or drowned in noise/background talk, or nothing was said, call no_speech instead of guessing.`;
 
 /** Наши tools + обязательный transcript + no_speech. */
 export const VOICE_TOOLS: ToolDefinition[] = [

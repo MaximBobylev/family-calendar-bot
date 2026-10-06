@@ -1,0 +1,34 @@
+# Фразы синтетического голосового набора (docs/research/voice-recording-script.md, «15 фраз по тексту» + English).
+# Переносимые данные (ADR-0006): озвучивает scripts/voice-synth.sh (edge-tts + ffmpeg), замеряет scripts/eval-voice.ts.
+#   id       — r01…r15 (русский), e01…e05 (английский); имя файла: <id>-<голос>-<условие>.ogg
+#   intent   — ожидаемый интент ПОСЛЕ детерминированных поправок (effectiveIntent), как в testdata/nlu/intents.yaml
+#   keywords — слова, которые должны пережить распознавание (имена, глаголы-команды, редкие слова);
+#              сравнение без регистра, ё=е, с допуском на окончания (sameWord из src/calendar/match.ts)
+#   title / calendar — справочно (не обязательны)
+# Итоги замера — docs/research/voice-synth-eval.md.
+phrases:
+  - { id: r01, lang: ru, intent: create_event, keywords: ["созвон", "Петей", "полчаса"], title: "Созвон с Петей", text: "Поставь созвон с Петей завтра в пятнадцать тридцать на полчаса" }
+  - { id: r02, lang: ru, intent: delete_event, keywords: ["отмени", "рисование", "Ани"], text: "Отмени рисование у Ани в четверг" }
+  - { id: r03, lang: ru, intent: modify_event, keywords: ["перенеси", "стоматолога", "Вани", "пятницу"], text: "Перенеси стоматолога Вани на пятницу на десять утра" }
+  - { id: r04, lang: ru, intent: list_events, keywords: ["послезавтра"], text: "Что у меня послезавтра?" }
+  - { id: r05, lang: ru, intent: create_event, keywords: ["вторник", "четверг", "плавание", "Сони"], title: "Плавание у Сони", text: "Каждый вторник и четверг в семь вечера плавание у Сони" }
+  - { id: r06, lang: ru, intent: create_event, keywords: ["ужин", "Кирилла", "Ксюши", "полвосьмого"], title: "Ужин у Кирилла и Ксюши", text: "Ужин у Кирилла и Ксюши в субботу в полвосьмого" }
+  - { id: r07, lang: ru, intent: modify_event, keywords: ["сдвинь", "планёрку"], text: "Сдвинь планёрку на час позже" }
+  - { id: r08, lang: ru, intent: create_event, keywords: ["забрать", "посылку", "Озоне"], title: "Забрать посылку в Озоне", text: "Забрать посылку в Озоне завтра с утра" }
+  - { id: r09, lang: ru, intent: create_event, keywords: ["семейный", "родительское", "собрание", "среду"], title: "Родительское собрание", calendar: "Семья", text: "Добавь в семейный календарь родительское собрание в среду в шесть" }
+  - { id: r10, lang: ru, intent: create_event, keywords: ["созвон", "тимлидом"], title: "Созвон по синку с тимлидом", text: "Созвон по синку с тимлидом в три пи эм" }
+  - { id: r11, lang: ru, intent: find_event, keywords: ["следующая", "встреча"], text: "Какая у меня следующая встреча?" }
+  - { id: r12, lang: ru, intent: delete_event, keywords: ["отмени", "последнее"], text: "Отмени последнее" }
+  - { id: r13, lang: ru, intent: find_event, keywords: ["когда", "встреча", "Тимуром"], text: "Когда у меня встреча с Тимуром?" }
+  - { id: r14, lang: ru, intent: create_event, keywords: ["запиши", "Машу", "логопеду", "понедельник"], title: "Маша к логопеду", text: "Запиши Машу к логопеду на понедельник в шестнадцать сорок пять" }
+  - { id: r15, lang: ru, intent: delete_event, keywords: ["удали", "обед", "пятницу"], text: "Перенеси, ой, не перенеси, а удали обед в пятницу" }
+  - { id: e01, lang: en, intent: create_event, keywords: ["call", "Anna", "tomorrow"], title: "Call with Anna", text: "Schedule a call with Anna tomorrow at three thirty for half an hour" }
+  - { id: e02, lang: en, intent: list_events, keywords: ["calendar", "Friday"], text: "What's on my calendar on Friday?" }
+  - { id: e03, lang: en, intent: modify_event, keywords: ["move", "dentist", "Monday"], text: "Move the dentist to next Monday at nine a.m." }
+  - { id: e04, lang: en, intent: delete_event, keywords: ["cancel", "lunch", "Mike", "Thursday"], text: "Cancel lunch with Mike on Thursday" }
+  - { id: e05, lang: en, intent: create_event, keywords: ["Wednesday", "book", "club"], title: "Book club", text: "Every other Wednesday at six p.m. book club" }
+# Записи без речи: команда из них — ошибка (ожидается no_speech / пусто / галлюцинация из стоп-листа).
+no_speech:
+  - { id: n01, kind: silence, seconds: 3 }
+  - { id: n02, kind: pink, seconds: 3 }
+  - { id: n03, kind: babble, seconds: 3 }

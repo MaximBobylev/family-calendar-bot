@@ -105,6 +105,9 @@ async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Tra
 const TRANSCRIPT_FIXES: [RegExp, string][] = [
   [/(?<!\p{L})от\s+м[еи]н(и|ь|ей)(?!\p{L})/giu, "отмени"],
   [/(?<!\p{L})созван(?!\p{L})/giu, "созвон"],
+  // Синтетический замер 2026-10-06 (docs/research/voice-synth-eval.md): стабильно, 6 из 6
+  [/(?<!\p{L})тем\s+лидом(?!\p{L})/giu, "тимлидом"],
+  [/(?<!\p{L})спеты(?!\p{L})/giu, "с Петей"],
 ];
 
 export function fixTranscript(text: string): string {
