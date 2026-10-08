@@ -35,6 +35,15 @@ export const createMessages = {
   renamed: { ru: "Готово, назвал «{title}».", en: "Done, renamed to “{title}”." },
   askWhen: { ru: "Когда поставить? Например: «завтра в 15».", en: "When? For example: “tomorrow at 3pm”." },
   askTime: { ru: "Во сколько?", en: "What time?" },
+  // tech-debt #26: время в чужом поясе — в карточке оба времени; незнакомый пояс — спросить, а не отбросить
+  zoneNote: {
+    ru: "🌍 {time} {zone} = {myTime} по вашему времени ({tz})",
+    en: "🌍 {time} {zone} = {myTime} your time ({tz})",
+  },
+  askZoneTime: {
+    ru: "Не знаю такой часовой пояс («{zone}»). Когда это по вашему времени? Например: «завтра в 16».",
+    en: "I don't know that time zone (“{zone}”). When is it in your time? For example: “tomorrow at 4pm”.",
+  },
   inPast: { ru: "Это время уже прошло. Когда поставить?", en: "That time has already passed. When should I schedule it?" },
   durationUnparseable: { ru: "Не понял длительность. Например: «на полчаса», «на два часа».", en: "I didn't get the duration. For example: “for 30 minutes”." },
   calendarReadOnly: { ru: "В календарь «{name}» нельзя записывать.", en: "The calendar “{name}” is read-only." },

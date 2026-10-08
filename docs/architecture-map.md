@@ -46,6 +46,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Справка `/help`, приветствие `/start` | `src/bot/help.ts`, тексты — `src/bot/messages/help.ts`; меню команд — `scripts/deploy.ts` (`setMyCommands`) |
 | Тексты ответов бота | `src/bot/messages/*.ts` — словарь RU/EN по областям (новый текст — в файл своей области), `t()` и `MessageKey` — `src/bot/messages.ts`; форматирование — `src/bot/format.ts`, `format-events.ts` |
 | Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/db/card-status.ts` (статусы, повтор), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`, `RETRYABLE`) |
+| Качество дат: сверка с LLM и правки после карточки | лог `date_check` (`bot/route-intent.ts`, `bot/ingest.ts`), `date_fix` — `src/bot/date-fix.ts`, сводка — `/admin/usage#date-fix` |
 | Учёт функций (US-64) | `src/db/features.ts` (`Feature`, `recordFeature` — вызывать после успешного действия), сводка — `/admin/usage` |
 | Настройки пользователя | `src/bot/settings/*` (экраны, кнопки, ввод текстом, подписи), `src/db/settings.ts` |
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
@@ -108,6 +109,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/assign/family.ts` | Дом с участниками и детьми (`loadHome`), подсказки «отводит / для кого» при создании, метки в списках (`familyLabeler`), личное «Отводите вы» ответственному (`notifyResponsible`) |
 | `bot/create-event.ts` | US-30/31/32: сценарий создания — календарь, «во сколько?», карточка, пересечения, подтверждение, вопрос о названии |
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
+| `bot/date-fix-logic.ts`, `bot/date-fix.ts` | Метрика `date_fix` (tech-debt #26): правка даты сразу после карточки — классификация (чистая) и хуки создания / изменения / отмены |
 | `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
 | `bot/modify-event.ts` | US-40/41/42/43: сценарий изменения — проверки, карточка, подтверждение «эту/всю серию», отмена |
 | `bot/modify-logic.ts` | Чистый `computeChange`: перенос, длительность, переименование, место, описание, напоминания; тип карточки |
@@ -146,7 +148,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `dates/point.ts` | Грамматика момента и периода (≈940 строк, табличная) |
 | `dates/duration.ts`, `recurrence.ts` | Длительности; правила повторения |
 | `dates/rrule.ts` | Ближайшие даты серии, RRULE для Google, описание словами |
-| `dates/extract.ts` | Фрагменты дат из всего сообщения, `cleanTitle`, `looksAllDay` |
+| `dates/extract.ts` | Фрагменты дат из всего сообщения, `cleanTitle`, `looksAllDay`; `unsure` / `unknownZone` — не угадывать |
+| `dates/zone.ts` | Явный пояс во фрагменте: «по Киеву», «UTC+4», «London time», «по местному» (`readZone`, `namedZone` для карточки) |
 | `dates/calendar.ts`, `timezone.ts`, `daily.ts` | Календарная арифметика и пояса; ввод пояса; «ЧЧ:ММ каждый день» |
 | **calendar/** | Доменная модель календаря (ADR-0003) |
 | `calendar/model.ts` | `CalendarEvent`, `CalendarProvider`, провайдер-нейтральные ошибки |
@@ -162,7 +165,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | **voice/** | `understand.ts` — мультимодальное «переслушивание» (VOICE_CHAIN); `signals.ts` — когда переслушивать |
 | **vision/** | `understand.ts` — US-66: картинка → видимый текст + `create_event`/`no_event` (Gemini из VOICE_CHAIN, `config.vision`) |
 | **ics/** | `parse.ts` — разбор `.ics` (RFC 5545: свёртка, TZID, DATE, DURATION, RRULE; чистый); `convert.ts` — событие файла → время в поясе пользователя |
-| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `assignments.ts` (поручения, их сообщения, задачи напоминаний), `event-meta.ts` (ответственный и «для кого»), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
+| **db/** | Доступ к D1: `users.ts` (пользователи, `deleteUserData`), `accounts.ts` (OAuth state, аккаунты, календари, кеш access token: `googleTokens`/`saveAccessToken`), `conversations.ts` (диалог с оптимистичной записью, карточки: `claimCard`/`finishCard`), `settings.ts`, `households.ts` (дом, участники, дети, общие календари, приглашения, привязка чатов), `inline.ts` (токены inline-карточек, счётчик нажатий, US-95), `assignments.ts` (поручения, их сообщения, задачи напоминаний), `event-meta.ts` (ответственный и «для кого»), `usage.ts` (журнал и учёт), `features.ts` (US-64: учёт использованных функций, `recordFeature`), `date-metrics.ts` (метрика правок даты `date_fix`, tech-debt #26), `ops-state.ts`, `alert-state.ts` (состояние алертов и их счётчики) |
 | `db/card-status.ts` | Машина состояний карточки `open → executing → done/failed` и решение для повторного нажатия (чистый, tech-debt #6) |
 | **jobs/** | `digest.ts` — US-70 сводки «Сегодня» (утро), «Завтра» (21:00), «Неделя» (вс 20:00 / пн 08:00): виды задач `digest`, `digest_tomorrow`, `digest_week`; `family-digest.ts` — US-93: чьи календари (участник без Google — общие календари дома), «Ваши дела сегодня»; `assign.ts` — US-91: напоминания, эскалация, «истекло» |
 | **sync/** | Синхронизация Google и то, что на ней держится (ADR-0005 §2) |

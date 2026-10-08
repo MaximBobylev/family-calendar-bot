@@ -75,6 +75,7 @@ export async function deleteUserData(db: D1Database, userId: string, telegramId:
     db.prepare("DELETE FROM bot_writes WHERE author_user_id = ?1").bind(userId),
     db.prepare("DELETE FROM usage_events WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM feature_usage WHERE user_id = ?1").bind(userId),
+    db.prepare("DELETE FROM date_metrics WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM entitlements WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM oauth_states WHERE user_id = ?1").bind(userId),
     db.prepare("DELETE FROM calendar_aliases WHERE user_id = ?1").bind(userId),

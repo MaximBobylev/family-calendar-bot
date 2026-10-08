@@ -20,6 +20,7 @@ import {
   type TitleQuestionPayload,
 } from "./create-logic";
 import { cardBody, createCard } from "./create-view";
+import { dateFixOnCancelled, dateFixOnCreated } from "./date-fix";
 import { dateLabel, escapeHtml, hhmm } from "./format";
 import { familyCardLines, notifyResponsible, saveEventFamily } from "./assign/family";
 import { creatorNote, noteCreator } from "./household/scope";
@@ -66,7 +67,8 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   if (res.kind === "ask") {
     // Ответ пользователя дополнит этот же черновик (US-12)
     // Второе мнение LLM о дате — только для первой карточки: ответ на вопрос дополняет наш кусок
-    const { altStartText: _alt, ...rest } = a.draft;
+    // Вопрос о незнакомом поясе — один раз: ответ — уже время по своему поясу
+    const { altStartText: _alt, unknownZone: _zone, ...rest } = a.draft;
     const draft = res.keepStart ? rest : { ...rest, startText: undefined };
     await mergeDialogState(
       ctx.db,
@@ -75,7 +77,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       { awaiting: { kind: "create_time", draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } },
       ctx.clock.now(),
     );
-    await ctx.telegram.sendMessage(chatId, t(res.question, locale));
+    await ctx.telegram.sendMessage(chatId, t(res.question, locale, { zone: a.draft.unknownZone ?? "" }));
     return;
   }
 
@@ -89,6 +91,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       options: res.options,
       ...(namedByAlias(cal, a.draft.calendar) ? { viaAlias: true } : {}),
       ...(a.draft.family ? { family: a.draft.family } : {}),
+      ...(a.draft.dateCheck ? { dateCheck: a.draft.dateCheck } : {}),
     } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
@@ -148,6 +151,7 @@ export async function confirmCreate(
 
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", locale));
+    await dateFixOnCancelled(ctx, action, action.payload);
     return false;
   }
   const o = options[Number(choice.slice(1))];
@@ -198,6 +202,8 @@ export async function confirmCreate(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
+  // Метрика date_fix (tech-debt #26): другой вариант / пересоздание на другую дату; запомнить карточку для «нет, в 16»
+  await dateFixOnCreated(ctx, action, action.payload, Number(choice.slice(1)), created.ref);
   const features: Feature[] = ["create", ...(o.series ? ["recurring" as const] : []), ...(action.payload.viaAlias ? ["alias" as const] : [])];
   await recordFeature(ctx.db, user.id, features, ctx.clock.now());
 

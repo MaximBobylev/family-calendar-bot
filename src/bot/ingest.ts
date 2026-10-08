@@ -82,6 +82,7 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
     ...(location ? { location } : {}),
     ...(intent?.allDay || looksAllDay(title ?? "") ? { allDay: true } : {}),
     description: sourceDescription(src.sourceLine, src.quote ?? src.text, (url) => t("ingestLink", user.locale, { url })),
+    dateCheck: { source: src.useLlm ? "forward" : "image", agreement: check.agreement },
   };
   if (!startText) {
     // Даты нет — спросить «Когда?»; ответ дополнит этот же черновик (dialog.ts, US-12)

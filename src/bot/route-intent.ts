@@ -56,16 +56,24 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       const rec = extractRecurrenceSpan(famText, localNow, user.home_tz);
       const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.home_tz, "point");
       // Сверка с `start` от LLM (ревью 2026-10-08): разные даты — варианты кнопками
-      const check = rec ? undefined : startCheck(famText, spans.point, intent.start);
-      if (check) log("date_check", { source: "message", agreement: check.agreement, unsure: spans.unsure });
+      // Незнакомый пояс («в 15 по Варне»): `start` от LLM его тоже не пересчитает — спрашиваем время по своему поясу
+      const check = rec ? undefined : startCheck(famText, spans.point, spans.unknownZone ? undefined : intent.start);
+      if (check) log("date_check", { source: "message", agreement: check.agreement, unsure: spans.unsure, unknown_zone: spans.unknownZone ? true : undefined });
       const start = check?.pick ?? {};
       const startText = start.startText;
       const durationText = spans.duration ?? intent.duration;
       const title = cleanTitle(
         intent.title,
-        [rec?.span, ...(rec?.remove ?? []), rec ? intent.start : undefined, startText, ...(spans.pointParts ?? []), durationText, ...fam.remove].filter(
-          (x): x is string => !!x,
-        ),
+        [
+          rec?.span,
+          ...(rec?.remove ?? []),
+          rec ? intent.start : undefined,
+          startText,
+          ...(spans.pointParts ?? []),
+          durationText,
+          spans.unknownZone,
+          ...fam.remove,
+        ].filter((x): x is string => !!x),
       );
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
@@ -76,6 +84,8 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
         durationText,
         allDay: intent.allDay || looksAllDay(famText) || undefined,
         family: fam.family,
+        unknownZone: spans.unknownZone,
+        dateCheck: check ? { source: "message", agreement: check.agreement } : undefined,
       };
       for (const k of Object.keys(draft) as (keyof CreateDraft)[]) if (draft[k] === undefined) delete draft[k];
       await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));

@@ -1,5 +1,6 @@
 // Разговоры, состояние диалога и карточки с кнопками (ADR-0003, US-05, US-60).
 
+import type { DateFixWatch } from "../bot/date-fix-logic";
 import { type CardVerdict, cardVerdict } from "./card-status";
 
 export const CARD_TTL_MS = 15 * 60 * 1000;
@@ -38,6 +39,8 @@ export interface DialogState {
   lastVoice?: { fileId: string; transcript: string; at: number; durationSec: number; reheard?: boolean };
   /** Последнее действие для «отмени последнее» (US-61): карточка отмены или причина, почему нельзя. */
   lastUndo?: { actionId?: string; at: number; notUndoable?: "delete" | "decline" };
+  /** Последняя карточка создания — поймать правку её даты сразу после (метрика date_fix, tech-debt #26). */
+  dateFix?: DateFixWatch;
 }
 
 /** Окно контекста = окно отмены (US-60). */

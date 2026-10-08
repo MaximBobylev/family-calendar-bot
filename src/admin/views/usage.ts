@@ -3,7 +3,7 @@
 
 import type { Feature } from "../../db/features";
 import type { UsageLimits } from "../../limits";
-import type { FeatureRow, InlineStats, ModelUsage, SourceUsage, UserUsage } from "../queries";
+import type { DateFixDay, FeatureRow, InlineStats, ModelUsage, SourceUsage, UserUsage } from "../queries";
 import { type FEATURE_LABELS, featureLabel, SOURCE_LABELS } from "../labels";
 import { esc, fmtTime, raw, table, usd } from "./layout";
 
@@ -23,6 +23,8 @@ export interface UsageView {
   features: FeatureRow[];
   bySource: SourceUsage[];
   inline: InlineStats;
+  /** Правки даты после карточки по дням (tech-debt #26). */
+  dateFixes: DateFixDay[];
   limits: UsageLimits;
 }
 
@@ -69,11 +71,45 @@ ${table(
   v.cards.map((c) => [c.kind, c.status, c.n]),
 )}
 ${ingestSection(v)}
+${dateFixSection(v.dateFixes)}
 <h2>Функции (US-64, за всё время)</h2>
 ${table(
   ["Функция", "Ключ", "Пользователей", "Раз", "Впервые"],
   v.features.map((f) => [featureLabel(f.feature), raw(`<code>${esc(f.feature)}</code>`), f.users, f.uses, fmtTime(f.first_at)]),
 )}`;
+}
+
+/** Доля правок от созданных: «3 / 40 (7,5%)». */
+const share = (n: number, of: number) => (of ? `${n} / ${of} (${((n / of) * 100).toFixed(1).replace(".", ",")}%)` : String(n));
+
+function dateFixSection(days: DateFixDay[]): string {
+  const total = (f: (d: DateFixDay) => number) => days.reduce((a, d) => a + f(d), 0);
+  const row = (label: string, d: Omit<DateFixDay, "day">) => [
+    label,
+    d.created,
+    raw(`<span class="${d.created && d.fixes / d.created > 0.05 ? "err" : ""}">${share(d.fixes, d.created)}</span>`),
+    `${d.option_ours} / ${d.option_llm}`,
+    d.modify,
+    d.recreate,
+    `${d.fixes_disagreed} / ${d.created_disagreed}`,
+  ];
+  const sum: Omit<DateFixDay, "day"> = {
+    created: total((d) => d.created),
+    created_disagreed: total((d) => d.created_disagreed),
+    fixes: total((d) => d.fixes),
+    option_ours: total((d) => d.option_ours),
+    option_llm: total((d) => d.option_llm),
+    modify: total((d) => d.modify),
+    recreate: total((d) => d.recreate),
+    fixes_disagreed: total((d) => d.fixes_disagreed),
+  };
+  return `<h2 id="date-fix">Даты: правки после карточки (date_fix, 14 дней)</h2>
+${table(
+  ["День (UTC)", "Создано", "Правок / создано", "Другой вариант: наш / LLM", "Изменили время", "Пересоздали", "Правки / создано при расхождении с LLM"],
+  [...days.map((d) => row(d.day, d)), ...(days.length ? [row("Итого", sum)] : [])],
+  "карточек создания не было",
+)}
+<p class="muted">Правка — в окне карточки (15 мин): выбран не первый вариант даты, изменено время только что созданного события или отменили и создали то же на другую дату. Расхождение — сверка <code>date_check</code> дала <code>differ</code> / <code>llm_invented</code>. Больше 5% правок — повод для шага 4 ревью дат (структура от LLM).</p>`;
 }
 
 function ingestSection(v: UsageView): string {

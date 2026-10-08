@@ -10,6 +10,7 @@ import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import { shiftAssignmentsForEvent } from "./assign/answers";
 import type { AppContext } from "./context";
+import { dateFixOnModified } from "./date-fix";
 import { locateEvent } from "./find-event";
 import { escapeHtml } from "./format";
 import { attachUndoMessage, recordUndo, type UndoRecord } from "./undo";
@@ -201,6 +202,8 @@ export async function confirmModify(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
+  // «нет, в 16» сразу после создания — правка даты карточки (метрика date_fix, tech-debt #26)
+  await dateFixOnModified(ctx, action, p.ref, !!o.start);
   await recordFeature(ctx.db, user.id, "modify", ctx.clock.now());
   return true;
 }

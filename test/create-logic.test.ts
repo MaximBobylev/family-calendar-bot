@@ -149,3 +149,42 @@ describe("сверка даты с LLM (ревью 2026-10-08, шаг 1)", () =>
   it("у нас только день, start не помогает — спросить время", () =>
     expect(resolve({ startText: "в пятницу", altStartText: "по Киеву" })).toEqual({ kind: "ask", question: "askTime", keepStart: true }));
 });
+
+describe("время в другом поясе и метки вариантов (tech-debt #26)", () => {
+  it("«по Киеву» — момент пересчитан, пояс сказанного — в варианте для карточки", () => {
+    const [o] = options(resolve({ startText: "3 ноября в 15:00 по Киеву" }));
+    expect(span(o!)).toBe("2026-11-03T16:00 – 2026-11-03T17:00");
+    expect(o!.zone).toEqual({ tz: "Europe/Kiev", ru: "по Киеву", en: "Kyiv time" });
+  });
+
+  it("свой пояс или «по местному» — без пометки", () => {
+    expect(options(resolve({ startText: "завтра в 15 по Москве" }))[0]!.zone).toBeUndefined();
+    expect(options(resolve({ startText: "завтра в 15 по местному" }))[0]!.zone).toBeUndefined();
+  });
+
+  it("незнакомый пояс без даты — вопрос о времени по своему поясу", () =>
+    expect(resolve({ unknownZone: "по Варне" })).toEqual({ kind: "ask", question: "askZoneTime", keepStart: false }));
+
+  it("вариант из `start` от LLM помечен — его выбор считается правкой даты", () => {
+    const [ours, llm] = options(resolve({ startText: "завтра в 15", altStartText: "в пятницу в 15" }));
+    expect(ours!.fromLlm).toBeUndefined();
+    expect(llm!.fromLlm).toBe(true);
+  });
+});
+
+describe("начало серии при разных «сейчас» (корпус с разными «сейчас», tech-debt #26)", () => {
+  const first = (text: string, at: string, zone = tz) => {
+    const r = resolveDraft({ recurrenceText: text }, parseLocal(at), zone, main, "ru", 60);
+    return r.kind === "options" ? formatMoment(r.options[0]!.start!) : r.kind === "reply" ? r.text : r.question;
+  };
+  it("в понедельник 07:00 «каждый понедельник в 10» — сегодня", () => expect(first("каждый понедельник в 10", "2026-10-12T07:00")).toBe("2026-10-12T10:00"));
+  it("в вс 23:50 — завтрашний понедельник", () => expect(first("каждый понедельник в 10", "2026-10-18T23:50")).toBe("2026-10-19T10:00"));
+  it("в пт 23:30 «каждую пятницу в 18» — следующая пятница", () => expect(first("каждую пятницу в 18", "2026-10-16T23:30")).toBe("2026-10-23T18:00"));
+  it("31 декабря 18:00 «каждый день в 9» — 1 января", () => expect(first("каждый день в 9", "2026-12-31T18:00")).toBe("2027-01-01T09:00"));
+  it("28 февраля 12:00 «каждый день в 8 до 1 марта» — одна дата, 1 марта", () =>
+    expect(first("каждый день в 8 до 1 марта", "2027-02-28T12:00")).toBe("2027-03-01T08:00"));
+  it("31 декабря 18:00 «по будням в 9 до конца года» — дат нет (до сегодня, 9:00 прошло)", () =>
+    expect(first("по будням в 9 до конца года", "2026-12-31T18:00")).toContain("ни одной даты"));
+  it("в день перехода времени (Берлин, 01:30) «каждое воскресенье в 10» — сегодня", () =>
+    expect(first("каждое воскресенье в 10", "2026-10-25T01:30", "Europe/Berlin")).toBe("2026-10-25T10:00"));
+});

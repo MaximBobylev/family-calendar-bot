@@ -81,3 +81,17 @@ cases:
   - { kind: point, text: "Board meeting first Monday of November at 10", expect: { unsure: true } }
   - { kind: point, text: "Позвонить через неделю после дня рождения", expect: { unsure: true } }
   - { kind: point, text: "Забрать Соню в 9 после школы", expect: { point: "в 9" } }
+  # Пояс в куске даты (tech-debt #26): известный город — часть куска (пересчёт делает парсер); незнакомый — не отбрасываем
+  # молча, а спрашиваем (unsure + unknownZone); «по Зуму», «по проекту», «по Ленинградскому проспекту» — не пояс
+  - { kind: point, text: "Созвон 3 ноября в 15:00 по Киеву", expect: { point: "3 ноября в 15:00 по Киеву" } }
+  - { kind: point, text: "Звонок маме завтра в 9 по Москве", expect: { point: "завтра в 9 по Москве" } }
+  - { kind: point, text: "Call with Tom at 3pm London time", expect: { point: "at 3pm London time" } }
+  - { kind: point, text: "Вебинар в 12 по UTC+4", expect: { point: "в 12 по UTC+4" } }
+  - { kind: point, text: "Созвон в 15 по местному времени", expect: { point: "в 15 по местному времени" } }
+  - { kind: point, text: "Созвон с Гиорги в 10 по тбилисскому времени", expect: { point: "в 10 по тбилисскому времени" } }
+  - { kind: point, text: "Созвон в 15 по Варне", expect: { unsure: true, unknownZone: "по Варне" } }
+  - { kind: point, text: "Созвон завтра в 15 по варненскому времени", expect: { unsure: true, unknownZone: "по варненскому времени" } }
+  - { kind: point, text: "Call at 3pm Lagos time", expect: { unsure: true, unknownZone: "Lagos time" } }
+  - { kind: point, text: "Завтра в 9 стендап по Зуму", expect: { point: "Завтра в 9" } }
+  - { kind: point, text: "Созвон в 15 по проекту", expect: { point: "в 15" } }
+  - { kind: point, text: "Встреча в 10 по Ленинградскому проспекту", expect: { point: "в 10" } }

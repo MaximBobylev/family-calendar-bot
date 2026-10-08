@@ -19,6 +19,7 @@ import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { AppContext } from "./context";
+import { dateFixOnUndoCreate } from "./date-fix";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
 
@@ -102,6 +103,8 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
     throw e;
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastUndo: undefined, lastEvent: undefined }, ctx.clock.now());
+  // Созданное откатили — пересоздание на другую дату будет правкой (метрика date_fix, tech-debt #26)
+  if (record.kind === "create") await dateFixOnUndoCreate(ctx, action, record.ref);
   await reply(`${t("undone", locale)}\n\n${summary}`);
   await recordFeature(ctx.db, user.id, "undo", ctx.clock.now());
   return true;

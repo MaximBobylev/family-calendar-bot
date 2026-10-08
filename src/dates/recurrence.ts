@@ -1,6 +1,6 @@
 // kind=recurrence: «каждый понедельник в 10», «по будням до конца года», «в последнюю пятницу месяца».
 
-import { parts, formatDate, type Day } from "./calendar";
+import { daysInMonth, formatDate, makeDay, parts, type Day } from "./calendar";
 import { MONTHS, NUMBER_WORDS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
 import { resolveAbsDate, readClockTime, resolveHour } from "./point";
 import type { Meridiem } from "./lexicon";
@@ -139,6 +139,13 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     if (w === "до" || w === "until") {
       if (word(tokens[i + 1]) === "конца" && word(tokens[i + 2]) === "года") {
         r.until = `${parts(today).year}-12-31`;
+        i += 3;
+        continue;
+      }
+      // «до конца месяца» — последний день текущего месяца (корпус с разными «сейчас», tech-debt #26)
+      if (word(tokens[i + 1]) === "конца" && word(tokens[i + 2]) === "месяца") {
+        const { year, month } = parts(today);
+        r.until = formatDate(makeDay(year, month, daysInMonth(year, month)));
         i += 3;
         continue;
       }

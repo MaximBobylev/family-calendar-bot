@@ -7,6 +7,7 @@ import { addMinutes, formatMoment, parseLocal, type Day, type Moment } from "../
 import { durationToMinutes } from "../dates/duration";
 import { parseDateFragment, type ParseValue, type Recurrence } from "../dates";
 import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
+import { namedZone, type NamedZone } from "../dates/zone";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
 import { t } from "./messages";
@@ -27,6 +28,17 @@ export interface CreateDraft {
   description?: string;
   /** Ответственный и «для кого» (US-92) — в event_meta после создания. */
   family?: EventFamily;
+  /** Пояс, которого мы не знаем («по Варне»): даты нет — спрашиваем время по своему поясу (tech-debt #26). */
+  unknownZone?: string;
+  /** Откуда дата и как она сошлась с LLM — для метрики правок даты `date_fix` (tech-debt #26). */
+  dateCheck?: DateCheckInfo;
+}
+
+/** Источник даты в карточке: команда (текст/голос), пересланное, фото. */
+export type DateSource = "message" | "forward" | "image";
+export interface DateCheckInfo {
+  source: DateSource;
+  agreement: StartAgreement;
 }
 
 /** Разрешённый вариант события — хранится в карточке. */
@@ -44,6 +56,10 @@ export interface CreateOption {
   location?: string;
   description?: string;
   series?: SeriesInfo;
+  /** Время сказано в другом поясе («в 15 по Киеву») — в карточке показываем и его (tech-debt #26). */
+  zone?: NamedZone;
+  /** Вариант из `start` от LLM (второе мнение), а не из нашего куска — выбор его = наш парсер ошибся (date_fix). */
+  fromLlm?: true;
 }
 
 /** Повторение: готовый RRULE и то, что показываем в карточке. */
@@ -64,6 +80,8 @@ export interface CreateCardPayload {
   viaAlias?: boolean;
   /** Ответственный и «для кого» (US-92). */
   family?: EventFamily;
+  /** Источник даты и исход сверки с LLM — для метрики date_fix (tech-debt #26). */
+  dateCheck?: DateCheckInfo;
 }
 
 /** Календарь найден по алиасу: по одним названиям (без алиасов) это имя его не находит. */
@@ -131,7 +149,7 @@ const MAX_OPTIONS = 4;
 
 export type Resolution =
   | { kind: "options"; options: CreateOption[] }
-  | { kind: "ask"; question: "askWhen" | "askTime" | "inPast"; keepStart: boolean }
+  | { kind: "ask"; question: "askWhen" | "askTime" | "inPast" | "askZoneTime"; keepStart: boolean }
   | { kind: "reply"; text: string };
 
 export type CalendarResolution = CalendarInfo | { error: "notFound" | "readOnly"; name: string } | { error: "noWritable" };
@@ -151,51 +169,54 @@ export function resolveCalendar(calendars: CalendarInfo[], name: string | undefi
 
 export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {
   if (draft.recurrenceText) return resolveSeries(draft, draft.recurrenceText, now, tz, cal, locale, defaultDuration);
-  if (!draft.startText) return { kind: "ask", question: "askWhen", keepStart: false };
+  if (!draft.startText) return { kind: "ask", question: draft.unknownZone ? "askZoneTime" : "askWhen", keepStart: false };
 
   const length = resolveLength(draft, now, tz, locale, defaultDuration);
   if ("kind" in length) return length;
   const { duration, allDay } = length;
   const base = optionBase(draft, cal, tz, locale);
 
-  const toOption = (v: ParseValue): CreateOption | "needTime" | null => {
+  const toOption = (v: ParseValue, extra: Pick<CreateOption, "zone" | "fromLlm">): CreateOption | "needTime" | null => {
     if ("datetime" in v) {
       const start = parseLocal(v.datetime);
       const end = addMinutes(start, duration);
-      return { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day };
+      return { ...base, ...extra, allDay: false, start, end, startDay: start.day, endDay: end.day };
     }
     if ("interval" in v) {
       const start = parseLocal(v.interval.start);
       const end = parseLocal(v.interval.end);
-      return { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day };
+      return { ...base, ...extra, allDay: false, start, end, startDay: start.day, endDay: end.day };
     }
     if ("date" in v) {
       if (typeof v.date !== "string" || !allDay) return "needTime";
       const day = parseLocal(`${v.date}T00:00`).day;
-      return { ...base, allDay: true, startDay: day, endDay: day };
+      return { ...base, ...(extra.fromLlm ? { fromLlm: true } : {}), allDay: true, startDay: day, endDay: day };
     }
     if ("range" in v && !v.range.from.includes("T")) {
-      return { ...base, allDay: true, startDay: parseLocal(`${v.range.from}T00:00`).day, endDay: parseLocal(`${v.range.to}T00:00`).day };
+      const days = { startDay: parseLocal(`${v.range.from}T00:00`).day, endDay: parseLocal(`${v.range.to}T00:00`).day };
+      return { ...base, ...(extra.fromLlm ? { fromLlm: true } : {}), allDay: true, ...days };
     }
     return null;
   };
 
-  const fromText = (text: string): Resolution => {
+  const fromText = (text: string, fromLlm: boolean): Resolution => {
     const parsed = parseDateFragment({ text, kind: "point", now: formatMoment(now), tz });
+    const zone = namedZone(text);
+    const extra = { ...(zone && zone.tz !== tz ? { zone } : {}), ...(fromLlm ? { fromLlm: true as const } : {}) };
     if ("error" in parsed) {
       if (parsed.error === "in_past") return { kind: "ask", question: "inPast", keepStart: false };
       return { kind: "ask", question: "askWhen", keepStart: false };
     }
     const values = "ambiguous" in parsed ? parsed.ambiguous : [parsed];
-    const options = values.map(toOption);
+    const options = values.map((v) => toOption(v, extra));
     if (options.includes("needTime")) return { kind: "ask", question: "askTime", keepStart: true };
     const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
     if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
     return { kind: "options", options: ok };
   };
 
-  const ours = fromText(draft.startText);
-  const alt = draft.altStartText ? fromText(draft.altStartText) : undefined;
+  const ours = fromText(draft.startText, false);
+  const alt = draft.altStartText ? fromText(draft.altStartText, true) : undefined;
   // Второе мнение LLM: у нас нет полного момента, а у LLM есть — берём его; оба есть и разные — оба кнопками
   if (alt?.kind !== "options") return ours;
   if (ours.kind !== "options") return alt;

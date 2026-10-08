@@ -146,14 +146,44 @@ export const UNITS = index<Unit>(
 /** Служебные слова, которые можно пропускать. */
 export const FILLERS = new Set(["в", "во", "на", "at", "on", "the", "к", "of", "for", "to"]);
 
-/** Явно названные пояса: «в 12 по Москве», «по МСК». */
-export const TIMEZONE_WORDS = new Map<string, string>([
-  ["москве", "Europe/Moscow"], ["мск", "Europe/Moscow"], ["московскому", "Europe/Moscow"], ["moscow", "Europe/Moscow"],
-  ["тбилиси", "Asia/Tbilisi"], ["tbilisi", "Asia/Tbilisi"],
-  ["берлину", "Europe/Berlin"], ["berlin", "Europe/Berlin"],
-  ["лондону", "Europe/London"], ["london", "Europe/London"],
-  ["utc", "UTC"], ["gmt", "UTC"],
-]);
+/**
+ * Явно названные пояса: «в 15 по Киеву», «по киевскому времени», «по времени Киева», «3pm London time» (tech-debt #26).
+ * Формы — дательный (после «по»), родительный («по времени …»), прилагательное и английское имя; `ru` / `en` — подпись в
+ * карточке («по Киеву» / «Kyiv time»). Пояс — IANA-имя, которое знает любой ICU (Europe/Kiev, а не Europe/Kyiv).
+ */
+export interface ZoneCity { tz: string; ru: string; en: string; forms: string[] }
+export const ZONE_CITIES: ZoneCity[] = [
+  { tz: "Europe/Moscow",      ru: "Москве",       en: "Moscow",       forms: ["москве", "москвы", "московскому", "мск", "msk", "moscow"] },
+  { tz: "Europe/Kiev",        ru: "Киеву",        en: "Kyiv",         forms: ["киеву", "киева", "киевскому", "kyiv", "kiev"] },
+  { tz: "Europe/Minsk",       ru: "Минску",       en: "Minsk",        forms: ["минску", "минска", "минскому", "minsk"] },
+  { tz: "Europe/Kaliningrad", ru: "Калининграду", en: "Kaliningrad",  forms: ["калининграду", "калининграда", "калининградскому", "kaliningrad"] },
+  { tz: "Asia/Yekaterinburg", ru: "Екатеринбургу", en: "Yekaterinburg", forms: ["екатеринбургу", "екатеринбурга", "екатеринбургскому", "yekaterinburg"] },
+  { tz: "Asia/Novosibirsk",   ru: "Новосибирску", en: "Novosibirsk",  forms: ["новосибирску", "новосибирска", "новосибирскому", "novosibirsk"] },
+  { tz: "Asia/Tbilisi",       ru: "Тбилиси",      en: "Tbilisi",      forms: ["тбилиси", "тбилисскому", "tbilisi"] },
+  { tz: "Asia/Yerevan",       ru: "Еревану",      en: "Yerevan",      forms: ["еревану", "еревана", "ереванскому", "yerevan"] },
+  { tz: "Asia/Almaty",        ru: "Алматы",       en: "Almaty",       forms: ["алматы", "алма-ате", "алматинскому", "almaty"] },
+  { tz: "Asia/Tashkent",      ru: "Ташкенту",     en: "Tashkent",     forms: ["ташкенту", "ташкента", "ташкентскому", "tashkent"] },
+  { tz: "Asia/Baku",          ru: "Баку",         en: "Baku",         forms: ["баку", "бакинскому", "baku"] },
+  { tz: "Europe/Warsaw",      ru: "Варшаве",      en: "Warsaw",       forms: ["варшаве", "варшавы", "варшавскому", "warsaw"] },
+  { tz: "Europe/Berlin",      ru: "Берлину",      en: "Berlin",       forms: ["берлину", "берлина", "берлинскому", "berlin"] },
+  { tz: "Europe/Prague",      ru: "Праге",        en: "Prague",       forms: ["праге", "праги", "пражскому", "prague"] },
+  { tz: "Europe/Paris",       ru: "Парижу",       en: "Paris",        forms: ["парижу", "парижа", "парижскому", "paris"] },
+  { tz: "Europe/London",      ru: "Лондону",      en: "London",       forms: ["лондону", "лондона", "лондонскому", "london"] },
+  { tz: "Europe/Lisbon",      ru: "Лиссабону",    en: "Lisbon",       forms: ["лиссабону", "лиссабона", "лиссабонскому", "lisbon"] },
+  { tz: "Europe/Belgrade",    ru: "Белграду",     en: "Belgrade",     forms: ["белграду", "белграда", "белградскому", "belgrade"] },
+  { tz: "Europe/Istanbul",    ru: "Стамбулу",     en: "Istanbul",     forms: ["стамбулу", "стамбула", "стамбульскому", "istanbul"] },
+  { tz: "Asia/Dubai",         ru: "Дубаю",        en: "Dubai",        forms: ["дубаю", "дубая", "дубайскому", "dubai"] },
+  { tz: "America/New_York",   ru: "Нью-Йорку",    en: "New York",     forms: ["нью-йорку", "нью-йорка", "нью-йоркскому", "new york", "nyc"] },
+  { tz: "America/Los_Angeles", ru: "Лос-Анджелесу", en: "Los Angeles", forms: ["лос-анджелесу", "лос-анджелеса", "los angeles"] },
+  { tz: "America/Sao_Paulo",  ru: "Сан-Паулу",    en: "São Paulo",    forms: ["сан-паулу", "sao paulo", "são paulo"] },
+  { tz: "America/Argentina/Buenos_Aires", ru: "Буэнос-Айресу", en: "Buenos Aires", forms: ["буэнос-айресу", "буэнос-айреса", "buenos aires"] },
+];
+
+/** Пояс без «по» / «time»: только сокращения («в 12 мск», «at 3pm UTC»). Название города без предлога — не пояс («Nobu London»). */
+export const BARE_ZONE_WORDS = new Set(["мск", "msk", "utc", "gmt"]);
+
+/** «по местному (времени)», «local time» — пояс пользователя: слово съедаем, ничего не пересчитываем. */
+export const LOCAL_ZONE_WORDS = new Set(["местному", "нашему", "моему", "вашему", "local", "my", "our"]);
 
 /**
  * Опечатки и искажения распознавания — только точные слова, которые не совпадают с настоящими

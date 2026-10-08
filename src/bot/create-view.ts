@@ -1,7 +1,7 @@
 // US-30 / US-32: отображение карточки создания — тело события, варианты дат кнопками, выбор для 29–31 числа.
 // Чистые функции: текст и кнопки по готовым вариантам, без ввода-вывода (tech-debt #10).
 
-import { parts, type Day } from "../dates/calendar";
+import { localToUtc, parts, utcToLocal, type Day } from "../dates/calendar";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { CreateOption } from "./create-logic";
 import { dateLabel, escapeHtml, hhmm, whenOf } from "./format";
@@ -18,6 +18,8 @@ export function cardBody(o: CreateOption, today: Day, locale: string, showCalend
     lines.push(`📅 ${t("seriesNext", locale, { list: o.series.next.map((d) => dateLabel(d, today, locale)).join(" · ") })}`);
   } else {
     lines.push(`🕒 ${whenLabel(o, today, locale)}`);
+    const zone = zoneLine(o, locale);
+    if (zone) lines.push(zone);
   }
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
   // Источник из чужого контента (US-65…US-67) — первая строка описания
@@ -81,6 +83,20 @@ export function createCard(
     ];
   }
   return { text, buttons };
+}
+
+/** «🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)» — время сказано в другом поясе (tech-debt #26). */
+export function zoneLine(o: CreateOption, locale: string): string | undefined {
+  if (!o.zone || !o.start || o.allDay) return undefined;
+  const there = utcToLocal(localToUtc(o.start, o.tz), o.zone.tz);
+  // Сейчас у пояса то же смещение, что у нашего, — сказать нечего
+  if (there.day === o.start.day && there.minutes === o.start.minutes) return undefined;
+  return t("zoneNote", locale, {
+    time: hhmm(there.minutes),
+    zone: escapeHtml(locale === "en" ? o.zone.en : o.zone.ru),
+    myTime: hhmm(o.start.minutes),
+    tz: o.tz,
+  });
 }
 
 const firstLine = (s: string) => {

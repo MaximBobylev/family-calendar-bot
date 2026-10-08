@@ -397,6 +397,41 @@ export async function cardCounts(db: D1Database, now: number): Promise<{ kind: s
   return results;
 }
 
+/** Даты (tech-debt #26): по дням UTC — создано из карточки и правки даты сразу после, по видам. Только счётчики. */
+export interface DateFixDay {
+  day: string;
+  created: number;
+  created_disagreed: number;
+  fixes: number;
+  option_ours: number;
+  option_llm: number;
+  modify: number;
+  recreate: number;
+  fixes_disagreed: number;
+}
+
+export async function dateFixDaily(db: D1Database, now: number, days = 14): Promise<DateFixDay[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT date(created_at / 1000, 'unixepoch') day,
+              coalesce(sum(event = 'created'), 0) created,
+              coalesce(sum(event = 'created' AND disagreed = 1), 0) created_disagreed,
+              coalesce(sum(event = 'fix'), 0) fixes,
+              coalesce(sum(fix_kind = 'option_ours'), 0) option_ours,
+              coalesce(sum(fix_kind = 'option_llm'), 0) option_llm,
+              coalesce(sum(fix_kind = 'modify'), 0) modify,
+              coalesce(sum(fix_kind = 'recreate'), 0) recreate,
+              coalesce(sum(event = 'fix' AND disagreed = 1), 0) fixes_disagreed
+       FROM date_metrics
+       WHERE created_at > ?
+       GROUP BY day
+       ORDER BY day DESC`,
+    )
+    .bind(now - days * DAY_MS)
+    .all<DateFixDay>();
+  return results;
+}
+
 export interface FeatureRow {
   feature: string;
   users: number;

@@ -54,3 +54,129 @@ cases:
     tz: Europe/Berlin
     note: "время в правиле — локальное; при переходе на зимнее время остаётся 10:00 (US-07)"
     expect: { recurrence: { freq: weekly, by_day: [MO], time: "10:00" } }
+
+  # Время в другом поясе (tech-debt #26): город → IANA (lexicon.ts ZONE_CITIES, падежи RU и имена EN), UTC±N, IANA-имя,
+  # «по местному» = свой пояс. Момент считается по часам того пояса и переводится в пояс пользователя.
+  - id: tz-008
+    text: "в 15:00 по Киеву"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    note: "Киев в октябре — летнее время UTC+3, как Москва"
+    expect: { datetime: "2026-10-07T15:00" }
+
+  - id: tz-009
+    text: "3 ноября в 15:00 по Киеву"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    note: "в ноябре Киев UTC+2: 15:00 по Киеву = 16:00 МСК (пример из ревью 2026-10-08 — раньше пояс молча отбрасывался)"
+    expect: { datetime: "2026-11-03T16:00" }
+
+  - id: tz-010
+    text: "в 9 по Москве"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Berlin
+    note: "в Москве уже 11:00: «в 9» по правилу часа — варианты 21:00 / завтра 09:00 по Москве, в Берлине на час раньше"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-07T20:00" }
+        - { datetime: "2026-10-08T08:00" }
+
+  - id: tz-011
+    text: "at 3pm London time"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-10-07T17:00" }
+
+  - id: tz-012
+    text: "в 10 по Тбилиси"
+    kind: point
+    now: "2026-10-07T08:00"
+    tz: Europe/Moscow
+    note: "в Тбилиси 09:00; 10:00 по Тбилиси (UTC+4) = 09:00 МСК"
+    expect: { datetime: "2026-10-07T09:00" }
+
+  - id: tz-013
+    text: "в 12 по UTC+4"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-10-07T11:00" }
+
+  - id: tz-014
+    text: "в 12 по местному времени"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Asia/Tbilisi
+    note: "«по местному» — пояс пользователя, без пересчёта"
+    expect: { datetime: "2026-10-07T12:00" }
+
+  - id: tz-015
+    text: "с 10 до 12 по Лондону"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    note: "интервал тоже пересчитывается (раньше — только момент)"
+    expect: { interval: { start: "2026-10-07T12:00", end: "2026-10-07T14:00" } }
+
+  - id: tz-016
+    text: "завтра в 10 по Нью-Йорку"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    note: "в Нью-Йорке сейчас 03:00 ср; «завтра» — по его календарю: чт 10:00 EDT (UTC−4) = 17:00 МСК"
+    expect: { datetime: "2026-10-08T17:00" }
+
+  - id: tz-017
+    text: "в 15 по киевскому времени"
+    kind: point
+    now: "2026-11-02T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-11-02T16:00" }
+
+  - id: tz-018
+    text: "в 15 по времени Киева"
+    kind: point
+    now: "2026-11-02T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-11-02T16:00" }
+
+  - id: tz-019
+    text: "в 12 по Europe/Berlin"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-10-07T13:00" }
+
+  - id: tz-020
+    text: "at 9am New York time"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    expect: { datetime: "2026-10-07T16:00" }
+
+  - id: tz-021
+    text: "в 12 мск"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Asia/Tbilisi
+    expect: { datetime: "2026-10-07T13:00" }
+
+  - id: tz-022
+    text: "в 15 по Варне"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Europe/Moscow
+    note: "пояса нет в словаре — не угадываем; извлечение помечает unknownZone, бот спрашивает время по своему поясу"
+    expect: { error: unparseable }
+
+  - id: tz-023
+    text: "в 15 по Минску"
+    kind: point
+    now: "2026-10-07T10:00"
+    tz: Asia/Tbilisi
+    note: "Минск UTC+3: 15:00 = 16:00 в Тбилиси"
+    expect: { datetime: "2026-10-07T16:00" }

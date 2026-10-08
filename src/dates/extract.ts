@@ -19,6 +19,9 @@ export interface ExtractedSpans {
   /** Дата сказана, но кусками, которые вместе не разбираются («через две недели … во вторник в 9»), или в конструкции,
    * которую парсер не знает («в первый понедельник ноября»): point не даём — лучше спросить, чем угадать (ревью 2026-10-08). */
   unsure?: true;
+  /** Время с поясом, которого мы не знаем («в 15 по Варне», «3pm Lagos time»): не отбрасываем молча, а спрашиваем
+   * время по своему поясу (tech-debt #26). Вместе с ним всегда `unsure`. */
+  unknownZone?: string;
   /** Слова, вошедшие в даты, — чтобы убрать их из названия. */
   usedWords: Set<number>;
 }
@@ -32,6 +35,27 @@ const ORDINAL = /^(перв|втор|трет|четв[её]рт|пят(ый|а�
 /** «через неделю после дня рождения» — сдвиг от неизвестного события, а не от сегодня. */
 const RELATIVE_START = /^(через|спустя|in)$/i;
 const ANCHOR_AFTER = /^(после|after|before)$/i;
+/** «по Зуму», «по Скайпу» — канал, а не город: с заглавной, но не пояс. */
+const NOT_PLACES =
+  /^(зум|zoom|скайп|skype|телеграм|telegram|ватсап|вотсап|whatsapp|вайбер|viber|телефон|видео|meet|teams|тимс|гугл|google|discord|дискорд|слак|slack|вк|vk)/i;
+
+/**
+ * Пояс, которого нет в словаре, сразу после куска-момента: «… в 15 по Варне», «по пражскому времени» (известные пояса
+ * парсер уже включил в кусок), «по времени Варны», «3pm Lagos time». Город узнаём по заглавной букве — «по работе»,
+ * «по проекту» не пояс.
+ */
+function unknownZoneAt(ws: string[], j: number): string | undefined {
+  const a = ws[j];
+  const b = ws[j + 1];
+  if (!a || !b) return undefined;
+  if (a.toLowerCase() === "по") {
+    if (b.toLowerCase() === "времени" && ws[j + 2]) return ws.slice(j, j + 3).join(" ");
+    if (ws[j + 2]?.toLowerCase() === "времени") return ws.slice(j, j + 3).join(" ");
+    // «по Ленинградскому проспекту» — прилагательное без «времени» не пояс
+    return /^\p{Lu}/u.test(b) && !NOT_PLACES.test(b) && !/(ому|ему)$/i.test(b) ? `${a} ${b}` : undefined;
+  }
+  return /^\p{Lu}/u.test(a) && b.toLowerCase() === "time" ? `${a} ${b}` : undefined;
+}
 
 function words(text: string): string[] {
   return text
@@ -46,6 +70,7 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
   const used = new Set<number>();
   let duration: string | undefined;
   let unsure = false;
+  let unknownZone: string | undefined;
 
   const parses = (fragment: string, k: ValueKind) => isUsable(parseDateFragment({ text: fragment, kind: k, now, tz }));
 
@@ -67,7 +92,14 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
         const after = ws[j] ?? "";
         if (kind === "point" && ORDINAL.test(before) && WEEKDAYS.has(ws[i]!.toLowerCase())) unsure = true;
         else if (kind === "point" && RELATIVE_START.test(ws[i]!) && ANCHOR_AFTER.test(after)) unsure = true;
-        else if (!NEGATION.test(before)) points.push(fragment);
+        else if (!NEGATION.test(before)) {
+          points.push(fragment);
+          const zone = kind === "point" ? unknownZoneAt(ws, j) : undefined;
+          if (zone) {
+            unknownZone ??= zone;
+            unsure = true;
+          }
+        }
       } else {
         continue;
       }
@@ -93,6 +125,7 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
     } else out.range = whole ? joined : points[0]!;
   }
   if (unsure && kind === "point") out.unsure = true;
+  if (unknownZone) out.unknownZone = unknownZone;
   if (duration) out.duration = duration;
   return out;
 }

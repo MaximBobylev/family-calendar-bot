@@ -7,11 +7,12 @@ import {
 } from "./calendar";
 import { readDuration } from "./duration";
 import {
-  DAY_PART_BOUNDS, DAY_PART_WORDS, FILLERS, MONTHS, MONTHS_PREPOSITIONAL, TIMEZONE_WORDS, UNITS,
+  DAY_PART_BOUNDS, DAY_PART_WORDS, FILLERS, MONTHS, MONTHS_PREPOSITIONAL, UNITS,
   WEEKDAY_INDEX, WEEKDAYS, type Meridiem,
 } from "./lexicon";
 import type { Token } from "./tokenize";
 import type { DayPart, ParseError, ParseResult, ParseValue, Weekday } from "./types";
+import { readZone } from "./zone";
 
 // --- AST -------------------------------------------------------------------
 
@@ -335,6 +336,8 @@ function parseAst(tokens: Token[]): Ast {
     // «в среду 14-го» — день недели вместе с числом
     else if (ast.date.k === "wd" && d.k === "abs") ast.date = { k: "abs", abs: d.abs, wd: ast.date.wd };
     else if (ast.date.k === "abs" && d.k === "wd") ast.date = { ...ast.date, wd: d.wd };
+    // «через неделю в понедельник» = «в понедельник через неделю» (корпус с разными «сейчас», tech-debt #26)
+    else if (ast.date.k === "rel" && ast.date.days === 7 && d.k === "wd" && d.mod === "none") ast.date = { ...d, mod: "plusWeek" };
     else throw new Unparseable();
   };
   const setTime = (t: TimeAst) => {
@@ -426,13 +429,15 @@ function parseAst(tokens: Token[]): Ast {
     if (w === "с" && t1?.t === "mer" && t1.v === "am" && word(tokens[i + 2]) === "пораньше") { setTime({ h: 9, m: 0, mer: "am" }); i += 3; continue; }
     if (w === "с" && t1?.t === "mer" && t1.v === "am") { ast.part = "morning"; i += 2; continue; }
 
-    // Явный пояс: «по Москве», «по московскому времени», «мск»
-    if (w === "по" && w1 && TIMEZONE_WORDS.has(w1)) {
-      ast.tz = TIMEZONE_WORDS.get(w1)!;
-      i += word(tokens[i + 2]) === "времени" ? 3 : 2;
-      continue;
+    // Явный пояс: «по Киеву», «по московскому времени», «мск», «по UTC+4», «London time»; «по местному» — свой (tech-debt #26)
+    {
+      const zone = readZone(tokens, i);
+      if (zone) {
+        if (zone.zone !== "local") ast.tz = zone.zone.tz;
+        i += zone.n;
+        continue;
+      }
     }
-    if (w && TIMEZONE_WORDS.has(w)) { ast.tz = TIMEZONE_WORDS.get(w)!; i++; continue; }
 
     // Интервалы: «с часу до двух», «from 1 to 2pm», «с 10 по 20 ноября»
     if (w === "с" || w === "from") {
@@ -710,7 +715,8 @@ function resolveDays(date: DateAst, now: Moment, time: ResolvedHour | undefined,
           return [n, n + 7];
         }
         case "nextWeek": return [startOfWeek(today) + 7 + WEEKDAY_INDEX[date.wd]];
-        case "plusWeek": return [nearest(date.wd, today) + 7];
+        // «в понедельник через неделю», сказанное в понедельник, — через 7 дней, а не через 14
+        case "plusWeek": return [(isToday ? today : nearest(date.wd, today)) + 7];
         case "none":
           if (!isToday) return [nearest(date.wd, today)];
           if (!time) return [today, today + 7];
@@ -821,7 +827,9 @@ function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
         if (compare(cand, start) > 0 && (!best || compare(cand, best) < 0)) best = cand;
       }
     }
-    return { interval: { start: formatMoment(start), end: formatMoment(best!) } };
+    // Без дня интервал, который уже целиком кончился («с 10 до 12» в 23:30), — завтра; идущий сейчас — сегодня (d12-004)
+    const shift = !ast.date && compare(best!, now) <= 0 ? 1 : 0;
+    return { interval: { start: formatMoment(at(start.day + shift, start.minutes)), end: formatMoment(at(best!.day + shift, best!.minutes)) } };
   }
 
   if (ast.period || ast.week) return resolveRange(ast, now);
@@ -838,7 +846,8 @@ function resolvePoint(input: Ast, now: Moment, tz: string): ParseResult {
   // Только время, без дня
   if (!ast.date) {
     if (!rh) {
-      if (ast.part) return dateValue(now.day + (night ? 1 : 0), ast.part);
+      // Часть суток уже кончилась («утром» в 23:30) — ближайшая такая же, завтра
+      if (ast.part) return dateValue(now.day + (night || now.minutes >= DAY_PART_BOUNDS[ast.part][1] ? 1 : 0), ast.part);
       throw new Unparseable();
     }
     const cand = at(now.day + rh.dayOffset, rh.hour * 60 + minutes);
@@ -885,7 +894,9 @@ function resolveRange(ast: Ast, now: Moment): ParseResult {
     const sat = wd === 6 ? today - 1 : today + (5 - wd);
     const thisWeekend = rangeOfDays(Math.max(sat, today), sat + 1);
     if (p.which === "this") return thisWeekend;
-    return { ambiguous: [thisWeekend, rangeOfDays(sat + 7, sat + 8)] };
+    // «на следующих выходных» в сб/вс — как «в следующую пятницу» в пятницу: ближайшие выходные после текущих
+    const first = wd >= 5 ? sat + 7 : sat;
+    return { ambiguous: [wd >= 5 ? rangeOfDays(first, first + 1) : thisWeekend, rangeOfDays(first + 7, first + 8)] };
   }
   if (p?.k === "month") {
     const t = parts(today);
@@ -960,12 +971,14 @@ export function parsePointOrRange(tokens: Token[], kind: "point" | "range", now:
     if (kind === "range" && !ast.time && !ast.interval && ast.relMinutes === undefined) return resolveRange(ast, now);
 
     if (!ast.tz || ast.tz === tz) return resolvePoint(ast, now, tz);
-    // Явно названный пояс: считаем в нём и переводим результат в пояс пользователя
-    const res = resolvePoint(ast, convertZone(now, tz, ast.tz), ast.tz);
-    if ("datetime" in res) {
-      return { datetime: formatMoment(convertZone(parseLocalMoment(res.datetime), ast.tz, tz)) };
-    }
-    return res;
+    // Явно названный пояс: считаем в нём («сегодня» — по его часам) и переводим моменты в пояс пользователя
+    const zoneTz = ast.tz;
+    const toUser = (s: string) => formatMoment(convertZone(parseLocalMoment(s), zoneTz, tz));
+    const convert = (v: ParseValue): ParseValue =>
+      "datetime" in v ? { datetime: toUser(v.datetime) } : "interval" in v ? { interval: { start: toUser(v.interval.start), end: toUser(v.interval.end) } } : v;
+    const res = resolvePoint(ast, convertZone(now, tz, zoneTz), zoneTz);
+    if ("ambiguous" in res) return { ambiguous: res.ambiguous.map(convert) };
+    return "error" in res ? res : convert(res);
   } catch (e) {
     if (e instanceof Unparseable) return { error: e.reason };
     throw e;

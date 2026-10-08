@@ -129,6 +129,37 @@
         text_contains: ["Расход AI", "{{user}}", "fake-model", "create_event", "/ 60", "/ 300"]
         text_not_contains: ["Петей", "Созвон"]
 
+- id: admin-date-fix-counted-after-card
+  story: US-30
+  steps:
+    # tech-debt #26: правка даты сразу после карточки — изменили время созданного; отменили и создали то же на другой день.
+    # В админке — только счётчики по дням, без названий
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - llm:
+        "Созвон с Петей завтра в 15:30 на полчаса": { tool: create_event, args: { start: "завтра в 15:30", title: "Созвон с Петей", duration: "на полчаса" } }
+        "Перенеси её на 16": { tool: modify_event, args: { reference: "last" } }
+        "Обед с Олей в пятницу в 13": { tool: create_event, args: { start: "в пятницу в 13", title: "Обед с Олей" } }
+        "Обед с Олей в субботу в 13": { tool: create_event, args: { start: "в субботу в 13", title: "Обед с Олей" } }
+    - telegram: { from: 1001, text: "Созвон с Петей завтра в 15:30 на полчаса" }
+    - press: "Создать"
+    - telegram: { from: 1001, text: "Перенеси её на 16" }
+    - press: "Подтвердить"
+    - telegram: { from: 1001, text: "Обед с Олей в пятницу в 13" }
+    - press: "Отмена"
+    - telegram: { from: 1001, text: "Обед с Олей в субботу в 13" }
+    - press: "Создать"
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, events: [], count: 2 }
+    - http_get:
+        path: "/admin/usage"
+        basic_auth: "admin:test-admin-password"
+        # день 2026-10-07: создано 2, правок 2 (изменили время — 1, пересоздали — 1), выбора вариантов и расхождений с LLM нет
+        text_contains: ["Даты: правки после карточки", "<td>2026-10-07</td><td>2</td>", "2 / 2 (100,0%)", "<td>0 / 0</td><td>1</td><td>1</td><td>0 / 0</td>"]
+        text_not_contains: ["Петей", "Олей", "Обед", "Созвон"]
+
 # --- Итерация 3 (R1): дома, синхронизация, контент → событие ---------------------------------------------------
 # Только псевдонимы и счётчики: ни названия дома, ни имён, ни кодов приглашений, ни id чатов и календарей (почта).
 

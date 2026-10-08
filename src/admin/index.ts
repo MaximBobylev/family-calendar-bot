@@ -291,7 +291,7 @@ async function reveal(
 
 async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<string> {
   const dayStart = now - (now % 86_400_000);
-  const [byUser, byModel, intents, cards, features, bySource, inline] = await Promise.all([
+  const [byUser, byModel, intents, cards, features, bySource, inline, dateFixes] = await Promise.all([
     q.usageByUser(ctx.db, now, dayStart),
     q.usageByModel(ctx.db, now),
     q.intentCounts(ctx.db, now),
@@ -299,6 +299,7 @@ async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<stri
     q.featureUsage(ctx.db),
     q.llmBySource(ctx.db, now),
     q.inlineStats(ctx.db, now),
+    q.dateFixDaily(ctx.db, now),
   ]);
   return usageBody({
     byUser: await Promise.all(byUser.map(async (u) => ({ ...u, user: await pseudo(u.user_id) }))),
@@ -308,6 +309,7 @@ async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<stri
     features,
     bySource,
     inline,
+    dateFixes,
     limits: ctx.config.limits,
   });
 }

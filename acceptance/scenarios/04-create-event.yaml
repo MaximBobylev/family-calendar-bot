@@ -117,6 +117,38 @@
         - text_contains: ["Когда поставить?"]
           text_not_contains: ["21 октября"]
 
+- id: create-time-in-other-zone-shows-both-times
+  story: US-30
+  steps:
+    - *setup
+    # tech-debt #26: «по Киеву» раньше молча отбрасывалось (15:00 по своему поясу); теперь 15:00 по Киеву = 16:00 МСК в ноябре
+    - llm: { "Созвон с Олегом 3 ноября в 15:00 по Киеву": { tool: create_event, args: { start: "3 ноября в 15:00", title: "Созвон с Олегом" } } }
+    - telegram: { from: 1001, text: "Созвон с Олегом 3 ноября в 15:00 по Киеву" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Созвон с Олегом</b>", "16:00–17:00", "🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)"]
+          text_not_contains: ["по Киеву</b>"]
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Созвон с Олегом", start: "2026-11-03T16:00:00+03:00", end: "2026-11-03T17:00:00+03:00" }]
+
+- id: create-unknown-zone-asks-instead-of-dropping
+  story: US-30
+  steps:
+    - *setup
+    # Пояса нет в словаре: не ставим 15:00 по своему поясу (и не берём `start` от LLM, он пояс тоже не пересчитает) — спрашиваем
+    - llm: { "Созвон с Димой завтра в 15 по Варне": { tool: create_event, args: { start: "завтра в 15", title: "Созвон с Димой" } } }
+    - telegram: { from: 1001, text: "Созвон с Димой завтра в 15 по Варне" }
+    - expect_telegram:
+        - text_contains: ["Не знаю такой часовой пояс («по Варне»)", "по вашему времени"]
+    - telegram: { from: 1001, text: "завтра в 16" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Созвон с Димой</b>", "чт, 8 октября, 16:00–17:00"]
+          text_not_contains: ["🌍", "Варне"]
+
 - id: create-warns-about-overlap
   story: US-30
   steps:

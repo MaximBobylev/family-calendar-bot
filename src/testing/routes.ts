@@ -18,6 +18,7 @@ import { runAlerts } from "../ops/alerts";
 import { ensureCalendarSyncs } from "../sync/engine";
 
 const TABLES = [
+  "date_metrics",
   "inline_adds",
   "inline_events",
   "change_notices",

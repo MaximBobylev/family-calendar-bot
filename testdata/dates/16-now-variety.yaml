@@ -1,0 +1,492 @@
+# Корпус с разными «сейчас» (ревью парсера дат 2026-10-08, шаг 3; tech-debt #26): ~60 типичных фраз, каждая — при шести
+# «сейчас». Остальной корпус почти весь при одном «сейчас» (ср 10:00) и не ловит ошибки около полуночи, конца месяца/года и
+# перехода времени. Ожидания — по docs/date-rules.md; найденные и исправленные расхождения помечены «ИСПРАВЛЕНО», решения
+# там, где правила молчали, — в date-rules.md («Разные „сейчас“»). id: nvNN-<сейчас>, NN — номер фразы.
+#   mon   — пн 2026-10-12 07:00 МСК          fri   — пт 2026-10-16 23:30 МСК     sun — вс 2026-10-18 23:50 МСК
+#   dec31 — чт 2026-12-31 18:00 МСК          feb28 — вс 2027-02-28 12:00 МСК (невисокосный год)
+#   dst   — вс 2026-10-25 01:30 Europe/Berlin (в 03:00 CEST часы переводят на 02:00 CET)
+defaults:
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  # 01. «сегодня в 15»
+  - { id: nv01-mon, text: "сегодня в 15", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T15:00"} }
+  - { id: nv01-fri, text: "сегодня в 15", now: "2026-10-16T23:30", expect: {"error":"in_past"} }
+  - { id: nv01-sun, text: "сегодня в 15", now: "2026-10-18T23:50", expect: {"error":"in_past"} }
+  - { id: nv01-dec31, text: "сегодня в 15", now: "2026-12-31T18:00", expect: {"error":"in_past"} }
+  - { id: nv01-feb28, text: "сегодня в 15", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T15:00"} }
+  - { id: nv01-dst, text: "сегодня в 15", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T15:00"} }
+
+  # 02. «завтра в 10»
+  - { id: nv02-mon, text: "завтра в 10", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-13T10:00"} }
+  - { id: nv02-fri, text: "завтра в 10", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T10:00"} }
+  - { id: nv02-sun, text: "завтра в 10", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T10:00"} }
+  - { id: nv02-dec31, text: "завтра в 10", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T10:00"} }
+  - { id: nv02-feb28, text: "завтра в 10", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T10:00"} }
+  - { id: nv02-dst, text: "завтра в 10", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "после полуночи (01:30) «завтра» — календарное завтра (26-е), не «сегодня после сна»: решено оставить календарь, карточка показывает дату", expect: {"datetime":"2026-10-26T10:00"} }
+
+  # 03. «послезавтра в 9 утра»
+  - { id: nv03-mon, text: "послезавтра в 9 утра", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-14T09:00"} }
+  - { id: nv03-fri, text: "послезавтра в 9 утра", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-18T09:00"} }
+  - { id: nv03-sun, text: "послезавтра в 9 утра", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-20T09:00"} }
+  - { id: nv03-dec31, text: "послезавтра в 9 утра", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-02T09:00"} }
+  - { id: nv03-feb28, text: "послезавтра в 9 утра", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-02T09:00"} }
+  - { id: nv03-dst, text: "послезавтра в 9 утра", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-27T09:00"} }
+
+  # 04. «завтра утром»
+  - { id: nv04-mon, text: "завтра утром", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-13","part":"morning"}} }
+  - { id: nv04-fri, text: "завтра утром", now: "2026-10-16T23:30", expect: {"date":{"date":"2026-10-17","part":"morning"}} }
+  - { id: nv04-sun, text: "завтра утром", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-19","part":"morning"}} }
+  - { id: nv04-dec31, text: "завтра утром", now: "2026-12-31T18:00", expect: {"date":{"date":"2027-01-01","part":"morning"}} }
+  - { id: nv04-feb28, text: "завтра утром", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-03-01","part":"morning"}} }
+  - { id: nv04-dst, text: "завтра утром", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-26","part":"morning"}} }
+
+  # 05. «сегодня вечером»
+  - { id: nv05-mon, text: "сегодня вечером", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-12","part":"evening"}} }
+  - { id: nv05-fri, text: "сегодня вечером", now: "2026-10-16T23:30", expect: {"date":{"date":"2026-10-16","part":"evening"}} }
+  - { id: nv05-sun, text: "сегодня вечером", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-18","part":"evening"}} }
+  - { id: nv05-dec31, text: "сегодня вечером", now: "2026-12-31T18:00", expect: {"date":{"date":"2026-12-31","part":"evening"}} }
+  - { id: nv05-feb28, text: "сегодня вечером", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-02-28","part":"evening"}} }
+  - { id: nv05-dst, text: "сегодня вечером", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-25","part":"evening"}} }
+
+  # 06. «завтра ночью»
+  - { id: nv06-mon, text: "завтра ночью", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-14","part":"night"}} }
+  - { id: nv06-fri, text: "завтра ночью", now: "2026-10-16T23:30", expect: {"date":{"date":"2026-10-18","part":"night"}} }
+  - { id: nv06-sun, text: "завтра ночью", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-20","part":"night"}} }
+  - { id: nv06-dec31, text: "завтра ночью", now: "2026-12-31T18:00", expect: {"date":{"date":"2027-01-02","part":"night"}} }
+  - { id: nv06-feb28, text: "завтра ночью", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-03-02","part":"night"}} }
+  - { id: nv06-dst, text: "завтра ночью", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-27","part":"night"}} }
+
+  # 07. «завтра в 2 ночи»
+  - { id: nv07-mon, text: "завтра в 2 ночи", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-14T02:00"} }
+  - { id: nv07-fri, text: "завтра в 2 ночи", now: "2026-10-16T23:30", note: "«завтра в 2 ночи» в пт 23:30 — ночь после завтрашнего дня (сб→вс), а не через 2,5 часа: правило дня с «ночи» (решение 2026-10-05 №14) действует и около полуночи", expect: {"datetime":"2026-10-18T02:00"} }
+  - { id: nv07-sun, text: "завтра в 2 ночи", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-20T02:00"} }
+  - { id: nv07-dec31, text: "завтра в 2 ночи", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-02T02:00"} }
+  - { id: nv07-feb28, text: "завтра в 2 ночи", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-02T02:00"} }
+  - { id: nv07-dst, text: "завтра в 2 ночи", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-27T02:00"} }
+
+  # 08. «в 2 ночи»
+  - { id: nv08-mon, text: "в 2 ночи", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-13T02:00"} }
+  - { id: nv08-fri, text: "в 2 ночи", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T02:00"} }
+  - { id: nv08-sun, text: "в 2 ночи", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T02:00"} }
+  - { id: nv08-dec31, text: "в 2 ночи", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T02:00"} }
+  - { id: nv08-feb28, text: "в 2 ночи", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T02:00"} }
+  - { id: nv08-dst, text: "в 2 ночи", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "02:00 25.10 в Берлине бывает дважды — первое вхождение (летнее)", expect: {"datetime":"2026-10-25T02:00"} }
+
+  # 09. «в 9»
+  - { id: nv09-mon, text: "в 9", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T09:00"} }
+  - { id: nv09-fri, text: "в 9", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T09:00"} }
+  - { id: nv09-sun, text: "в 9", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T09:00"} }
+  - { id: nv09-dec31, text: "в 9", now: "2026-12-31T18:00", expect: {"ambiguous":[{"datetime":"2026-12-31T21:00"},{"datetime":"2027-01-01T09:00"}]} }
+  - { id: nv09-feb28, text: "в 9", now: "2027-02-28T12:00", expect: {"ambiguous":[{"datetime":"2027-02-28T21:00"},{"datetime":"2027-03-01T09:00"}]} }
+  - { id: nv09-dst, text: "в 9", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T09:00"} }
+
+  # 10. «в 12»
+  - { id: nv10-mon, text: "в 12", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T12:00"} }
+  - { id: nv10-fri, text: "в 12", now: "2026-10-16T23:30", expect: {"ambiguous":[{"datetime":"2026-10-17T00:00"},{"datetime":"2026-10-17T12:00"}]} }
+  - { id: nv10-sun, text: "в 12", now: "2026-10-18T23:50", expect: {"ambiguous":[{"datetime":"2026-10-19T00:00"},{"datetime":"2026-10-19T12:00"}]} }
+  - { id: nv10-dec31, text: "в 12", now: "2026-12-31T18:00", expect: {"ambiguous":[{"datetime":"2027-01-01T00:00"},{"datetime":"2027-01-01T12:00"}]} }
+  - { id: nv10-feb28, text: "в 12", now: "2027-02-28T12:00", expect: {"ambiguous":[{"datetime":"2027-03-01T00:00"},{"datetime":"2027-03-01T12:00"}]} }
+  - { id: nv10-dst, text: "в 12", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T12:00"} }
+
+  # 11. «в 23:45»
+  - { id: nv11-mon, text: "в 23:45", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T23:45"} }
+  - { id: nv11-fri, text: "в 23:45", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-16T23:45"} }
+  - { id: nv11-sun, text: "в 23:45", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T23:45"} }
+  - { id: nv11-dec31, text: "в 23:45", now: "2026-12-31T18:00", expect: {"datetime":"2026-12-31T23:45"} }
+  - { id: nv11-feb28, text: "в 23:45", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T23:45"} }
+  - { id: nv11-dst, text: "в 23:45", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T23:45"} }
+
+  # 12. «через час»
+  - { id: nv12-mon, text: "через час", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T08:00"} }
+  - { id: nv12-fri, text: "через час", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T00:30"} }
+  - { id: nv12-sun, text: "через час", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T00:50"} }
+  - { id: nv12-dec31, text: "через час", now: "2026-12-31T18:00", expect: {"datetime":"2026-12-31T19:00"} }
+  - { id: nv12-feb28, text: "через час", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T13:00"} }
+  - { id: nv12-dst, text: "через час", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "01:30 CEST + 1 ч = 02:30 CEST (первое вхождение) — верно", expect: {"datetime":"2026-10-25T02:30"} }
+
+  # 13. «через полтора часа»
+  - { id: nv13-mon, text: "через полтора часа", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T08:30"} }
+  - { id: nv13-fri, text: "через полтора часа", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T01:00"} }
+  - { id: nv13-sun, text: "через полтора часа", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T01:20"} }
+  - { id: nv13-dec31, text: "через полтора часа", now: "2026-12-31T18:00", expect: {"datetime":"2026-12-31T19:30"} }
+  - { id: nv13-feb28, text: "через полтора часа", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T13:30"} }
+  - { id: nv13-dst, text: "через полтора часа", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ: 01:30 CEST + 1,5 ч = 02:00 CET (второе вхождение), а локальное «02:00» адаптер календаря читает как первое (CEST) — событие на час раньше. Формат без смещения этого не выражает; бывает раз в год в повторяющийся час", expect: {"datetime":"2026-10-25T02:00"} }
+
+  # 14. «через 3 дня»
+  - { id: nv14-mon, text: "через 3 дня", now: "2026-10-12T07:00", expect: {"date":"2026-10-15"} }
+  - { id: nv14-fri, text: "через 3 дня", now: "2026-10-16T23:30", expect: {"date":"2026-10-19"} }
+  - { id: nv14-sun, text: "через 3 дня", now: "2026-10-18T23:50", expect: {"date":"2026-10-21"} }
+  - { id: nv14-dec31, text: "через 3 дня", now: "2026-12-31T18:00", expect: {"date":"2027-01-03"} }
+  - { id: nv14-feb28, text: "через 3 дня", now: "2027-02-28T12:00", expect: {"date":"2027-03-03"} }
+  - { id: nv14-dst, text: "через 3 дня", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-28"} }
+
+  # 15. «через неделю»
+  - { id: nv15-mon, text: "через неделю", now: "2026-10-12T07:00", expect: {"date":"2026-10-19"} }
+  - { id: nv15-fri, text: "через неделю", now: "2026-10-16T23:30", expect: {"date":"2026-10-23"} }
+  - { id: nv15-sun, text: "через неделю", now: "2026-10-18T23:50", expect: {"date":"2026-10-25"} }
+  - { id: nv15-dec31, text: "через неделю", now: "2026-12-31T18:00", expect: {"date":"2027-01-07"} }
+  - { id: nv15-feb28, text: "через неделю", now: "2027-02-28T12:00", expect: {"date":"2027-03-07"} }
+  - { id: nv15-dst, text: "через неделю", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-11-01"} }
+
+  # 16. «через месяц»
+  - { id: nv16-mon, text: "через месяц", now: "2026-10-12T07:00", expect: {"date":"2026-11-12"} }
+  - { id: nv16-fri, text: "через месяц", now: "2026-10-16T23:30", expect: {"date":"2026-11-16"} }
+  - { id: nv16-sun, text: "через месяц", now: "2026-10-18T23:50", expect: {"date":"2026-11-18"} }
+  - { id: nv16-dec31, text: "через месяц", now: "2026-12-31T18:00", expect: {"date":"2027-01-31"} }
+  - { id: nv16-feb28, text: "через месяц", now: "2027-02-28T12:00", expect: {"date":"2027-03-28"} }
+  - { id: nv16-dst, text: "через месяц", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-11-25"} }
+
+  # 17. «через 2 недели в 10»
+  - { id: nv17-mon, text: "через 2 недели в 10", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-26T10:00"} }
+  - { id: nv17-fri, text: "через 2 недели в 10", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-30T10:00"} }
+  - { id: nv17-sun, text: "через 2 недели в 10", now: "2026-10-18T23:50", expect: {"datetime":"2026-11-01T10:00"} }
+  - { id: nv17-dec31, text: "через 2 недели в 10", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-14T10:00"} }
+  - { id: nv17-feb28, text: "через 2 недели в 10", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-14T10:00"} }
+  - { id: nv17-dst, text: "через 2 недели в 10", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-11-08T10:00"} }
+
+  # 18. «через сутки»
+  - { id: nv18-mon, text: "через сутки", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-13T07:00"} }
+  - { id: nv18-fri, text: "через сутки", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T23:30"} }
+  - { id: nv18-sun, text: "через сутки", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T23:50"} }
+  - { id: nv18-dec31, text: "через сутки", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T18:00"} }
+  - { id: nv18-feb28, text: "через сутки", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T12:00"} }
+  - { id: nv18-dst, text: "через сутки", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "сутки = 24 реальных часа через переход: 00:30 следующего дня по местному", expect: {"datetime":"2026-10-26T00:30"} }
+
+  # 19. «в понедельник в 10»
+  - { id: nv19-mon, text: "в понедельник в 10", now: "2026-10-12T07:00", expect: {"ambiguous":[{"datetime":"2026-10-12T10:00"},{"datetime":"2026-10-19T10:00"}]} }
+  - { id: nv19-fri, text: "в понедельник в 10", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-19T10:00"} }
+  - { id: nv19-sun, text: "в понедельник в 10", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T10:00"} }
+  - { id: nv19-dec31, text: "в понедельник в 10", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-04T10:00"} }
+  - { id: nv19-feb28, text: "в понедельник в 10", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T10:00"} }
+  - { id: nv19-dst, text: "в понедельник в 10", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-26T10:00"} }
+
+  # 20. «в пятницу в 19»
+  - { id: nv20-mon, text: "в пятницу в 19", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-16T19:00"} }
+  - { id: nv20-fri, text: "в пятницу в 19", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-23T19:00"} }
+  - { id: nv20-sun, text: "в пятницу в 19", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-23T19:00"} }
+  - { id: nv20-dec31, text: "в пятницу в 19", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T19:00"} }
+  - { id: nv20-feb28, text: "в пятницу в 19", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-05T19:00"} }
+  - { id: nv20-dst, text: "в пятницу в 19", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-30T19:00"} }
+
+  # 21. «в эту пятницу»
+  - { id: nv21-mon, text: "в эту пятницу", now: "2026-10-12T07:00", expect: {"date":"2026-10-16"} }
+  - { id: nv21-fri, text: "в эту пятницу", now: "2026-10-16T23:30", expect: {"date":"2026-10-16"} }
+  - { id: nv21-sun, text: "в эту пятницу", now: "2026-10-18T23:50", expect: {"date":"2026-10-23"} }
+  - { id: nv21-dec31, text: "в эту пятницу", now: "2026-12-31T18:00", expect: {"date":"2027-01-01"} }
+  - { id: nv21-feb28, text: "в эту пятницу", now: "2027-02-28T12:00", expect: {"date":"2027-03-05"} }
+  - { id: nv21-dst, text: "в эту пятницу", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-30"} }
+
+  # 22. «в следующую пятницу»
+  - { id: nv22-mon, text: "в следующую пятницу", now: "2026-10-12T07:00", expect: {"ambiguous":[{"date":"2026-10-16"},{"date":"2026-10-23"}]} }
+  - { id: nv22-fri, text: "в следующую пятницу", now: "2026-10-16T23:30", expect: {"ambiguous":[{"date":"2026-10-23"},{"date":"2026-10-30"}]} }
+  - { id: nv22-sun, text: "в следующую пятницу", now: "2026-10-18T23:50", expect: {"ambiguous":[{"date":"2026-10-23"},{"date":"2026-10-30"}]} }
+  - { id: nv22-dec31, text: "в следующую пятницу", now: "2026-12-31T18:00", expect: {"ambiguous":[{"date":"2027-01-01"},{"date":"2027-01-08"}]} }
+  - { id: nv22-feb28, text: "в следующую пятницу", now: "2027-02-28T12:00", expect: {"ambiguous":[{"date":"2027-03-05"},{"date":"2027-03-12"}]} }
+  - { id: nv22-dst, text: "в следующую пятницу", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"ambiguous":[{"date":"2026-10-30"},{"date":"2026-11-06"}]} }
+
+  # 23. «в воскресенье в 12»
+  - { id: nv23-mon, text: "в воскресенье в 12", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-18T12:00"} }
+  - { id: nv23-fri, text: "в воскресенье в 12", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-18T12:00"} }
+  - { id: nv23-sun, text: "в воскресенье в 12", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-25T12:00"} }
+  - { id: nv23-dec31, text: "в воскресенье в 12", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-03T12:00"} }
+  - { id: nv23-feb28, text: "в воскресенье в 12", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-07T12:00"} }
+  - { id: nv23-dst, text: "в воскресенье в 12", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "воскресенье сегодня, 12:00 впереди — варианты сегодня / через неделю", expect: {"ambiguous":[{"datetime":"2026-10-25T12:00"},{"datetime":"2026-11-01T12:00"}]} }
+
+  # 24. «в субботу утром»
+  - { id: nv24-mon, text: "в субботу утром", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-17","part":"morning"}} }
+  - { id: nv24-fri, text: "в субботу утром", now: "2026-10-16T23:30", expect: {"date":{"date":"2026-10-17","part":"morning"}} }
+  - { id: nv24-sun, text: "в субботу утром", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-24","part":"morning"}} }
+  - { id: nv24-dec31, text: "в субботу утром", now: "2026-12-31T18:00", expect: {"date":{"date":"2027-01-02","part":"morning"}} }
+  - { id: nv24-feb28, text: "в субботу утром", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-03-06","part":"morning"}} }
+  - { id: nv24-dst, text: "в субботу утром", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-31","part":"morning"}} }
+
+  # 25. «в среду на следующей неделе в 11»
+  - { id: nv25-mon, text: "в среду на следующей неделе в 11", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-21T11:00"} }
+  - { id: nv25-fri, text: "в среду на следующей неделе в 11", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-21T11:00"} }
+  - { id: nv25-sun, text: "в среду на следующей неделе в 11", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-21T11:00"} }
+  - { id: nv25-dec31, text: "в среду на следующей неделе в 11", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-06T11:00"} }
+  - { id: nv25-feb28, text: "в среду на следующей неделе в 11", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-03T11:00"} }
+  - { id: nv25-dst, text: "в среду на следующей неделе в 11", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-28T11:00"} }
+
+  # 26. «в понедельник через неделю»
+  - { id: nv26-mon, text: "в понедельник через неделю", now: "2026-10-12T07:00", note: "ИСПРАВЛЕНО: в понедельник «в понедельник через неделю» — через 7 дней (19-е); было 26-е (ближайший следующий понедельник + 7)", expect: {"date":"2026-10-19"} }
+  - { id: nv26-fri, text: "в понедельник через неделю", now: "2026-10-16T23:30", expect: {"date":"2026-10-26"} }
+  - { id: nv26-sun, text: "в понедельник через неделю", now: "2026-10-18T23:50", expect: {"date":"2026-10-26"} }
+  - { id: nv26-dec31, text: "в понедельник через неделю", now: "2026-12-31T18:00", expect: {"date":"2027-01-11"} }
+  - { id: nv26-feb28, text: "в понедельник через неделю", now: "2027-02-28T12:00", expect: {"date":"2027-03-08"} }
+  - { id: nv26-dst, text: "в понедельник через неделю", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-11-02"} }
+
+  # 27. «через неделю в понедельник»
+  - { id: nv27-mon, text: "через неделю в понедельник", now: "2026-10-12T07:00", note: "ИСПРАВЛЕНО: «через неделю в понедельник» = «в понедельник через неделю»; было unparseable", expect: {"date":"2026-10-19"} }
+  - { id: nv27-fri, text: "через неделю в понедельник", now: "2026-10-16T23:30", expect: {"date":"2026-10-26"} }
+  - { id: nv27-sun, text: "через неделю в понедельник", now: "2026-10-18T23:50", expect: {"date":"2026-10-26"} }
+  - { id: nv27-dec31, text: "через неделю в понедельник", now: "2026-12-31T18:00", expect: {"date":"2027-01-11"} }
+  - { id: nv27-feb28, text: "через неделю в понедельник", now: "2027-02-28T12:00", expect: {"date":"2027-03-08"} }
+  - { id: nv27-dst, text: "через неделю в понедельник", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-11-02"} }
+
+  # 28. «на выходных»
+  - { id: nv28-mon, text: "на выходных", now: "2026-10-12T07:00", expect: {"ambiguous":[{"date":"2026-10-17"},{"date":"2026-10-18"}]} }
+  - { id: nv28-fri, text: "на выходных", now: "2026-10-16T23:30", expect: {"ambiguous":[{"date":"2026-10-17"},{"date":"2026-10-18"}]} }
+  - { id: nv28-sun, text: "на выходных", now: "2026-10-18T23:50", note: "в воскресенье «на выходных» — только сегодня (date-rules, «Создание события»), даже в 23:50", expect: {"date":"2026-10-18"} }
+  - { id: nv28-dec31, text: "на выходных", now: "2026-12-31T18:00", expect: {"ambiguous":[{"date":"2027-01-02"},{"date":"2027-01-03"}]} }
+  - { id: nv28-feb28, text: "на выходных", now: "2027-02-28T12:00", expect: {"date":"2027-02-28"} }
+  - { id: nv28-dst, text: "на выходных", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-25"} }
+
+  # 29. «в выходные в 12»
+  - { id: nv29-mon, text: "в выходные в 12", now: "2026-10-12T07:00", expect: {"ambiguous":[{"datetime":"2026-10-17T12:00"},{"datetime":"2026-10-18T12:00"}]} }
+  - { id: nv29-fri, text: "в выходные в 12", now: "2026-10-16T23:30", expect: {"ambiguous":[{"datetime":"2026-10-17T12:00"},{"datetime":"2026-10-18T12:00"}]} }
+  - { id: nv29-sun, text: "в выходные в 12", now: "2026-10-18T23:50", note: "в вс 23:50 «в выходные в 12» — сегодняшние 12:00 прошли: in_past (переспросить)", expect: {"error":"in_past"} }
+  - { id: nv29-dec31, text: "в выходные в 12", now: "2026-12-31T18:00", expect: {"ambiguous":[{"datetime":"2027-01-02T12:00"},{"datetime":"2027-01-03T12:00"}]} }
+  - { id: nv29-feb28, text: "в выходные в 12", now: "2027-02-28T12:00", note: "12:00 = «сейчас» — считается прошедшим", expect: {"error":"in_past"} }
+  - { id: nv29-dst, text: "в выходные в 12", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T12:00"} }
+
+  # 30. «на неделе»
+  - { id: nv30-mon, text: "на неделе", now: "2026-10-12T07:00", expect: {"date":"2026-10-14"} }
+  - { id: nv30-fri, text: "на неделе", now: "2026-10-16T23:30", expect: {"date":"2026-10-21"} }
+  - { id: nv30-sun, text: "на неделе", now: "2026-10-18T23:50", expect: {"date":"2026-10-21"} }
+  - { id: nv30-dec31, text: "на неделе", now: "2026-12-31T18:00", note: "чт → пт (1 января): праздники парсер не знает", expect: {"date":"2027-01-01"} }
+  - { id: nv30-feb28, text: "на неделе", now: "2027-02-28T12:00", expect: {"date":"2027-03-03"} }
+  - { id: nv30-dst, text: "на неделе", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-28"} }
+
+  # 31. «на этой неделе в 15»
+  - { id: nv31-mon, text: "на этой неделе в 15", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-14T15:00"} }
+  - { id: nv31-fri, text: "на этой неделе в 15", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-21T15:00"} }
+  - { id: nv31-sun, text: "на этой неделе в 15", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-21T15:00"} }
+  - { id: nv31-dec31, text: "на этой неделе в 15", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T15:00"} }
+  - { id: nv31-feb28, text: "на этой неделе в 15", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-03T15:00"} }
+  - { id: nv31-dst, text: "на этой неделе в 15", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-28T15:00"} }
+
+  # 32. «к пятнице»
+  - { id: nv32-mon, text: "к пятнице", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-16T09:00"} }
+  - { id: nv32-fri, text: "к пятнице", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-23T09:00"} }
+  - { id: nv32-sun, text: "к пятнице", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-23T09:00"} }
+  - { id: nv32-dec31, text: "к пятнице", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T09:00"} }
+  - { id: nv32-feb28, text: "к пятнице", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-05T09:00"} }
+  - { id: nv32-dst, text: "к пятнице", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-30T09:00"} }
+
+  # 33. «к 18»
+  - { id: nv33-mon, text: "к 18", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T18:00"} }
+  - { id: nv33-fri, text: "к 18", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T18:00"} }
+  - { id: nv33-sun, text: "к 18", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T18:00"} }
+  - { id: nv33-dec31, text: "к 18", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T18:00"} }
+  - { id: nv33-feb28, text: "к 18", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T18:00"} }
+  - { id: nv33-dst, text: "к 18", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T18:00"} }
+
+  # 34. «в конце месяца»
+  - { id: nv34-mon, text: "в конце месяца", now: "2026-10-12T07:00", expect: {"error":"unparseable"} }
+  - { id: nv34-fri, text: "в конце месяца", now: "2026-10-16T23:30", expect: {"error":"unparseable"} }
+  - { id: nv34-sun, text: "в конце месяца", now: "2026-10-18T23:50", expect: {"error":"unparseable"} }
+  - { id: nv34-dec31, text: "в конце месяца", now: "2026-12-31T18:00", expect: {"error":"unparseable"} }
+  - { id: nv34-feb28, text: "в конце месяца", now: "2027-02-28T12:00", expect: {"error":"unparseable"} }
+  - { id: nv34-dst, text: "в конце месяца", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"error":"unparseable"} }
+
+  # 35. «1-го в 10»
+  - { id: nv35-mon, text: "1-го в 10", now: "2026-10-12T07:00", expect: {"datetime":"2026-11-01T10:00"} }
+  - { id: nv35-fri, text: "1-го в 10", now: "2026-10-16T23:30", expect: {"datetime":"2026-11-01T10:00"} }
+  - { id: nv35-sun, text: "1-го в 10", now: "2026-10-18T23:50", expect: {"datetime":"2026-11-01T10:00"} }
+  - { id: nv35-dec31, text: "1-го в 10", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T10:00"} }
+  - { id: nv35-feb28, text: "1-го в 10", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T10:00"} }
+  - { id: nv35-dst, text: "1-го в 10", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-11-01T10:00"} }
+
+  # 36. «31-го»
+  - { id: nv36-mon, text: "31-го", now: "2026-10-12T07:00", expect: {"date":"2026-10-31"} }
+  - { id: nv36-fri, text: "31-го", now: "2026-10-16T23:30", expect: {"date":"2026-10-31"} }
+  - { id: nv36-sun, text: "31-го", now: "2026-10-18T23:50", expect: {"date":"2026-10-31"} }
+  - { id: nv36-dec31, text: "31-го", now: "2026-12-31T18:00", expect: {"date":"2026-12-31"} }
+  - { id: nv36-feb28, text: "31-го", now: "2027-02-28T12:00", expect: {"date":"2027-03-31"} }
+  - { id: nv36-dst, text: "31-го", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-31"} }
+
+  # 37. «29 февраля»
+  - { id: nv37-mon, text: "29 февраля", now: "2026-10-12T07:00", expect: {"date":"2028-02-29"} }
+  - { id: nv37-fri, text: "29 февраля", now: "2026-10-16T23:30", expect: {"date":"2028-02-29"} }
+  - { id: nv37-sun, text: "29 февраля", now: "2026-10-18T23:50", expect: {"date":"2028-02-29"} }
+  - { id: nv37-dec31, text: "29 февраля", now: "2026-12-31T18:00", expect: {"date":"2028-02-29"} }
+  - { id: nv37-feb28, text: "29 февраля", now: "2027-02-28T12:00", expect: {"date":"2028-02-29"} }
+  - { id: nv37-dst, text: "29 февраля", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2028-02-29"} }
+
+  # 38. «1 января в 12»
+  - { id: nv38-mon, text: "1 января в 12", now: "2026-10-12T07:00", expect: {"datetime":"2027-01-01T12:00"} }
+  - { id: nv38-fri, text: "1 января в 12", now: "2026-10-16T23:30", expect: {"datetime":"2027-01-01T12:00"} }
+  - { id: nv38-sun, text: "1 января в 12", now: "2026-10-18T23:50", expect: {"datetime":"2027-01-01T12:00"} }
+  - { id: nv38-dec31, text: "1 января в 12", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T12:00"} }
+  - { id: nv38-feb28, text: "1 января в 12", now: "2027-02-28T12:00", expect: {"datetime":"2028-01-01T12:00"} }
+  - { id: nv38-dst, text: "1 января в 12", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2027-01-01T12:00"} }
+
+  # 39. «14.02 в 19»
+  - { id: nv39-mon, text: "14.02 в 19", now: "2026-10-12T07:00", expect: {"datetime":"2027-02-14T19:00"} }
+  - { id: nv39-fri, text: "14.02 в 19", now: "2026-10-16T23:30", expect: {"datetime":"2027-02-14T19:00"} }
+  - { id: nv39-sun, text: "14.02 в 19", now: "2026-10-18T23:50", expect: {"datetime":"2027-02-14T19:00"} }
+  - { id: nv39-dec31, text: "14.02 в 19", now: "2026-12-31T18:00", expect: {"datetime":"2027-02-14T19:00"} }
+  - { id: nv39-feb28, text: "14.02 в 19", now: "2027-02-28T12:00", expect: {"datetime":"2028-02-14T19:00"} }
+  - { id: nv39-dst, text: "14.02 в 19", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2027-02-14T19:00"} }
+
+  # 40. «в полночь»
+  - { id: nv40-mon, text: "в полночь", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-13T00:00"} }
+  - { id: nv40-fri, text: "в полночь", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T00:00"} }
+  - { id: nv40-sun, text: "в полночь", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T00:00"} }
+  - { id: nv40-dec31, text: "в полночь", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T00:00"} }
+  - { id: nv40-feb28, text: "в полночь", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T00:00"} }
+  - { id: nv40-dst, text: "в полночь", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-26T00:00"} }
+
+  # 41. «утром»
+  - { id: nv41-mon, text: "утром", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-12","part":"morning"}} }
+  - { id: nv41-fri, text: "утром", now: "2026-10-16T23:30", note: "ИСПРАВЛЕНО: утро уже кончилось — ближайшее утро, завтра; было сегодняшнее (прошедшее) утро", expect: {"date":{"date":"2026-10-17","part":"morning"}} }
+  - { id: nv41-sun, text: "утром", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-19","part":"morning"}} }
+  - { id: nv41-dec31, text: "утром", now: "2026-12-31T18:00", expect: {"date":{"date":"2027-01-01","part":"morning"}} }
+  - { id: nv41-feb28, text: "утром", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-03-01","part":"morning"}} }
+  - { id: nv41-dst, text: "утром", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-25","part":"morning"}} }
+
+  # 42. «ближе к вечеру»
+  - { id: nv42-mon, text: "ближе к вечеру", now: "2026-10-12T07:00", expect: {"date":{"date":"2026-10-12","part":"late_afternoon"}} }
+  - { id: nv42-fri, text: "ближе к вечеру", now: "2026-10-16T23:30", note: "ИСПРАВЛЕНО: «ближе к вечеру» (16–20) в 23:30 — завтра; было сегодня", expect: {"date":{"date":"2026-10-17","part":"late_afternoon"}} }
+  - { id: nv42-sun, text: "ближе к вечеру", now: "2026-10-18T23:50", expect: {"date":{"date":"2026-10-19","part":"late_afternoon"}} }
+  - { id: nv42-dec31, text: "ближе к вечеру", now: "2026-12-31T18:00", note: "18:00 — часть суток ещё идёт: сегодня", expect: {"date":{"date":"2026-12-31","part":"late_afternoon"}} }
+  - { id: nv42-feb28, text: "ближе к вечеру", now: "2027-02-28T12:00", expect: {"date":{"date":"2027-02-28","part":"late_afternoon"}} }
+  - { id: nv42-dst, text: "ближе к вечеру", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":{"date":"2026-10-25","part":"late_afternoon"}} }
+
+  # 43. «с 10 до 12»
+  - { id: nv43-mon, text: "с 10 до 12", now: "2026-10-12T07:00", expect: {"interval":{"start":"2026-10-12T10:00","end":"2026-10-12T12:00"}} }
+  - { id: nv43-fri, text: "с 10 до 12", now: "2026-10-16T23:30", note: "ИСПРАВЛЕНО: интервал без дня, целиком прошедший, — завтра; было сегодня 10–12 (в прошлом). Идущий сейчас — сегодня (d12-004)", expect: {"interval":{"start":"2026-10-17T10:00","end":"2026-10-17T12:00"}} }
+  - { id: nv43-sun, text: "с 10 до 12", now: "2026-10-18T23:50", expect: {"interval":{"start":"2026-10-19T10:00","end":"2026-10-19T12:00"}} }
+  - { id: nv43-dec31, text: "с 10 до 12", now: "2026-12-31T18:00", expect: {"interval":{"start":"2027-01-01T10:00","end":"2027-01-01T12:00"}} }
+  - { id: nv43-feb28, text: "с 10 до 12", now: "2027-02-28T12:00", expect: {"interval":{"start":"2027-03-01T10:00","end":"2027-03-01T12:00"}} }
+  - { id: nv43-dst, text: "с 10 до 12", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"interval":{"start":"2026-10-25T10:00","end":"2026-10-25T12:00"}} }
+
+  # 44. «завтра с 23 до 2»
+  - { id: nv44-mon, text: "завтра с 23 до 2", now: "2026-10-12T07:00", expect: {"interval":{"start":"2026-10-13T23:00","end":"2026-10-14T02:00"}} }
+  - { id: nv44-fri, text: "завтра с 23 до 2", now: "2026-10-16T23:30", expect: {"interval":{"start":"2026-10-17T23:00","end":"2026-10-18T02:00"}} }
+  - { id: nv44-sun, text: "завтра с 23 до 2", now: "2026-10-18T23:50", expect: {"interval":{"start":"2026-10-19T23:00","end":"2026-10-20T02:00"}} }
+  - { id: nv44-dec31, text: "завтра с 23 до 2", now: "2026-12-31T18:00", expect: {"interval":{"start":"2027-01-01T23:00","end":"2027-01-02T02:00"}} }
+  - { id: nv44-feb28, text: "завтра с 23 до 2", now: "2027-02-28T12:00", expect: {"interval":{"start":"2027-03-01T23:00","end":"2027-03-02T02:00"}} }
+  - { id: nv44-dst, text: "завтра с 23 до 2", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"interval":{"start":"2026-10-26T23:00","end":"2026-10-27T02:00"}} }
+
+  # 45. «в пятницу в 3 ночи»
+  - { id: nv45-mon, text: "в пятницу в 3 ночи", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-17T03:00"} }
+  - { id: nv45-fri, text: "в пятницу в 3 ночи", now: "2026-10-16T23:30", note: "пятница сегодня: ночь после неё (сб 03:00) впереди — варианты сегодня / через неделю, как «в среду в 12» в среду", expect: {"ambiguous":[{"datetime":"2026-10-17T03:00"},{"datetime":"2026-10-24T03:00"}]} }
+  - { id: nv45-sun, text: "в пятницу в 3 ночи", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-24T03:00"} }
+  - { id: nv45-dec31, text: "в пятницу в 3 ночи", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-02T03:00"} }
+  - { id: nv45-feb28, text: "в пятницу в 3 ночи", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-06T03:00"} }
+  - { id: nv45-dst, text: "в пятницу в 3 ночи", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-31T03:00"} }
+
+  # 46. «tomorrow at 3pm»
+  - { id: nv46-mon, text: "tomorrow at 3pm", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-13T15:00"} }
+  - { id: nv46-fri, text: "tomorrow at 3pm", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T15:00"} }
+  - { id: nv46-sun, text: "tomorrow at 3pm", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T15:00"} }
+  - { id: nv46-dec31, text: "tomorrow at 3pm", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T15:00"} }
+  - { id: nv46-feb28, text: "tomorrow at 3pm", now: "2027-02-28T12:00", expect: {"datetime":"2027-03-01T15:00"} }
+  - { id: nv46-dst, text: "tomorrow at 3pm", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-26T15:00"} }
+
+  # 47. «next Friday»
+  - { id: nv47-mon, text: "next Friday", now: "2026-10-12T07:00", expect: {"ambiguous":[{"date":"2026-10-16"},{"date":"2026-10-23"}]} }
+  - { id: nv47-fri, text: "next Friday", now: "2026-10-16T23:30", expect: {"ambiguous":[{"date":"2026-10-23"},{"date":"2026-10-30"}]} }
+  - { id: nv47-sun, text: "next Friday", now: "2026-10-18T23:50", expect: {"ambiguous":[{"date":"2026-10-23"},{"date":"2026-10-30"}]} }
+  - { id: nv47-dec31, text: "next Friday", now: "2026-12-31T18:00", expect: {"ambiguous":[{"date":"2027-01-01"},{"date":"2027-01-08"}]} }
+  - { id: nv47-feb28, text: "next Friday", now: "2027-02-28T12:00", expect: {"ambiguous":[{"date":"2027-03-05"},{"date":"2027-03-12"}]} }
+  - { id: nv47-dst, text: "next Friday", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"ambiguous":[{"date":"2026-10-30"},{"date":"2026-11-06"}]} }
+
+  # 48. «this weekend»
+  - { id: nv48-mon, text: "this weekend", now: "2026-10-12T07:00", expect: {"ambiguous":[{"date":"2026-10-17"},{"date":"2026-10-18"}]} }
+  - { id: nv48-fri, text: "this weekend", now: "2026-10-16T23:30", expect: {"ambiguous":[{"date":"2026-10-17"},{"date":"2026-10-18"}]} }
+  - { id: nv48-sun, text: "this weekend", now: "2026-10-18T23:50", expect: {"date":"2026-10-18"} }
+  - { id: nv48-dec31, text: "this weekend", now: "2026-12-31T18:00", expect: {"ambiguous":[{"date":"2027-01-02"},{"date":"2027-01-03"}]} }
+  - { id: nv48-feb28, text: "this weekend", now: "2027-02-28T12:00", expect: {"date":"2027-02-28"} }
+  - { id: nv48-dst, text: "this weekend", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"date":"2026-10-25"} }
+
+  # 49. «tonight at 8»
+  - { id: nv49-mon, text: "tonight at 8", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T20:00"} }
+  - { id: nv49-fri, text: "tonight at 8", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T20:00"} }
+  - { id: nv49-sun, text: "tonight at 8", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T20:00"} }
+  - { id: nv49-dec31, text: "tonight at 8", now: "2026-12-31T18:00", expect: {"datetime":"2026-12-31T20:00"} }
+  - { id: nv49-feb28, text: "tonight at 8", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T20:00"} }
+  - { id: nv49-dst, text: "tonight at 8", now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"datetime":"2026-10-25T20:00"} }
+
+  # 50. «в 15:00 по Киеву»
+  - { id: nv50-mon, text: "в 15:00 по Киеву", now: "2026-10-12T07:00", note: "Киев в октябре UTC+3 = Москва", expect: {"datetime":"2026-10-12T15:00"} }
+  - { id: nv50-fri, text: "в 15:00 по Киеву", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T15:00"} }
+  - { id: nv50-sun, text: "в 15:00 по Киеву", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T15:00"} }
+  - { id: nv50-dec31, text: "в 15:00 по Киеву", now: "2026-12-31T18:00", note: "Киев зимой UTC+2: 15:00 по Киеву = 16:00 МСК; «сегодня» по Киеву (17:00) — 15:00 прошло, завтра", expect: {"datetime":"2027-01-01T16:00"} }
+  - { id: nv50-feb28, text: "в 15:00 по Киеву", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T16:00"} }
+  - { id: nv50-dst, text: "в 15:00 по Киеву", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "в Берлине 01:30 CEST; 15:00 по Киеву 25.10 (EET, UTC+2) = 13:00 UTC = 14:00 CET", expect: {"datetime":"2026-10-25T14:00"} }
+
+  # 51. «at 3pm London time»
+  - { id: nv51-mon, text: "at 3pm London time", now: "2026-10-12T07:00", expect: {"datetime":"2026-10-12T17:00"} }
+  - { id: nv51-fri, text: "at 3pm London time", now: "2026-10-16T23:30", expect: {"datetime":"2026-10-17T17:00"} }
+  - { id: nv51-sun, text: "at 3pm London time", now: "2026-10-18T23:50", expect: {"datetime":"2026-10-19T17:00"} }
+  - { id: nv51-dec31, text: "at 3pm London time", now: "2026-12-31T18:00", expect: {"datetime":"2027-01-01T18:00"} }
+  - { id: nv51-feb28, text: "at 3pm London time", now: "2027-02-28T12:00", expect: {"datetime":"2027-02-28T18:00"} }
+  - { id: nv51-dst, text: "at 3pm London time", now: "2026-10-25T01:30", tz: Europe/Berlin, note: "Лондон перешёл на GMT: 15:00 GMT = 16:00 CET", expect: {"datetime":"2026-10-25T16:00"} }
+
+  # 52. «в конце месяца» (range)
+  - { id: nv52-mon, text: "в конце месяца", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2026-10-21","to":"2026-10-31"}} }
+  - { id: nv52-fri, text: "в конце месяца", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2026-10-21","to":"2026-10-31"}} }
+  - { id: nv52-sun, text: "в конце месяца", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2026-10-21","to":"2026-10-31"}} }
+  - { id: nv52-dec31, text: "в конце месяца", kind: range, now: "2026-12-31T18:00", note: "конец месяца — с сегодня до последнего дня: 31 декабря — один день", expect: {"range":{"from":"2026-12-31","to":"2026-12-31"}} }
+  - { id: nv52-feb28, text: "в конце месяца", kind: range, now: "2027-02-28T12:00", note: "невисокосный февраль: 21–28, с сегодня — один день", expect: {"range":{"from":"2027-02-28","to":"2027-02-28"}} }
+  - { id: nv52-dst, text: "в конце месяца", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2026-10-25","to":"2026-10-31"}} }
+
+  # 53. «на следующей неделе» (range)
+  - { id: nv53-mon, text: "на следующей неделе", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2026-10-19","to":"2026-10-25"}} }
+  - { id: nv53-fri, text: "на следующей неделе", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2026-10-19","to":"2026-10-25"}} }
+  - { id: nv53-sun, text: "на следующей неделе", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2026-10-19","to":"2026-10-25"}} }
+  - { id: nv53-dec31, text: "на следующей неделе", kind: range, now: "2026-12-31T18:00", expect: {"range":{"from":"2027-01-04","to":"2027-01-10"}} }
+  - { id: nv53-feb28, text: "на следующей неделе", kind: range, now: "2027-02-28T12:00", expect: {"range":{"from":"2027-03-01","to":"2027-03-07"}} }
+  - { id: nv53-dst, text: "на следующей неделе", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2026-10-26","to":"2026-11-01"}} }
+
+  # 54. «на следующих выходных» (range)
+  - { id: nv54-mon, text: "на следующих выходных", kind: range, now: "2026-10-12T07:00", expect: {"ambiguous":[{"range":{"from":"2026-10-17","to":"2026-10-18"}},{"range":{"from":"2026-10-24","to":"2026-10-25"}}]} }
+  - { id: nv54-fri, text: "на следующих выходных", kind: range, now: "2026-10-16T23:30", expect: {"ambiguous":[{"range":{"from":"2026-10-17","to":"2026-10-18"}},{"range":{"from":"2026-10-24","to":"2026-10-25"}}]} }
+  - { id: nv54-sun, text: "на следующих выходных", kind: range, now: "2026-10-18T23:50", note: "ИСПРАВЛЕНО: в сб/вс «на следующих выходных» — ближайшие выходные после текущих (как «в следующую пятницу» в пятницу); было: остаток текущих", expect: {"ambiguous":[{"range":{"from":"2026-10-24","to":"2026-10-25"}},{"range":{"from":"2026-10-31","to":"2026-11-01"}}]} }
+  - { id: nv54-dec31, text: "на следующих выходных", kind: range, now: "2026-12-31T18:00", expect: {"ambiguous":[{"range":{"from":"2027-01-02","to":"2027-01-03"}},{"range":{"from":"2027-01-09","to":"2027-01-10"}}]} }
+  - { id: nv54-feb28, text: "на следующих выходных", kind: range, now: "2027-02-28T12:00", note: "ИСПРАВЛЕНО (см. nv54-sun)", expect: {"ambiguous":[{"range":{"from":"2027-03-06","to":"2027-03-07"}},{"range":{"from":"2027-03-13","to":"2027-03-14"}}]} }
+  - { id: nv54-dst, text: "на следующих выходных", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, note: "ИСПРАВЛЕНО (см. nv54-sun)", expect: {"ambiguous":[{"range":{"from":"2026-10-31","to":"2026-11-01"}},{"range":{"from":"2026-11-07","to":"2026-11-08"}}]} }
+
+  # 55. «в этом месяце» (range)
+  - { id: nv55-mon, text: "в этом месяце", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2026-10-12","to":"2026-10-31"}} }
+  - { id: nv55-fri, text: "в этом месяце", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2026-10-16","to":"2026-10-31"}} }
+  - { id: nv55-sun, text: "в этом месяце", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2026-10-18","to":"2026-10-31"}} }
+  - { id: nv55-dec31, text: "в этом месяце", kind: range, now: "2026-12-31T18:00", expect: {"range":{"from":"2026-12-31","to":"2026-12-31"}} }
+  - { id: nv55-feb28, text: "в этом месяце", kind: range, now: "2027-02-28T12:00", expect: {"range":{"from":"2027-02-28","to":"2027-02-28"}} }
+  - { id: nv55-dst, text: "в этом месяце", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2026-10-25","to":"2026-10-31"}} }
+
+  # 56. «до конца недели» (range)
+  - { id: nv56-mon, text: "до конца недели", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2026-10-12","to":"2026-10-18"}} }
+  - { id: nv56-fri, text: "до конца недели", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2026-10-16","to":"2026-10-18"}} }
+  - { id: nv56-sun, text: "до конца недели", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2026-10-18","to":"2026-10-18"}} }
+  - { id: nv56-dec31, text: "до конца недели", kind: range, now: "2026-12-31T18:00", expect: {"range":{"from":"2026-12-31","to":"2027-01-03"}} }
+  - { id: nv56-feb28, text: "до конца недели", kind: range, now: "2027-02-28T12:00", expect: {"range":{"from":"2027-02-28","to":"2027-02-28"}} }
+  - { id: nv56-dst, text: "до конца недели", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2026-10-25","to":"2026-10-25"}} }
+
+  # 57. «в начале месяца» (range)
+  - { id: nv57-mon, text: "в начале месяца", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2026-11-01","to":"2026-11-10"}} }
+  - { id: nv57-fri, text: "в начале месяца", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2026-11-01","to":"2026-11-10"}} }
+  - { id: nv57-sun, text: "в начале месяца", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2026-11-01","to":"2026-11-10"}} }
+  - { id: nv57-dec31, text: "в начале месяца", kind: range, now: "2026-12-31T18:00", expect: {"range":{"from":"2027-01-01","to":"2027-01-10"}} }
+  - { id: nv57-feb28, text: "в начале месяца", kind: range, now: "2027-02-28T12:00", expect: {"range":{"from":"2027-03-01","to":"2027-03-10"}} }
+  - { id: nv57-dst, text: "в начале месяца", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2026-11-01","to":"2026-11-10"}} }
+
+  # 58. «в январе» (range)
+  - { id: nv58-mon, text: "в январе", kind: range, now: "2026-10-12T07:00", expect: {"range":{"from":"2027-01-01","to":"2027-01-31"}} }
+  - { id: nv58-fri, text: "в январе", kind: range, now: "2026-10-16T23:30", expect: {"range":{"from":"2027-01-01","to":"2027-01-31"}} }
+  - { id: nv58-sun, text: "в январе", kind: range, now: "2026-10-18T23:50", expect: {"range":{"from":"2027-01-01","to":"2027-01-31"}} }
+  - { id: nv58-dec31, text: "в январе", kind: range, now: "2026-12-31T18:00", expect: {"range":{"from":"2027-01-01","to":"2027-01-31"}} }
+  - { id: nv58-feb28, text: "в январе", kind: range, now: "2027-02-28T12:00", expect: {"range":{"from":"2028-01-01","to":"2028-01-31"}} }
+  - { id: nv58-dst, text: "в январе", kind: range, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"range":{"from":"2027-01-01","to":"2027-01-31"}} }
+
+  # 59. «по будням в 9 до конца года» (recurrence)
+  - { id: nv59-mon, text: "по будням в 9 до конца года", kind: recurrence, now: "2026-10-12T07:00", expect: {"recurrence":{"time":"09:00","until":"2026-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+  - { id: nv59-fri, text: "по будням в 9 до конца года", kind: recurrence, now: "2026-10-16T23:30", expect: {"recurrence":{"time":"09:00","until":"2026-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+  - { id: nv59-sun, text: "по будням в 9 до конца года", kind: recurrence, now: "2026-10-18T23:50", expect: {"recurrence":{"time":"09:00","until":"2026-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+  - { id: nv59-dec31, text: "по будням в 9 до конца года", kind: recurrence, now: "2026-12-31T18:00", note: "«до конца года» 31 декабря — до сегодня; 9:00 прошло, дат нет — бот отвечает seriesNoDates (решено не переносить на следующий год)", expect: {"recurrence":{"time":"09:00","until":"2026-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+  - { id: nv59-feb28, text: "по будням в 9 до конца года", kind: recurrence, now: "2027-02-28T12:00", note: "until — конец текущего года", expect: {"recurrence":{"time":"09:00","until":"2027-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+  - { id: nv59-dst, text: "по будням в 9 до конца года", kind: recurrence, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"recurrence":{"time":"09:00","until":"2026-12-31","by_day":["MO","TU","WE","TH","FR"],"freq":"weekly"}} }
+
+  # 60. «каждую пятницу в 18 до конца месяца» (recurrence)
+  - { id: nv60-mon, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2026-10-12T07:00", note: "ИСПРАВЛЕНО: «до конца месяца» в повторении — последний день текущего месяца; было unparseable", expect: {"recurrence":{"time":"18:00","until":"2026-10-31","by_day":["FR"],"freq":"weekly"}} }
+  - { id: nv60-fri, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2026-10-16T23:30", expect: {"recurrence":{"time":"18:00","until":"2026-10-31","by_day":["FR"],"freq":"weekly"}} }
+  - { id: nv60-sun, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2026-10-18T23:50", expect: {"recurrence":{"time":"18:00","until":"2026-10-31","by_day":["FR"],"freq":"weekly"}} }
+  - { id: nv60-dec31, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2026-12-31T18:00", expect: {"recurrence":{"time":"18:00","until":"2026-12-31","by_day":["FR"],"freq":"weekly"}} }
+  - { id: nv60-feb28, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2027-02-28T12:00", note: "невисокосный февраль — до 28-го", expect: {"recurrence":{"time":"18:00","until":"2027-02-28","by_day":["FR"],"freq":"weekly"}} }
+  - { id: nv60-dst, text: "каждую пятницу в 18 до конца месяца", kind: recurrence, now: "2026-10-25T01:30", tz: Europe/Berlin, expect: {"recurrence":{"time":"18:00","until":"2026-10-31","by_day":["FR"],"freq":"weekly"}} }
+
