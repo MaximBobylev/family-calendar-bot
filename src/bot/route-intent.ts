@@ -4,6 +4,7 @@
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, extractRecurrenceSpan, looksAllDay } from "../dates/extract";
 import { mergeDialogState } from "../db/conversations";
+import { log } from "../log";
 import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
 import { detailHints } from "../nlu/detail-hints";
@@ -16,6 +17,7 @@ import { assignOverride } from "./assign/logic";
 import { assignmentApplies, startAssign } from "./assign/start";
 import type { AppContext } from "./context";
 import { draftFromIntent, startCreate, type CreateDraft } from "./create-event";
+import { startCheck } from "./create-logic";
 import { startDelete } from "./delete-event";
 import { lookupEvent } from "./event-lookup";
 import type { EventRequest } from "./find-event";
@@ -53,7 +55,11 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
       const rec = extractRecurrenceSpan(famText, localNow, user.home_tz);
       const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.home_tz, "point");
-      const startText = rec ? undefined : (spans.point ?? (intent.start || undefined));
+      // Сверка с `start` от LLM (ревью 2026-10-08): разные даты — варианты кнопками
+      const check = rec ? undefined : startCheck(famText, spans.point, intent.start);
+      if (check) log("date_check", { source: "message", agreement: check.agreement, unsure: spans.unsure });
+      const start = check?.pick ?? {};
+      const startText = start.startText;
       const durationText = spans.duration ?? intent.duration;
       const title = cleanTitle(
         intent.title,
@@ -64,6 +70,7 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       const draft: CreateDraft = {
         ...draftFromIntent(intent),
         startText,
+        altStartText: start.altStartText,
         recurrenceText: rec?.span,
         title,
         durationText,

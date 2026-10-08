@@ -25,7 +25,10 @@ export const WHEN_QUESTION = /^(а\s+)?(когда|when)(?!\p{L})/iu;
 const CREATE_WORD = word("(постав\\p{L}*|запиш\\p{L}*|добав\\p{L}*|созда\\p{L}*|запланир\\p{L}*|schedule|add|create|book|set\\s+up)");
 
 /** Есть ли в тексте дата или время — по детерминированному извлечению; «сейчас» не важно, нужен только факт. */
-const hasDate = (text: string) => !!extractDateSpans(text, "2026-01-01T00:00", "UTC", "point").point;
+const hasDate = (text: string) => {
+  const s = extractDateSpans(text, "2026-01-01T00:00", "UTC", "point");
+  return !!(s.point || s.unsure);
+};
 
 /** Не поиск события: «когда я свободен» — это свободное время (US-22, позже). */
 const NOT_LOOKUP = word("(свобод\\p{L}*|free|available)");

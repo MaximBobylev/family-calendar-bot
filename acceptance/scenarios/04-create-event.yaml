@@ -96,6 +96,27 @@
         calendar: ivan@gmail.com
         events: [{ summary: "Встреча", start: "2026-10-14T12:00:00+03:00", end: "2026-10-14T13:00:00+03:00" }]
 
+- id: create-negated-day-is-not-the-date
+  story: US-30
+  steps:
+    - *setup
+    - llm: { "Поставь встречу не в пятницу, а в субботу в 12": { tool: create_event, args: { start: "в субботу в 12" } } }
+    - telegram: { from: 1001, text: "Поставь встречу не в пятницу, а в субботу в 12" }
+    - expect_telegram:
+        - text_contains: ["сб, 10 октября, 12:00–13:00"]
+          text_not_contains: ["пт, 9 октября"]
+
+- id: create-unknown-date-construct-asks-instead-of-guessing
+  story: US-30
+  steps:
+    - *setup
+    # «через две недели» + «во вторник в 9» вместе не разбираются: раньше — 21 октября без времени, теперь — вопрос
+    - llm: { "Поставь стоматолога через две недели во вторник в 9": { tool: create_event, args: { start: "через две недели во вторник в 9", title: "Стоматолог" } } }
+    - telegram: { from: 1001, text: "Поставь стоматолога через две недели во вторник в 9" }
+    - expect_telegram:
+        - text_contains: ["Когда поставить?"]
+          text_not_contains: ["21 октября"]
+
 - id: create-warns-about-overlap
   story: US-30
   steps:

@@ -14,6 +14,8 @@ import { t } from "./messages";
 /** Черновик создания: то, что сказал пользователь (фрагменты), — до разрешения дат. */
 export interface CreateDraft {
   startText?: string;
+  /** Дата словами LLM (`start`), если она не совпадает с найденной в тексте: второе мнение — варианты кнопками. */
+  altStartText?: string;
   /** Правило повторения как сказано: «каждый понедельник в 10» (US-32). */
   recurrenceText?: string;
   title?: string;
@@ -88,6 +90,45 @@ export function draftFromIntent(i: CreateEventIntent): CreateDraft {
 
 // --- Разрешение черновика --------------------------------------------------
 
+const normWords = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .split(/[^\p{L}\p{N}:.]+/u)
+    .map((w) => w.replace(/^[.:]+|[.:]+$/g, ""))
+    .filter(Boolean);
+
+/**
+ * Дата из текста (наш парсер) и дата словами от LLM (`start`) — сверка (ревью 2026-10-08, шаг 1). Наш кусок —
+ * основной; `start` — второе мнение, если он скопирован из текста (каждое слово есть в тексте — не выдумка) и
+ * не часть нашего куска («в 15» при «завтра в 15»). Нашего куска нет — `start`, как раньше (ADR-0005 п.3).
+ */
+export function pickStart(text: string, point: string | undefined, llmStart: string | undefined): Pick<CreateDraft, "startText" | "altStartText"> {
+  return startCheck(text, point, llmStart).pick;
+}
+
+/** Как сошлись наш кусок и `start` от LLM — для лога `date_check` (ревью 2026-10-08, шаг 3: доля расхождений). */
+export type StartAgreement = "none" | "ours_only" | "llm_only" | "agree" | "llm_invented" | "differ";
+
+export function startCheck(
+  text: string,
+  point: string | undefined,
+  llmStart: string | undefined,
+): { pick: Pick<CreateDraft, "startText" | "altStartText">; agreement: StartAgreement } {
+  const llm = llmStart?.trim() || undefined;
+  if (!point) return llm ? { pick: { startText: llm }, agreement: "llm_only" } : { pick: {}, agreement: "none" };
+  if (!llm) return { pick: { startText: point }, agreement: "ours_only" };
+  const inText = new Set(normWords(text));
+  const llmWords = normWords(llm);
+  const ours = new Set(normWords(point));
+  if (!llmWords.length || !llmWords.every((w) => inText.has(w))) return { pick: { startText: point }, agreement: "llm_invented" };
+  if (llmWords.every((w) => ours.has(w))) return { pick: { startText: point }, agreement: "agree" };
+  return { pick: { startText: point, altStartText: llm }, agreement: "differ" };
+}
+
+/** Больше вариантов в карточке не показываем: дальше это уже не выбор, а шум. */
+const MAX_OPTIONS = 4;
+
 export type Resolution =
   | { kind: "options"; options: CreateOption[] }
   | { kind: "ask"; question: "askWhen" | "askTime" | "inPast"; keepStart: boolean }
@@ -139,17 +180,29 @@ export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: C
     return null;
   };
 
-  const parsed = parseDateFragment({ text: draft.startText, kind: "point", now: formatMoment(now), tz });
-  if ("error" in parsed) {
-    if (parsed.error === "in_past") return { kind: "ask", question: "inPast", keepStart: false };
-    return { kind: "ask", question: "askWhen", keepStart: false };
-  }
-  const values = "ambiguous" in parsed ? parsed.ambiguous : [parsed];
-  const options = values.map(toOption);
-  if (options.includes("needTime")) return { kind: "ask", question: "askTime", keepStart: true };
-  const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
-  if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
-  return { kind: "options", options: ok };
+  const fromText = (text: string): Resolution => {
+    const parsed = parseDateFragment({ text, kind: "point", now: formatMoment(now), tz });
+    if ("error" in parsed) {
+      if (parsed.error === "in_past") return { kind: "ask", question: "inPast", keepStart: false };
+      return { kind: "ask", question: "askWhen", keepStart: false };
+    }
+    const values = "ambiguous" in parsed ? parsed.ambiguous : [parsed];
+    const options = values.map(toOption);
+    if (options.includes("needTime")) return { kind: "ask", question: "askTime", keepStart: true };
+    const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
+    if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
+    return { kind: "options", options: ok };
+  };
+
+  const ours = fromText(draft.startText);
+  const alt = draft.altStartText ? fromText(draft.altStartText) : undefined;
+  // Второе мнение LLM: у нас нет полного момента, а у LLM есть — берём его; оба есть и разные — оба кнопками
+  if (alt?.kind !== "options") return ours;
+  if (ours.kind !== "options") return alt;
+  const key = (o: CreateOption) => JSON.stringify([o.allDay, o.startDay, o.start, o.endDay]);
+  const seen = new Set(ours.options.map(key));
+  const extra = alt.options.filter((o) => !seen.has(key(o)));
+  return { kind: "options", options: [...ours.options, ...extra].slice(0, MAX_OPTIONS) };
 }
 
 /** Длительность и «весь день» из черновика. */

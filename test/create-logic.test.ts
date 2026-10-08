@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarInfo } from "../src/calendar/model";
 import { formatMoment, parseLocal } from "../src/dates/calendar";
-import { type CreateOption, resolveCalendar, resolveDraft } from "../src/bot/create-logic";
+import { type CreateOption, pickStart, resolveCalendar, resolveDraft, startCheck } from "../src/bot/create-logic";
 
 // «Сейчас» — ср 7 октября 2026, 10:00 (как в приёмочных сценариях).
 const now = parseLocal("2026-10-07T10:00");
@@ -98,4 +98,54 @@ describe("resolveCalendar", () => {
     expect(resolveCalendar([ro], "Спорт")).toEqual({ error: "noWritable" });
     expect(resolveCalendar([ro], "Праздники")).toEqual({ error: "readOnly", name: "Праздники" });
   });
+});
+
+describe("сверка даты с LLM (ревью 2026-10-08, шаг 1)", () => {
+  it.each([
+    [
+      "нет куска — start от LLM, как раньше",
+      "Созвон через две недели во вторник в 9",
+      undefined,
+      "через две недели во вторник в 9",
+      { startText: "через две недели во вторник в 9" },
+    ],
+    ["start — часть нашего куска — не второе мнение", "Созвон завтра в 15", "завтра в 15", "в 15", { startText: "завтра в 15" }],
+    ["start со словами не из текста — выдумка, не берём", "Ужин в пятницу", "в пятницу", "в пятницу в 19:00", { startText: "в пятницу" }],
+    [
+      "start из текста и не часть куска — второе мнение",
+      "Встреча 10.11, начало 15:00",
+      "10.11",
+      "10.11, начало 15:00",
+      { startText: "10.11", altStartText: "10.11, начало 15:00" },
+    ],
+    ["нет ничего", "Созвон", undefined, undefined, {}],
+  ])("%s", (_name, text, point, llm, want) => expect(pickStart(text, point, llm)).toEqual(want));
+
+  it.each([
+    ["Созвон", undefined, undefined, "none"],
+    ["Созвон завтра в 15", "завтра в 15", undefined, "ours_only"],
+    ["Созвон через две недели во вторник в 9", undefined, "во вторник в 9", "llm_only"],
+    ["Созвон завтра в 15", "завтра в 15", "завтра в 15", "agree"],
+    ["Ужин в пятницу", "в пятницу", "в пятницу в 19:00", "llm_invented"],
+    ["Встреча 10.11, начало 15:00", "10.11", "10.11, начало 15:00", "differ"],
+  ])("для лога: %s / %s / %s → %s", (text, point, llm, want) => expect(startCheck(text, point, llm).agreement).toBe(want));
+
+  it("у нас только день, у LLM — момент: берём LLM", () => {
+    const [o, ...rest] = options(resolve({ startText: "в пятницу", altStartText: "в пятницу в 19:00" }));
+    expect(rest).toEqual([]);
+    expect(span(o!)).toBe("2026-10-09T19:00 – 2026-10-09T20:00");
+  });
+
+  it("оба момента и разные — оба вариантами, наш первый", () =>
+    expect(options(resolve({ startText: "завтра в 15", altStartText: "в пятницу в 15" })).map(span)).toEqual([
+      "2026-10-08T15:00 – 2026-10-08T16:00",
+      "2026-10-09T15:00 – 2026-10-09T16:00",
+    ]));
+
+  it("совпадают — один вариант", () => expect(options(resolve({ startText: "завтра в 15", altStartText: "8 октября в 15:00" })).length).toBe(1));
+
+  it("start не разбирается — только наш", () => expect(options(resolve({ startText: "завтра в 15", altStartText: "по Киеву" })).length).toBe(1));
+
+  it("у нас только день, start не помогает — спросить время", () =>
+    expect(resolve({ startText: "в пятницу", altStartText: "по Киеву" })).toEqual({ kind: "ask", question: "askTime", keepStart: true }));
 });

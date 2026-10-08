@@ -17,6 +17,7 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { pickStart } from "../src/bot/create-logic";
 import { findCalendarByName } from "../src/calendar/match";
 import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from "../src/dates/extract";
 import { parseDateFragment } from "../src/dates";
@@ -224,10 +225,14 @@ function downstream(c: Case, intent: Intent): Outcome {
     }
     const rec = extractRecurrenceSpan(famText, now, tz);
     const spans = extractDateSpans(rec ? rec.rest : famText, now, tz, "point");
-    const startText = rec ? undefined : (spans.point ?? (eff.start || undefined));
+    // Как route-intent.ts: наш кусок, `start` от LLM — второе мнение (pickStart)
+    const pick = rec ? {} : pickStart(famText, spans.point, eff.start);
+    const startText = pick.startText;
     const durationText = spans.duration ?? eff.duration;
     out.recurrence = !!rec;
-    out.start = rec ? null : resolvePoint(startText);
+    const ours = resolvePoint(startText);
+    const alt = resolvePoint(pick.altStartText);
+    out.start = rec ? null : !ours?.includes("T") && alt?.includes("T") ? alt : ours;
     out.title = cleanTitle(
       eff.title,
       [rec?.span, ...(rec?.remove ?? []), rec ? eff.start : undefined, startText, ...(spans.pointParts ?? []), durationText, ...famRemove].filter(

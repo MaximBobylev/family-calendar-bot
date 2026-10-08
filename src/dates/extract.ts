@@ -16,11 +16,22 @@ export interface ExtractedSpans {
   /** Период для чтения расписания. */
   range?: string;
   duration?: string;
+  /** Дата сказана, но кусками, которые вместе не разбираются («через две недели … во вторник в 9»), или в конструкции,
+   * которую парсер не знает («в первый понедельник ноября»): point не даём — лучше спросить, чем угадать (ревью 2026-10-08). */
+  unsure?: true;
   /** Слова, вошедшие в даты, — чтобы убрать их из названия. */
   usedWords: Set<number>;
 }
 
 const isUsable = (r: ParseResult) => !("error" in r) || r.error === "in_past";
+
+/** «не в пятницу, а в субботу», «not Friday» — отрицаемый кусок не дата события. */
+const NEGATION = /^(не|not)$/i;
+/** Порядковое перед днём недели: «в первый понедельник ноября», «last Friday of the month» — парсер этого не знает. */
+const ORDINAL = /^(перв|втор|трет|четв[её]рт|пят(ый|ая|ую|ое|ой)$|последн|first$|second$|third$|fourth$|fifth$|last$)/i;
+/** «через неделю после дня рождения» — сдвиг от неизвестного события, а не от сегодня. */
+const RELATIVE_START = /^(через|спустя|in)$/i;
+const ANCHOR_AFTER = /^(после|after|before)$/i;
 
 function words(text: string): string[] {
   return text
@@ -34,6 +45,7 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
   const points: string[] = [];
   const used = new Set<number>();
   let duration: string | undefined;
+  let unsure = false;
 
   const parses = (fragment: string, k: ValueKind) => isUsable(parseDateFragment({ text: fragment, kind: k, now, tz }));
 
@@ -51,7 +63,11 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
       if (!duration && kind === "point" && durationLike(fragment) && parses(fragment, "duration")) {
         duration = fragment;
       } else if (parses(fragment, kind)) {
-        points.push(fragment);
+        const before = ws[i - 1] ?? "";
+        const after = ws[j] ?? "";
+        if (kind === "point" && ORDINAL.test(before) && WEEKDAYS.has(ws[i]!.toLowerCase())) unsure = true;
+        else if (kind === "point" && RELATIVE_START.test(ws[i]!) && ANCHOR_AFTER.test(after)) unsure = true;
+        else if (!NEGATION.test(before)) points.push(fragment);
       } else {
         continue;
       }
@@ -65,15 +81,18 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
 
   const joined = points.length ? points.join(" ") : undefined;
   const out: ExtractedSpans = { usedWords: used };
-  // Склейка нескольких кусков должна разбираться целиком, иначе берём первый
   if (joined) {
     const whole = parses(joined, kind);
-    const value = whole ? joined : points[0]!;
     if (kind === "point") {
-      out.point = value;
-      out.pointParts = whole ? points : [points[0]!];
-    } else out.range = value;
+      // Куски момента, которые вместе не разбираются, — противоречие или незнакомая конструкция: не угадываем
+      // первый («через две недели» из «через две недели во вторник в 9»), а отдаём решение LLM / вопросу
+      if (whole && !unsure) {
+        out.point = joined;
+        out.pointParts = points;
+      } else unsure = true;
+    } else out.range = whole ? joined : points[0]!;
   }
+  if (unsure && kind === "point") out.unsure = true;
   if (duration) out.duration = duration;
   return out;
 }

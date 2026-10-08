@@ -65,7 +65,9 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   }
   if (res.kind === "ask") {
     // Ответ пользователя дополнит этот же черновик (US-12)
-    const draft = res.keepStart ? a.draft : { ...a.draft, startText: undefined };
+    // Второе мнение LLM о дате — только для первой карточки: ответ на вопрос дополняет наш кусок
+    const { altStartText: _alt, ...rest } = a.draft;
+    const draft = res.keepStart ? rest : { ...rest, startText: undefined };
     await mergeDialogState(
       ctx.db,
       a.conversationId,

@@ -71,3 +71,13 @@ cases:
   - { kind: point, text: "Movie night with the kids", expect: {} }
   - { kind: point, text: "Jazz Night Saturday Oct 24", expect: { point: "Saturday Oct 24" } }
   - { kind: point, text: "Drinks tomorrow night", expect: { point: "tomorrow night" } }
+  # Ревью 2026-10-08: не угадывать дату по куску. Отрицание — не дата; куски, которые вместе не разбираются, и
+  # незнакомые конструкции (порядковый день недели, сдвиг «после» события) — unsure: дату берём у LLM или спрашиваем
+  - { kind: point, text: "Встреча не в пятницу, а в субботу в 12", expect: { point: "в субботу в 12" } }
+  - { kind: point, text: "Meeting not Friday but Saturday at 12", expect: { point: "Saturday at 12" } }
+  - { kind: point, text: "Стоматолог через две недели во вторник в 9", expect: { unsure: true } }
+  - { kind: point, text: "Собрание в первый понедельник ноября в 10", expect: { unsure: true } }
+  - { kind: point, text: "Уборка в последнюю пятницу месяца", expect: { unsure: true } }
+  - { kind: point, text: "Board meeting first Monday of November at 10", expect: { unsure: true } }
+  - { kind: point, text: "Позвонить через неделю после дня рождения", expect: { unsure: true } }
+  - { kind: point, text: "Забрать Соню в 9 после школы", expect: { point: "в 9" } }

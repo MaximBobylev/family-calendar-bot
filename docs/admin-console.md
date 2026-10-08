@@ -260,7 +260,7 @@
 
 **Текст** — заголовок, счётчики, ссылка на `/admin`. Ни текстов, ни имён, ни id пользователей, ни текстов ошибок (они могут содержать данные пользователя — смотреть в `/admin`, там они замаскированы).
 
-**Структурные логи** — `src/log.ts`: одна строка JSON. События: `update` (`update_id`, `stage` webhook|queue, `outcome` processed|done|busy|error, `ms`), `job` (`job_id`, `kind`, `attempt`, `outcome`, `final`, `ms`), `tick` (`jobs`), `alerts` (`sent`, `ms`), `health`. Ошибка — только `errorClass`: имя + ведущие ASCII-«классы» сообщения (`Error: google 500:`), хвост сообщения не пишется. Смотреть: `wrangler tail` / Workers Logs, фильтр по `"event":"job"`.
+**Структурные логи** — `src/log.ts`: одна строка JSON. События: `update` (`update_id`, `stage` webhook|queue, `outcome` processed|done|busy|error, `ms`), `job` (`job_id`, `kind`, `attempt`, `outcome`, `final`, `ms`), `tick` (`jobs`), `alerts` (`sent`, `ms`), `health`, `date_check` (`source` message|foreign, `agreement` — сверка даты парсера с `start` от LLM, `docs/date-rules.md`). Ошибка — только `errorClass`: имя + ведущие ASCII-«классы» сообщения (`Error: google 500:`), хвост сообщения не пишется. Смотреть: `wrangler tail` / Workers Logs, фильтр по `"event":"job"`.
 
 ### Внешний heartbeat
 

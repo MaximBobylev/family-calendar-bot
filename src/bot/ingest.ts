@@ -15,12 +15,13 @@ import type { User } from "../db/users";
 import { icsToItem, type IcsItem } from "../ics/convert";
 import { parseIcs } from "../ics/parse";
 import { llmCostMicroUsd } from "../limits";
+import { log } from "../log";
 import { type CreateEventIntent, parseIntentChain } from "../nlu/intents";
 import type { TgMessage } from "../telegram/types";
 import { understandImageChain } from "../vision/understand";
 import type { AppContext } from "./context";
 import { startCreate } from "./create-event";
-import { type CreateDraft, resolveCalendar } from "./create-logic";
+import { type CreateDraft, resolveCalendar, startCheck } from "./create-logic";
 import { cancelCards } from "./dialog";
 import { escapeHtml, whenOf } from "./format";
 import { type ForwardOrigin, forwardOrigin } from "./forwarded";
@@ -69,9 +70,13 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
   const title = intent?.title ?? heuristicTitle(dates.sentence, dates.fragments, location);
-  const startText = dates.point ?? (intent?.start || undefined);
+  // Сверка с `start` от модели (ревью 2026-10-08): разные даты — варианты кнопками
+  const check = startCheck(src.text, dates.point, intent?.start);
+  log("date_check", { source: "foreign", agreement: check.agreement });
+  const start = check.pick;
+  const startText = start.startText;
   const draft: CreateDraft = {
-    ...(startText ? { startText } : {}),
+    ...start,
     ...(dates.duration ? { durationText: dates.duration } : {}),
     ...(title ? { title } : {}),
     ...(location ? { location } : {}),

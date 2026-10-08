@@ -12,6 +12,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { pickStart } from "../src/bot/create-logic";
 import { foreignDateSpans, guessPlace, heuristicTitle } from "../src/bot/ingest-logic";
 import { normalizeWords, sameWord } from "../src/calendar/match";
 import { parseDateFragment } from "../src/dates";
@@ -195,7 +196,11 @@ function grade(img: Img, r: Result): Result {
   const dates = foreignDateSpans(a.text, now, tz);
   const place = a.location ?? guessPlace(a.text);
   const title = a.title ?? heuristicTitle(dates.sentence, dates.fragments, place);
-  const start = resolvePoint(dates.point ?? a.start);
+  // Как ingest.ts: наш кусок, `start` модели — второе мнение (pickStart); у нас только день, у модели момент — модель
+  const pick = pickStart(a.text, dates.point, a.start);
+  const ours = resolvePoint(pick.startText);
+  const alt = resolvePoint(pick.altStartText);
+  const start = !ours?.includes("T") && alt?.includes("T") ? alt : ours;
   const out: Result = { ...r, card, start, modelStart: resolvePoint(a.start), title, place };
   // Не-событие: верно, если карточки нет или в ней нет даты (бот спросит «когда?» — мягкая ошибка, считаем неверным)
   out.eventOk = img.event ? card : !card;
