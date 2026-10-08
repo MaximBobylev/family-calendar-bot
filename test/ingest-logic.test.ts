@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import { firstUrl, foreignDateSpans, guessPlace, heuristicTitle, sentences, sourceDescription } from "../src/bot/ingest-logic";
+import { parseDateFragment } from "../src/dates";
 
 // «Сейчас» — ср 7 октября 2026, 10:00 МСК (как в приёмочных сценариях)
 const now = "2026-10-07T10:00";
@@ -20,6 +24,27 @@ describe("foreignDateSpans", () => {
     expect(dates("Уважаемые родители!\nРодительское собрание в четверг в 18:00").sentence).toBe("Родительское собрание в четверг в 18:00"));
 
   it("длинный текст режется на куски", () => expect(sentences(`${"слово ".repeat(100)}`).length).toBe(3));
+});
+
+// Корпус чужих текстов (testdata/extract/foreign.yaml): фрагмент и во что он разбирается
+interface ForeignDoc {
+  defaults: { now: string; tz: string };
+  cases: { text: string; point: string | null; start?: string | string[] }[];
+}
+const foreign = parseYaml(readFileSync(join(import.meta.dirname, "..", "testdata", "extract", "foreign.yaml"), "utf8")) as ForeignDoc;
+const startOf = (point: string) => {
+  const r = parseDateFragment({ text: point, kind: "point", now: foreign.defaults.now, tz: foreign.defaults.tz });
+  const vs = "ambiguous" in r ? r.ambiguous : [r];
+  const one = vs.map((v) => ("datetime" in v ? v.datetime : "date" in v ? (typeof v.date === "string" ? v.date : v.date.date) : JSON.stringify(v)));
+  return one.length === 1 ? one[0] : one;
+};
+
+describe("foreignDateSpans: корпус", () => {
+  it.each(foreign.cases.map((c) => [c.text.replace(/\n/g, " / "), c] as const))("%s", (_t, c) => {
+    const d = foreignDateSpans(c.text, foreign.defaults.now, foreign.defaults.tz);
+    expect(d.point ?? null).toBe(c.point);
+    if (c.start) expect(startOf(d.point!)).toEqual(c.start);
+  });
 });
 
 describe("guessPlace", () => {

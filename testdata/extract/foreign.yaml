@@ -1,0 +1,30 @@
+# Дата события в чужом тексте (пересланное, подпись, текст картинки) — по предложениям (US-65/66, src/bot/ingest-logic.ts
+# foreignDateSpans). Переносимые данные (ADR-0006). «Сейчас» — четверг 2026-10-08 12:00 МСК (как testdata/images).
+#   point — фрагмент для парсера; start — во что он разбирается (datetime или дата; список — варианты ambiguous)
+defaults:
+  now: "2026-10-08T12:00"
+  tz: Europe/Moscow
+
+cases:
+  - { text: "Уважаемые родители! Собрание в пятницу.\nНачало в 18:30.", point: "в пятницу в 18:30", start: "2026-10-09T18:30" }
+  # tech-debt #25: скриншот чата — «на выходных» уточняется «В субботу в 12:30»; «14:02» отдельной строкой — время сообщения
+  - text: "Маша\nПривет! Как насчёт встретиться\nна выходных?\nДавай! Когда тебе удобно?\nВ субботу в 12:30 в кафе «Пушкин»,\nТверской бульвар, 26\n14:02\nОтлично, до встречи!"
+    point: "В субботу в 12:30"
+    start: "2026-10-10T12:30"
+  - text: "Маша\nПривет! Как насчёт встретиться на выходных?\nДавай! Когда тебе удобно?\nВ субботу в 12:30 в кафе «Пушкин», Тверской бульвар, 26\n14:02\nОтлично, до встречи!"
+    point: "В субботу в 12:30"
+    start: "2026-10-10T12:30"
+  - { text: "Маша\nВстретимся на выходных?\n14:02", point: "на выходных", start: ["2026-10-10", "2026-10-11"] }
+  - { text: "Петя\nЗавтра встречаемся?\n10:15\nДа, в 15:00 у метро\n10:16", point: "Завтра в 15:00", start: "2026-10-09T15:00" }
+  - { text: "Ок, до встречи в пятницу\n9:41 PM\nВ 19:30 у входа\n9:42 PM ✓✓", point: "в пятницу В 19:30", start: "2026-10-09T19:30" }
+  # tech-debt #25: афиша EN — «Night» в названии не «сегодня вечером»; дата и «Doors 7:30 pm» на разных строках склеиваются
+  - text: "Jazz Night\nSaturday, Oct 24\nDoors 7:30 pm\nBlue Note Club, 131 W 3rd St\nFree entry · Live quartet"
+    point: "Saturday Oct 24 7:30 pm"
+    start: "2026-10-24T19:30"
+  - { text: "Party Night\nFriday, October 16\nDoors open 8pm\nClub 21", point: "Friday October 16 8pm", start: "2026-10-16T20:00" }
+  - { text: "Movie night\nSunday Oct 18\nStarts at 7 pm", point: "Sunday Oct 18 at 7 pm", start: "2026-10-18T19:00" }
+  - { text: "Spooky movie night\nat the community hall", point: null }
+  - { text: "Спектакль «Гроза»\n24 октября\nНачало в 19:00", point: "24 октября в 19:00", start: "2026-10-24T19:00" }
+  # «night» после дня — по-прежнему вечер
+  - { text: "Party tomorrow night at 9", point: "tomorrow night at 9", start: "2026-10-09T21:00" }
+  - { text: "Friday night drinks", point: "Friday night", start: "2026-10-09" }

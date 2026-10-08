@@ -603,6 +603,8 @@ function parseAst(tokens: Token[]): Ast {
     }
 
     // Части суток
+    // Английское «night» — только после дня или «at night»: «Jazz Night», «Movie night» на афише — название (tech-debt #25)
+    if (w === "night" && !ast.date && prev !== "at") throw new Unparseable();
     if (w && DAY_PART_WORDS.has(w)) { ast.part = DAY_PART_WORDS.get(w)!; i++; continue; }
     if (w && DAY_PART_NOMINATIVE.has(w) && (ast.date || prev === "на")) { ast.part = DAY_PART_NOMINATIVE.get(w)!; i++; continue; }
     if (w === "после" && (w1 === "обеда" || w1 === "полудня")) { ast.part = "afternoon"; i += 2; continue; }

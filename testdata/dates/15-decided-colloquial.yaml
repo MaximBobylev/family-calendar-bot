@@ -405,6 +405,20 @@ cases:
     text: "tomorrow night at 9"
     expect: { datetime: "2026-10-08T21:00" }
 
+  - id: d10-012
+    text: "night"
+    note: "английское night без дня — не дата: «Jazz Night», «Movie night» на афише (tech-debt #25)"
+    expect: { error: unparseable }
+
+  - id: d10-013
+    text: "at night"
+    note: "«at night» — как tonight"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
+  - id: d10-014
+    text: "tonight"
+    expect: { date: { date: "2026-10-07", part: evening } }
+
   # 11. «через сутки» = через 24 часа (момент)
 
   - id: d11-001

@@ -37,18 +37,31 @@ export interface ForeignDates {
   fragments: string[];
 }
 
-const kindOf = (text: string, now: string, tz: string) => {
+/** Что даёт кусок: только дни (`date`, с датами-кандидатами), момент со временем (`time`), прошлое или ничего. */
+function kindOf(text: string, now: string, tz: string): { k: "date"; days: string[] } | { k: "time"; day: string } | { k: "past" } | null {
   const r = parseDateFragment({ text, kind: "point", now, tz });
-  if ("error" in r) return r.error === "in_past" ? "past" : null;
-  const v = "ambiguous" in r ? r.ambiguous[0]! : r;
-  return "date" in v ? "date" : "other";
-};
+  if ("error" in r) return r.error === "in_past" ? { k: "past" } : null;
+  const vs = "ambiguous" in r ? r.ambiguous : [r];
+  const v = vs[0]!;
+  if ("datetime" in v) return { k: "time", day: v.datetime.slice(0, 10) };
+  if ("interval" in v) return { k: "time", day: v.interval.start.slice(0, 10) };
+  // «на выходных» — кандидаты суббота и воскресенье; остальное (диапазоны и т.п.) — не момент
+  const days = vs.flatMap((x) => ("date" in x ? [typeof x.date === "string" ? x.date : x.date.date] : []));
+  return days.length ? { k: "date", days } : null;
+}
 
-/** Дата события в чужом тексте: первая по порядку; «В четверг собрание.» + «Начало в 18:00.» склеиваются. */
+/** Строка из одного времени «14:02» — время сообщения в скриншоте чата, а не время события (tech-debt #25). */
+const CHAT_TIMESTAMP = /^\d{1,2}:\d{2}(\s*(?:[AaPp]\.?[Mm]\.?))?(\s*[✓✔]+)?$/u;
+
+/**
+ * Дата события в чужом тексте: первая по порядку; «В четверг собрание.» + «Начало в 18:00.» склеиваются;
+ * «встретимся на выходных?» + «В субботу в 12:30» — второе уточняет первое (тот же день, есть время) и побеждает.
+ */
 export function foreignDateSpans(text: string, now: string, tz: string): ForeignDates {
   const found: { point: string; sentence: string }[] = [];
   let duration: string | undefined;
   for (const s of sentences(text)) {
+    if (CHAT_TIMESTAMP.test(s)) continue;
     const sp = extractDateSpans(s, now, tz, "point");
     if (sp.duration && !duration) duration = sp.duration;
     if (sp.point) found.push({ point: sp.point, sentence: s });
@@ -56,18 +69,22 @@ export function foreignDateSpans(text: string, now: string, tz: string): Foreign
   }
   const first = found[0];
   if (!first) return { fragments: duration ? [duration] : [], ...(duration ? { duration } : {}) };
-  const out = (point: string, extra: string[] = []): ForeignDates => ({
+  const out = (point: string, extra: string[] = [], sentence = first.sentence): ForeignDates => ({
     point,
-    sentence: first.sentence,
+    sentence,
     fragments: [first.point, ...extra, ...(duration ? [duration] : [])],
     ...(duration ? { duration } : {}),
   });
-  // Только дата в первом куске, время — во втором
   const second = found[1];
-  if (second && kindOf(first.point, now, tz) === "date") {
+  const k1 = kindOf(first.point, now, tz);
+  if (second && k1?.k === "date") {
+    // Только дата в первом куске, время — во втором
     const joined = `${first.point} ${second.point}`;
     const k = kindOf(joined, now, tz);
-    if (k === "other" || k === "past") return out(joined, [second.point]);
+    if (k?.k === "time" || k?.k === "past") return out(joined, [second.point]);
+    // Второй кусок сам по себе — момент в один из дней первого: «на выходных» → «в субботу в 12:30»
+    const k2 = kindOf(second.point, now, tz);
+    if (k2?.k === "time" && k1.days.includes(k2.day)) return out(second.point, [second.point], second.sentence);
   }
   return out(first.point);
 }

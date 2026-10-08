@@ -66,3 +66,8 @@ cases:
   - { kind: point, text: "Send the report by Friday", expect: { point: "by Friday" } }
   - { kind: point, text: "Сдать отчёт к 18", expect: { point: "к 18" } }
   - { kind: point, text: "Забрать детей к шести вечера", expect: { point: "к шести вечера" } }
+  # tech-debt #25: английское «night» без дня — часть названия («Jazz Night»), после дня — вечер
+  - { kind: point, text: "Jazz Night", expect: {} }
+  - { kind: point, text: "Movie night with the kids", expect: {} }
+  - { kind: point, text: "Jazz Night Saturday Oct 24", expect: { point: "Saturday Oct 24" } }
+  - { kind: point, text: "Drinks tomorrow night", expect: { point: "tomorrow night" } }
