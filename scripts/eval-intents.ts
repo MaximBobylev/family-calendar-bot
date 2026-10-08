@@ -362,21 +362,29 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
   const v = VARIANTS[variant]!;
   // «or:<модель>» — OpenRouter (без «размышления», как в проде); «gg:<модель>» — Google AI Studio (OpenAI-совместимый
   // эндпоинт Gemini API); иначе — Workers AI
-  const cfg = model.startsWith("gg:")
+  // «ds:<модель>» — DeepSeek (OpenAI-совместимый, «размышление» выключено: по умолчанию включено и медленно)
+  const cfg = model.startsWith("ds:")
     ? {
-        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-        apiKey: process.env.GEMINI_API_KEY ?? "",
+        baseUrl: "https://api.deepseek.com",
+        apiKey: process.env.DEEPSEEK_API_KEY ?? "",
         model: model.slice(3),
-        ...(process.env.GG_EXTRA ? { extraBody: JSON.parse(process.env.GG_EXTRA) } : {}),
+        extraBody: process.env.DS_EXTRA ? JSON.parse(process.env.DS_EXTRA) : { thinking: { type: "disabled" } },
       }
-    : model.startsWith("or:")
+    : model.startsWith("gg:")
       ? {
-          baseUrl: "https://openrouter.ai/api/v1",
-          apiKey: process.env.OPENROUTER_API_KEY ?? "",
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+          apiKey: process.env.GEMINI_API_KEY ?? "",
           model: model.slice(3),
-          extraBody: { reasoning: { enabled: false }, ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}) },
+          ...(process.env.GG_EXTRA ? { extraBody: JSON.parse(process.env.GG_EXTRA) } : {}),
         }
-      : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
+      : model.startsWith("or:")
+        ? {
+            baseUrl: "https://openrouter.ai/api/v1",
+            apiKey: process.env.OPENROUTER_API_KEY ?? "",
+            model: model.slice(3),
+            extraBody: { reasoning: { enabled: false }, ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}) },
+          }
+        : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
   // «none» — без LLM (модель не ответила tool call): что дают одни детерминированные поправки
   if (model === "none") return grade({ ...base, calls: [] });
