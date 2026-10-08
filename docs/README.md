@@ -46,7 +46,7 @@
 | [adr/0004](adr/0004-monetization.md) | Монетизация и платный доступ (предложение) |
 | [adr/0005](adr/0005-runtime-and-processing.md) | Cloudflare Workers + TS, inbox, push-синхронизация, детерминированный разбор дат |
 | [adr/0006](adr/0006-portable-acceptance-tests.md) | Переносимые приёмочные тесты (данные + чёрный ящик) |
-| [adr/0007-one-bot-localization.md](adr/0007-one-bot-localization.md) | ADR-0007: один бот с локализацией через Bot API; отдельные боты по языкам — при выходе на отдельный рынок (R3) |
+| [adr/0007](adr/0007-one-bot-localization.md) | Один бот + локализация через Bot API; боты по языкам — при выходе на отдельный рынок (R3) |
 
 ## Глоссарий
 
