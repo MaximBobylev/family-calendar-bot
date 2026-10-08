@@ -10,6 +10,8 @@
 //   --set testdata/nlu/intents-r1.yaml — другой набор (R1: дом с участниками и детьми — поручения, «для кого», поиск).
 //   --models none — без LLM: только детерминированные поправки (можно в сервисе test, без секретов).
 //   --dry-run — только посчитать вызовы и расход квоты Workers AI, ничего не вызывая (можно в сервисе test).
+//   --max-fail-streak 5 — после стольких сбоев подряд модель пропускается (бесплатные тарифы); OR_EXTRA='{"reasoning":{...}}'
+//   и OR_MAX_TOKENS — свои параметры для or:-моделей с рассуждением (по умолчанию reasoning off, 300 токенов).
 //   --spend-quota — разрешить больше WORKERS_AI_SAFE_CALLS вызовов Workers AI (квота общая с ботом в проде!).
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -354,10 +356,36 @@ async function withRetry<T>(f: () => Promise<T>, label: string): Promise<T> {
   }
 }
 
+// OpenRouter иногда отвечает 200 с {"error":{…}} вместо choices (2026-10-08, Nemotron Nano free: «ResourceExhausted …
+// provider_unavailable»). callTools видит в этом «нет вызова», и замер засчитал бы сбой провайдера как ответ модели —
+// в замере превращаем такой ответ в HTTP-ошибку с кодом из тела (502 → повтор в withRetry).
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const res = await realFetch(input, init);
+  if (!res.ok || !String(input).startsWith("https://openrouter.ai/")) return res;
+  const body = await res.text();
+  const err = (() => {
+    try {
+      return (JSON.parse(body) as { error?: { code?: number } }).error;
+    } catch {
+      return undefined;
+    }
+  })();
+  return new Response(body, { status: err ? (Number(err.code) >= 400 && Number(err.code) < 600 ? Number(err.code) : 502) : res.status, headers: res.headers });
+};
+
 /** Пауза между вызовами (--delay-ms) — под поминутные лимиты бесплатных тарифов. */
 const DELAY_MS = Number(arg("delay-ms") ?? 0);
+/** Модель, у которой столько фраз подряд кончились ошибкой (после повторов), дальше не вызываем — бережём квоту. */
+const MAX_FAIL_STREAK = Number(arg("max-fail-streak") ?? 5);
+const failStreak = new Map<string, number>();
+/** OR_MAX_TOKENS — больше токенов ответа для OpenRouter-модели с включённым рассуждением (по умолчанию 300). */
+const modelOpts = (model: string) =>
+  model.startsWith("or:") && process.env.OR_MAX_TOKENS ? { ...MODEL_OPTS[model], maxTokens: Number(process.env.OR_MAX_TOKENS) } : MODEL_OPTS[model];
 
 async function runOne(variant: string, model: string, c: Case, rep: number): Promise<Run> {
+  if ((failStreak.get(model) ?? 0) >= MAX_FAIL_STREAK)
+    return { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0, error: `пропущено: ${MAX_FAIL_STREAK} сбоев подряд` };
   if (DELAY_MS) await new Promise((r) => setTimeout(r, DELAY_MS));
   const v = VARIANTS[variant]!;
   // «or:<модель>» — OpenRouter (без «размышления», как в проде); «gg:<модель>» — Google AI Studio (OpenAI-совместимый
@@ -382,7 +410,11 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
             baseUrl: "https://openrouter.ai/api/v1",
             apiKey: process.env.OPENROUTER_API_KEY ?? "",
             model: model.slice(3),
-            extraBody: { reasoning: { enabled: false }, ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}) },
+            // OR_EXTRA — свои поля запроса вместо reasoning off (модель с рассуждением, которая его не выключает)
+            extraBody: {
+              ...(process.env.OR_EXTRA ? JSON.parse(process.env.OR_EXTRA) : { reasoning: { enabled: false } }),
+              ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}),
+            },
           }
         : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
@@ -393,7 +425,7 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
   try {
     const parsed = await withRetry(async () => {
       const t0 = Date.now();
-      const p = await parseIntent(cfg, c.text, { calendars: calendarNames }, { systemPrompt: v.systemPrompt, tools: v.tools, ...MODEL_OPTS[model] });
+      const p = await parseIntent(cfg, c.text, { calendars: calendarNames }, { systemPrompt: v.systemPrompt, tools: v.tools, ...modelOpts(model) });
       ms = Date.now() - t0;
       lastHeaders = p.rateHeaders;
       return p;
@@ -408,6 +440,7 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
         return true;
       }
     });
+    failStreak.set(model, 0);
     const run = grade({ ...base, ms, tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut, calls, brokenJson });
     const ok = !!run.check && Object.values(run.check).every((x) => x !== false);
     liveDone++;
@@ -419,6 +452,8 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
     return run;
   } catch (e) {
     liveDone++;
+    failStreak.set(model, (failStreak.get(model) ?? 0) + 1);
+    if (failStreak.get(model) === MAX_FAIL_STREAK) live(`DEAD ${model}: ${MAX_FAIL_STREAK} сбоев подряд — остальные фразы пропускаем`);
     live(`GAVE ${c.id} «${c.text}» | итого ${liveOk}/${liveDone}`);
     return { ...base, ms, error: String(e).slice(0, 300) };
   }

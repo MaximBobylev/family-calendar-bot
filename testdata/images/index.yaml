@@ -1,0 +1,100 @@
+# Синтетические картинки для замера «фото → событие» (US-66). Генератор — scripts/image-synth.sh (ImageMagick),
+# замер — scripts/eval-images.ts, итоги — docs/research/free-models-eval.md. Переносимые данные (ADR-0006).
+#   text   — видимый текст (эталон для «идеального OCR»: прогон --models oracle проверяет сам набор и наш парсер)
+#   event  — есть ли событие; false — ожидается no_event (или хотя бы без даты)
+#   start  — ожидаемое начало после НАШЕГО парсера по видимому тексту (как в проде: foreignDateSpans); список — любое из
+#   title  — слова, которые должны быть в названии; «a|b» — любое из (без регистра, с допуском на окончания)
+#   place  — подстрока места (справочно)
+defaults:
+  now: "2026-10-08T12:00"   # четверг
+  tz: Europe/Moscow
+images:
+  - id: "01"
+    file: 01-concert-poster.jpg
+    kind: афиша
+    event: true
+    start: "2026-10-18T19:00"
+    title: ["Сплин"]
+    place: Горбунова
+    text: "КОНЦЕРТ\nгруппа «Сплин»\n18 октября\nначало в 19:00\nДК Горбунова, ул. Новозаводская, 27\nБилеты: от 2500 ₽ · 16+"
+  - id: "02"
+    file: 02-school-meeting.jpg
+    kind: объявление в школе
+    event: true
+    start: ["2026-10-08T18:00", "2026-10-15T18:00"]
+    title: ["собрание"]
+    place: "12"
+    text: "ОБЪЯВЛЕНИЕ\nУважаемые родители учеников 3 «Б» класса!\nРодительское собрание состоится\nв четверг в 18:00, каб. 12.\nПовестка: итоги первой четверти,\nосенняя экскурсия.\nЯвка обязательна.\nКлассный руководитель\nСмирнова Е. В."
+  - id: "03"
+    file: 03-chat-screenshot.png
+    kind: скриншот чата
+    event: true
+    start: "2026-10-10T12:30"
+    title: ["Маша|встреча|Пушкин|кафе"]
+    place: Пушкин
+    text: "Маша\nПривет! Как насчёт встретиться\nна выходных?\nДавай! Когда тебе удобно?\nВ субботу в 12:30 в кафе «Пушкин»,\nТверской бульвар, 26\n14:02\nОтлично, до встречи!"
+  - id: "04"
+    file: 04-booking-en.png
+    kind: бронь (EN)
+    event: true
+    start: "2026-10-16T20:00"
+    title: ["Nobu"]
+    place: Berkeley
+    text: "Booking confirmed\nHi Maxim,\nYour table at Nobu London is confirmed.\nFriday, October 16, 2026 at 8:00 PM\nParty size: 2 guests\nAddress: 15 Berkeley St, London W1J 8DY\nNeed to change your reservation? Reply to this e-mail.\nReference: NB-48213"
+  - id: "05"
+    file: 05-doctor-ticket.png
+    kind: талон к врачу
+    event: true
+    start: "2026-10-14T09:30"
+    title: ["стоматолог|врач|приём|Иванова"]
+    place: "205"
+    text: "ТАЛОН НА ПРИЁМ К ВРАЧУ\nГБУЗ «Городская поликлиника № 3»\nВрач: стоматолог-терапевт Иванова А. П.\nДата: 14.10.2026\nВремя: 09:30\nКабинет: 205, 2 этаж\nПри себе иметь полис ОМС и паспорт. Отмена: 8 (495) 123-45-67"
+  - id: "06"
+    file: 06-landscape.jpg
+    kind: пейзаж без текста
+    event: false
+    text: ""
+  - id: "07"
+    file: 07-ad-no-date.jpg
+    kind: реклама без даты
+    event: false
+    text: "СКИДКИ\nна всё −30%\nМагазин «Уют»\nул. Садовая, 10 · ежедневно"
+  - id: "08"
+    file: 08-blurry-excursion.jpg
+    kind: размытое бледное объявление
+    event: true
+    start: "2026-10-22T10:00"
+    title: ["экскурсия|музей"]
+    text: "ЭКСКУРСИЯ В МУЗЕЙ\n22 октября в 10:00\nСбор у главного входа школы.\nСтоимость 600 руб., сдать до 15.10."
+  - id: "09"
+    file: 09-kindergarten-party.jpg
+    kind: объявление в детском саду
+    event: true
+    start: "2026-10-30T10:30"
+    title: ["утренник|осень"]
+    place: музыкальн
+    text: "Дорогие родители!\nПриглашаем вас на осенний\nутренник «Золотая осень»\n30 октября в 10:30\nв музыкальном зале.\nКостюмы: листочки, грибочки."
+  - id: "10"
+    file: 10-swim-moved.jpg
+    kind: записка на двери (наклон)
+    event: true
+    start: "2026-10-19T17:00"
+    title: ["плавание|плавания|занятие"]
+    place: Дельфин
+    text: "Секция плавания, группа 2\nВНИМАНИЕ!\nЗанятие переносится на\nпонедельник, 19 октября, 17:00.\nБассейн «Дельфин», дорожка 4.\nТренер: Олег"
+  - id: "11"
+    file: 11-jazz-en.jpg
+    kind: афиша (EN)
+    event: true
+    start: "2026-10-24T19:30"
+    title: ["Jazz"]
+    place: Blue Note
+    text: "Jazz Night\nSaturday, Oct 24\nDoors 7:30 pm\nBlue Note Club, 131 W 3rd St\nFree entry · Live quartet"
+  - id: "12"
+    file: 12-birthday-photo.jpg
+    kind: приглашение «фото» (поворот, шум)
+    event: true
+    start: "2026-10-25T15:00"
+    title: ["Сони|рождения"]
+    place: Ленина
+    text: "Приглашение\nПриглашаем на день рождения Сони!\n25 октября в 15:00\nул. Ленина, 5, кв. 12\nБудут торт и аниматор :)"

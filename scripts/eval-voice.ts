@@ -1,9 +1,11 @@
 // Замер двух голосовых конвейеров на синтетическом шумном наборе (scripts/voice-synth.py) — ручной запуск, не тест.
 //   A — как сейчас в проде: Groq Whisper → isEmptySpeech → fixTranscript → OpenRouter Nemotron free (reasoning off) → effectiveIntent;
-//   B — мультимодальный: Gemini напрямую (src/voice/understand.ts) → транскрипт + интент / no_speech → effectiveIntent.
+//   B — мультимодальный: Gemini напрямую (src/voice/understand.ts) → транскрипт + интент / no_speech → effectiveIntent;
+//   C — мультимодальный через OpenRouter (kind openai-audio, input_audio ogg; тот же VOICE_TOOLS/правила): модель —
+//       VOICE_OR_MODEL, поля запроса — VOICE_OR_EXTRA (по умолчанию reasoning off; прод их не передаёт — вклеиваем в fetch).
 // Запуск (ключи есть только в сервисе deploy; квоты — общие с продом, см. CLAUDE.md):
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-voice.ts [папка=reports/voice-synth] \
-//     [--dry-run] [--only A|B] [--filter подстрока] [--limit N] [--resume [--retry-errors]] [--report] [--results файл.jsonl]
+//     [--dry-run] [--only A|B|C] [--files a.ogg,b.ogg] [--filter подстрока] [--limit N] [--resume [--retry-errors]] [--report] [--results файл.jsonl]
 //   --dry-run — только оценка вызовов по провайдерам, без сети; --resume — пропустить уже записанное в results.jsonl
 //   (--retry-errors — кроме ошибок: повторить их; в сводке последняя запись по файлу заменяет прежнюю);
 //   --report — только сводка по results.jsonl. Живой журнал — <папка>/live.log. Фразы — testdata/voice/phrases.yaml.
@@ -27,10 +29,11 @@ const opt = (name: string) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
-const positional = argv.filter((a, i) => !a.startsWith("--") && !["--only", "--filter", "--limit", "--results"].includes(argv[i - 1] ?? ""));
+const positional = argv.filter((a, i) => !a.startsWith("--") && !["--only", "--filter", "--limit", "--results", "--files"].includes(argv[i - 1] ?? ""));
 const dir = positional[0] ?? "reports/voice-synth";
 const only = opt("--only");
-const pipelines = (only ? [only] : ["A", "B"]) as ("A" | "B")[];
+const pipelines = (only ? [only] : ["A", "B"]) as Pipeline[];
+type Pipeline = "A" | "B" | "C";
 const LIVE = join(dir, "live.log");
 const RESULTS = join(dir, opt("--results") ?? "results.jsonl");
 
@@ -59,6 +62,8 @@ let items: Item[] = readFileSync(join(dir, "index.tsv"), "utf8")
     const [file, phrase, voice, condition] = l.split("\t") as [string, string, string, string];
     return { file, phrase, voice, condition };
   });
+const files = new Set((opt("--files") ?? "").split(",").filter(Boolean));
+if (files.size) items = items.filter((i) => files.has(i.file));
 const filter = opt("--filter");
 if (filter) items = items.filter((i) => i.file.includes(filter));
 const limit = Number(opt("--limit") ?? 0);
@@ -71,7 +76,7 @@ const CALENDARS = ["Иван", "Семья", "общий", "Работа", "work
 
 interface Result {
   file: string;
-  pipeline: "A" | "B";
+  pipeline: Pipeline;
   phrase: string;
   voice: string;
   condition: string;
@@ -156,8 +161,29 @@ const gemini: VoiceConfig = {
   model: process.env.GEMINI_VOICE_MODEL || "gemini-3.5-flash-lite",
 };
 
+const orVoice: VoiceConfig = {
+  name: "openrouter-voice",
+  kind: "openai-audio",
+  baseUrl: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY ?? "",
+  model: process.env.VOICE_OR_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+};
+// Прод (viaOpenAiAudio) не передаёт поля провайдера; для замера вклеиваем их в тело запросов с аудио к OpenRouter
+const OR_VOICE_EXTRA: Record<string, unknown> = process.env.VOICE_OR_EXTRA ? JSON.parse(process.env.VOICE_OR_EXTRA) : { reasoning: { enabled: false } };
+const realFetch = globalThis.fetch;
+// OpenRouter бывает отвечает 200 с {"error":{…}} (провайдер перегружен) — прод принял бы это за no_speech; в замере это сбой
+globalThis.fetch = async (input, init) => {
+  if (!String(input).startsWith(orVoice.baseUrl)) return realFetch(input, init);
+  const audio = typeof init?.body === "string" && init.body.includes('"input_audio"');
+  const res = await realFetch(input, audio ? { ...init, body: JSON.stringify({ ...JSON.parse(init!.body as string), ...OR_VOICE_EXTRA }) } : init);
+  if (!res.ok) return res;
+  const body = await res.text();
+  const code = /^\s*\{"id":"[^"]*","error":\{/.test(body) || /^\s*\{"error":\{/.test(body) ? 502 : res.status;
+  return new Response(body, { status: code, headers: res.headers });
+};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const isRateLimit = (e: unknown) => /\b(429|503)\b/.test(String(e));
+const isRateLimit = (e: unknown) => /\b(429|502|503)\b/.test(String(e));
 const short = (e: unknown) =>
   String(e instanceof Error ? e.message : e)
     .replace(/\s+/g, " ")
@@ -202,7 +228,12 @@ class Provider {
     }
   }
 }
-const P = { groq: new Provider("groq", 3_000), openrouter: new Provider("openrouter", 3_500), gemini: new Provider("gemini", 4_500) };
+const P = {
+  groq: new Provider("groq", 3_000),
+  openrouter: new Provider("openrouter", 3_500),
+  gemini: new Provider("gemini", 4_500),
+  orvoice: new Provider("openrouter-voice", 2_500),
+};
 
 const intentName = (text: string, intent: Intent) => effectiveIntent(text, intent).name;
 
@@ -227,12 +258,13 @@ async function runA(item: Item, audio: ArrayBuffer): Promise<Result> {
   }
 }
 
-async function runB(item: Item, audio: ArrayBuffer): Promise<Result> {
-  const base = { file: item.file, pipeline: "B" as const, phrase: item.phrase, voice: item.voice, condition: item.condition };
+async function runB(item: Item, audio: ArrayBuffer, pl: "B" | "C" = "B"): Promise<Result> {
+  const base = { file: item.file, pipeline: pl, phrase: item.phrase, voice: item.voice, condition: item.condition };
   const t0 = Date.now();
+  const prov = pl === "B" ? P.gemini : P.orvoice;
   try {
-    const { result } = await P.gemini.call(() => understandVoiceChain([gemini], audio, CALENDARS));
-    const ms = P.gemini.lastMs;
+    const { result } = await prov.call(() => understandVoiceChain([pl === "B" ? gemini : orVoice], audio, CALENDARS));
+    const ms = prov.lastMs;
     if (result.noSpeech) return { ...base, ok: true, transcript: "", intent: "no_speech", ms };
     return { ...base, ok: true, transcript: result.transcript, intent: intentName(result.transcript, result.intent), ms };
   } catch (e) {
@@ -272,7 +304,7 @@ function summary(all: Result[]): void {
   ];
   for (const [title, key] of groups) {
     console.log(`\n### ${title}\n\n${head}`);
-    for (const pl of ["A", "B"] as const) {
+    for (const pl of ["A", "B", "C"] as const) {
       const rs = all.filter((r) => r.pipeline === pl);
       const keys = [...new Set(rs.map(key))];
       for (const k of keys)
@@ -310,9 +342,10 @@ const doneKeys = new Set(
 const todo = pipelines.flatMap((pl) => items.filter((i) => !doneKeys.has(`${pl}|${i.file}`)).map((i) => ({ pl, i })));
 const nA = todo.filter((t) => t.pl === "A").length;
 const nB = todo.filter((t) => t.pl === "B").length;
+const nC = todo.filter((t) => t.pl === "C").length;
 const nSpeechA = todo.filter((t) => t.pl === "A" && phrases.has(t.i.phrase)).length;
 console.log(
-  `Файлов: ${items.length}; заданий: A ${nA}, B ${nB}.\n` +
+  `Файлов: ${items.length}; заданий: A ${nA}, B ${nB}, C ${nC} (OpenRouter ${orVoice.model}).\n` +
     `Оценка вызовов: Groq ≤ ${nA} (лимит 2000/сутки), OpenRouter free ≤ ${nSpeechA} (+ повторы после 429; ≈1000/сутки), ` +
     `Gemini ≤ ${nB} (бесплатный тариф общий с переслушиванием в проде — держать ≤ 200, пауза ≥ 4 с).\n` +
     `Время: ≈ ${Math.ceil((nB * 6 + nA * 4) / 60)} мин последовательно. Workers AI не вызывается.`,
@@ -323,9 +356,15 @@ if (nB > 200) {
 }
 if (flag("--dry-run")) process.exit(0);
 for (const [k, v] of Object.entries({ GROQ_API_KEY: groq.apiKey, OPENROUTER_API_KEY: nemotron.apiKey, GEMINI_API_KEY: gemini.apiKey }))
-  if (!v && ((k === "GEMINI_API_KEY" && pipelines.includes("B")) || (k !== "GEMINI_API_KEY" && pipelines.includes("A")))) throw new Error(`нет ${k}`);
+  if (
+    !v &&
+    ((k === "GEMINI_API_KEY" && pipelines.includes("B")) ||
+      (k !== "GEMINI_API_KEY" && pipelines.includes("A")) ||
+      (k === "OPENROUTER_API_KEY" && pipelines.includes("C")))
+  )
+    throw new Error(`нет ${k}`);
 
-live(`=== eval-voice: ${items.length} файлов × ${pipelines.join("+")}, LLM ${nemotron.model}, voice ${gemini.model}`);
+live(`=== eval-voice: ${items.length} файлов × ${pipelines.join("+")}, LLM ${nemotron.model}, voice ${gemini.model}, C ${orVoice.model}`);
 const results: Result[] = flag("--resume") ? [...done] : [];
 // По файлу — оба конвейера подряд (условия сети одинаковые), строго последовательно
 for (const item of items) {
@@ -333,7 +372,7 @@ for (const item of items) {
   const audio = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
   for (const pl of pipelines) {
     if (doneKeys.has(`${pl}|${item.file}`)) continue;
-    const r = grade(pl === "A" ? await runA(item, audio) : await runB(item, audio), item);
+    const r = grade(pl === "A" ? await runA(item, audio) : await runB(item, audio, pl), item);
     results.push(r);
     appendFileSync(RESULTS, `${JSON.stringify(r)}\n`);
     const verdict = r.ok
@@ -347,5 +386,5 @@ for (const item of items) {
     live(`${pl} ${item.file} ${timing} | «${r.transcript ?? ""}» → ${r.intent ?? r.error} | ${verdict}`);
   }
 }
-live(`=== вызовов: groq ${P.groq.calls}, openrouter ${P.openrouter.calls}, gemini ${P.gemini.calls}`);
+live(`=== вызовов: groq ${P.groq.calls}, openrouter ${P.openrouter.calls}, gemini ${P.gemini.calls}, openrouter-voice ${P.orvoice.calls}`);
 summary(latest(results));
