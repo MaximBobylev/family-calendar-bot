@@ -75,3 +75,14 @@
     - voice: { from: 1001, transcript: "Что у меня завтра?" }
     - expect_telegram:
         - { text_contains: ["Не могу распознать голос сейчас"] }
+
+- id: llm-falls-back-on-200-with-error-body
+  story: US-14
+  steps:
+    - *setup
+    # OpenRouter при перегрузке отвечает 200 с ошибкой в теле (2026-10-08) — это сбой провайдера, не «не понял»
+    - provider_outage: { provider: llm, status: 200 }
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Завтра, чт, 8 октября", "Планёрка"] }
+    - expect_provider_calls: { llm: 1, llm-backup: 1 }

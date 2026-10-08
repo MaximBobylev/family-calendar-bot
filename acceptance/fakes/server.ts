@@ -531,6 +531,8 @@ const server = createServer(async (req, res) => {
       const body = (await readJson(req)) as { messages?: { role: string; content: string }[] };
       llmRequests.push({ ...body, _via: via });
       const outage = outages.get(via);
+      // status 200 — как OpenRouter при перегрузке: HTTP 200, ошибка в теле, без choices
+      if (outage === 200) return send(res, 200, { error: { message: "fake upstream overload", code: 502 } });
       if (outage) return send(res, outage, { error: { message: "fake outage" } });
       const text = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "";
       const fx = llmFixtures.get(text);

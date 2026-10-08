@@ -86,7 +86,13 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
   const json = (await res.json()) as {
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
+    error?: { message?: string; code?: number | string };
   };
+  // OpenRouter иногда отвечает 200 с ошибкой в теле и без choices (перегрузка провайдера, 2026-10-08) —
+  // это сбой провайдера, а не «модель не вызвала инструмент»: пусть цепочка попробует следующего
+  if (json.error && !json.choices?.length) {
+    throw new LlmHttpError(`llm 200 with error: ${JSON.stringify(json.error).slice(0, 300)}`, 502, rateHeadersOf(res));
+  }
   const calls = json.choices?.[0]?.message?.tool_calls ?? [];
   return {
     rateHeaders: rateHeadersOf(res),

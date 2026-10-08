@@ -144,7 +144,10 @@ async function viaOpenAiAudio(cfg: VoiceConfig, data: string, calendars: string[
   const j = (await res.json()) as {
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
+    error?: { message?: string };
   };
+  // 200 с ошибкой в теле и без choices — сбой провайдера, а не «ничего не сказано»
+  if (j.error && !j.choices?.length) throw new Error(`voice 200 with error: ${JSON.stringify(j.error).slice(0, 300)}`);
   const calls = (j.choices?.[0]?.message?.tool_calls ?? []).map((c) => {
     let args: Record<string, unknown> = {};
     try {
