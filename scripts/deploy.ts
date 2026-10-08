@@ -78,10 +78,10 @@ if (openrouterKey) {
   }
 }
 // DeepSeek (docs/research/llm-intents-eval.md, 2026-10-08): deepseek-flash без «размышления» — 98,2% / 99,3% полей,
-// p50 1,1 с, ≈ $0,0003 за команду. Платный; серверы в Китае (ADR-0002). Место в цепочке — LLM_PRIMARY=deepseek: первым,
-// иначе — после бесплатных OpenRouter (запасной перед Workers AI).
+// p50 1,1 с, ≈ $0,0003 за команду. Платный; серверы в Китае (ADR-0002). Решение владельца 2026-10-08: пока разработка —
+// только бесплатные модели, ключ сам по себе DeepSeek не включает; на запуске — LLM_PRIMARY=deepseek (первым в цепочке).
 const deepseekKey = env.DEEPSEEK_API_KEY?.trim();
-if (deepseekKey) {
+if (deepseekKey && env.LLM_PRIMARY?.trim() === "deepseek") {
   const deepseek = {
     name: "deepseek",
     baseUrl: "https://api.deepseek.com",
@@ -92,8 +92,7 @@ if (deepseekKey) {
     inPerM: 0.3,
     outPerM: 1.2,
   };
-  if (env.LLM_PRIMARY?.trim() === "deepseek") llmChain.unshift(deepseek);
-  else llmChain.push(deepseek);
+  llmChain.unshift(deepseek);
 }
 llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8" });
 
