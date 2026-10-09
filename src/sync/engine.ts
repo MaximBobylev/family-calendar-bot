@@ -24,6 +24,7 @@ import {
   pruneStatements,
   releaseLease,
   snapshotsBetween,
+  snapshotEtags,
   snapshotsByIds,
   updateSyncRow,
   upsertSnapshots,
@@ -108,7 +109,7 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
   const changes: Change[] = [];
   // Поручения, связанные с событием (US-91): перенос/удаление мимо бота. Сделанное ботом (запись в слушателе — origin,
   // или её эхо по тому же etag) поручения уже сдвинул/отменил сам (modify-event.ts, delete-event.ts) — не повторяем.
-  const linked: { eventId: string; kind: ChangeKind; deltaMs: number; actor: string | null }[] = [];
+  const linked: { eventId: string; beforeEtag: string | null; kind: ChangeKind; deltaMs: number; actor: string | null }[] = [];
   for (const e of entries) {
     const before = old.get(e.eventId) ?? null;
     if (!e.after && !before) continue;
@@ -122,7 +123,7 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
       // Запись бота в серию целиком: экземпляры приходят синком — автор известен по журналу
       const series = writes.find((w) => w.eventId === (e.after?.seriesId ?? before.seriesId));
       const deltaMs = kind === "moved" && isActive(e.after) && isActive(before) ? e.after.startMs! - before.startMs! : 0;
-      if (!direct) linked.push({ eventId: e.eventId, kind, deltaMs, actor: series?.authorUserId ?? null });
+      if (!direct) linked.push({ eventId: e.eventId, beforeEtag: before.etag ?? null, kind, deltaMs, actor: series?.authorUserId ?? null });
     }
     if (kind && opts.notify) {
       const origin = e.origin ?? attribute(writes, e, before);
@@ -137,8 +138,22 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
     ...(deletes.length ? [deleteSnapshots(ctx.db, pcid, deletes)] : []),
     ...reminderStatements(ctx.db, pcid, touched, upserts.filter(isActive), reminderUsers(chats), now),
   ];
-  await notifyChanges(ctx, pcid, changes, stmts, chats);
+  // Снимки до записи — внутри того же batch: запись бота успела раньше (её журнал мы не видели, а поручение она уже
+  // сдвинула) — второй раз не сдвигаем (tech-debt #21)
+  const first = linked.length
+    ? snapshotEtags(
+        ctx.db,
+        pcid,
+        linked.map((l) => l.eventId),
+      )
+    : undefined;
+  const state = await notifyChanges(ctx, pcid, changes, stmts, chats, first);
+  const etagNow = new Map((state?.results as { event_id: string; etag: string | null }[] | undefined)?.map((r) => [r.event_id, r.etag]));
   for (const l of linked) {
+    if (etagNow.get(l.eventId) !== l.beforeEtag) {
+      log("sync_race_skipped", { kind: l.kind });
+      continue;
+    }
     try {
       if (l.kind === "moved") await shiftAssignmentsForProviderEvent(ctx, pcid, l.eventId, l.deltaMs, l.actor);
       else await cancelAssignmentsForProviderEvent(ctx, pcid, l.eventId, l.actor);

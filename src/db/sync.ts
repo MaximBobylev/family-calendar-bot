@@ -251,6 +251,12 @@ export function upsertSnapshots(db: D1Database, pcid: string, snaps: Snapshot[],
   return out;
 }
 
+/** etag снимков (null — снимка нет) — чтение внутри batch, до записи снимков: проиграли ли гонку (tech-debt #21). */
+export const snapshotEtags = (db: D1Database, pcid: string, ids: string[]) =>
+  db
+    .prepare("SELECT event_id, etag FROM event_snapshots WHERE provider_calendar_id = ? AND event_id IN (SELECT value FROM json_each(?))")
+    .bind(pcid, JSON.stringify(ids));
+
 export const deleteSnapshots = (db: D1Database, pcid: string, ids: string[]) =>
   db.prepare("DELETE FROM event_snapshots WHERE provider_calendar_id = ? AND event_id IN (SELECT value FROM json_each(?))").bind(pcid, JSON.stringify(ids));
 
@@ -383,23 +389,49 @@ export async function userCalendarIds(db: D1Database, userId: string): Promise<s
 
 // --- Outbox уведомлений ------------------------------------------------------------------------------------------------
 
+/**
+ * Снимок события, с которым сравнивали изменение: нет снимка (exists false) или снимок с этим etag. Уведомление пишется,
+ * только если снимок всё ещё такой: запись бота и параллельный синк того же события не разошлют его дважды (tech-debt #21).
+ */
+export interface SnapshotGuard {
+  pcid: string;
+  eventId: string;
+  exists: boolean;
+  etag: string | null;
+}
+
 export interface NoticeRow {
   chatId: string;
   userId: string | null;
   noticeJson: string;
   deliverAt: number;
+  guard?: SnapshotGuard;
 }
 
-/** Строки outbox — одним запросом (json_each). */
+/**
+ * Строки outbox — одним запросом (json_each). С guard — только если снимок ещё не обновлён: запрос должен идти в batch
+ * раньше записи снимков (batch D1 — одна транзакция, кто закоммитил первым, тот и уведомил).
+ */
 export function insertNotices(db: D1Database, rows: NoticeRow[], now: number): D1PreparedStatement[] {
   if (rows.length === 0) return [];
-  const data = rows.map((r) => ({ id: crypto.randomUUID(), c: r.chatId, u: r.userId, n: r.noticeJson, d: r.deliverAt }));
+  const data = rows.map((r) => ({
+    id: crypto.randomUUID(),
+    c: r.chatId,
+    u: r.userId,
+    n: r.noticeJson,
+    d: r.deliverAt,
+    ...(r.guard ? { gp: r.guard.pcid, ge: r.guard.eventId, gx: r.guard.exists ? 1 : 0, gt: r.guard.etag } : {}),
+  }));
   return [
     db
       .prepare(
         `INSERT INTO change_notices (id, chat_id, user_id, notice_json, created_at, deliver_at, status)
          SELECT j.value ->> '$.id', j.value ->> '$.c', j.value ->> '$.u', j.value ->> '$.n', ?2, j.value ->> '$.d', 'queued'
-         FROM json_each(?1) j`,
+         FROM json_each(?1) j
+         WHERE j.value ->> '$.ge' IS NULL
+            OR j.value ->> '$.gx' = (SELECT count(*) FROM event_snapshots s
+                                     WHERE s.provider_calendar_id = j.value ->> '$.gp' AND s.event_id = j.value ->> '$.ge'
+                                       AND (j.value ->> '$.gx' = 0 OR s.etag IS j.value ->> '$.gt'))`,
       )
       .bind(JSON.stringify(data), now),
   ];

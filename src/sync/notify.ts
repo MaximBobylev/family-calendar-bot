@@ -63,6 +63,7 @@ function noticeFor(change: Change, chat: CalendarChat): Notice | null {
  */
 export function noticeStatements(
   db: D1Database,
+  pcid: string,
   chats: CalendarChat[],
   changes: Change[],
   now: number,
@@ -73,12 +74,14 @@ export function noticeStatements(
   for (const change of changes) {
     const times = [change.before, change.after].filter((s): s is Snapshot => !!s).map(timeOf);
     if (!inNotifyWindow(times, now)) continue;
+    const ev = change.after ?? change.before;
+    const guard = ev ? { pcid, eventId: ev.eventId, exists: !!change.before, etag: change.before?.etag ?? null } : undefined;
     for (const chat of recipientsOf(chats, change)) {
       const notice = noticeFor(change, chat);
       if (!notice) continue;
       const quiet = quietUntil(now, chat.tz);
       const deliverAt = quiet ?? now;
-      rows.push({ chatId: chat.chatId, userId: chat.userId, noticeJson: JSON.stringify(notice), deliverAt });
+      rows.push({ chatId: chat.chatId, userId: chat.userId, noticeJson: JSON.stringify(notice), deliverAt, ...(guard ? { guard } : {}) });
       if (quiet === null) flushNow.add(chat.chatId);
       else if (!rows.some((r, i) => i < rows.length - 1 && r.chatId === chat.chatId && r.deliverAt === deliverAt))
         stmts.push(flushJob(db, chat.chatId, deliverAt));
@@ -154,17 +157,23 @@ export async function runNotifyFlushJob(ctx: AppContext, job: DueJob): Promise<v
   await flushChat(ctx, chatId);
 }
 
-/** Записать уведомления об изменениях календаря и сразу отправить те, что не попали в тихие часы. */
+/**
+ * Записать уведомления об изменениях календаря и сразу отправить те, что не попали в тихие часы. Уведомления — в batch
+ * раньше extra (снимков): их guard сверяется со снимком до записи (tech-debt #21). first — чтение, которому тоже нужен
+ * снимок до batch; возвращается его результат.
+ */
 export async function notifyChanges(
   ctx: AppContext,
   pcid: string,
   changes: Change[],
   extra: D1PreparedStatement[] = [],
   known?: CalendarChat[],
-): Promise<void> {
+  first?: D1PreparedStatement,
+): Promise<D1Result | undefined> {
   const chats = changes.length ? (known ?? (await chatsForCalendar(ctx.db, pcid))) : [];
-  const { stmts, flushNow } = noticeStatements(ctx.db, chats, changes, ctx.clock.now());
-  const all = [...extra, ...stmts];
-  if (all.length) await ctx.db.batch(all);
+  const { stmts, flushNow } = noticeStatements(ctx.db, pcid, chats, changes, ctx.clock.now());
+  const all = [...(first ? [first] : []), ...stmts, ...extra];
+  const results = all.length ? await ctx.db.batch(all) : [];
   for (const chatId of flushNow) await flushChat(ctx, chatId);
+  return first ? results[0] : undefined;
 }
