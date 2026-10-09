@@ -4,6 +4,7 @@
 import type { CalendarEvent, EventReminders } from "../calendar/model";
 import type { Day } from "../dates/calendar";
 import type { InlineKeyboardButton } from "../telegram/types";
+import { calendarZoneLine } from "./create-view";
 import { escapeHtml, spanLabel } from "./format";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
@@ -30,6 +31,8 @@ export function modifyCard(
       `${t("was", locale)}: ${spanLabel(payload.oldStart, payload.oldEnd, today, locale)}`,
       `${t("now", locale)}: ${spanLabel(o.start, o.end!, today, locale)}`,
     );
+    const zone = payload.calendarTz ? calendarZoneLine(o.start, payload.tz, payload.calendarTz, locale) : undefined;
+    if (zone) lines.push(zone);
   }
   if (o.title) lines.push(`${t("newTitle", locale)}: <b>${escapeHtml(o.title)}</b>`);
   lines.push(...detailLines(o, payload, locale));

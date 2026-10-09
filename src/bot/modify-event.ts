@@ -75,6 +75,7 @@ export async function proposeChange(
   }
 
   const askScope = e.recurring && req.scope === undefined && res.options.length === 1;
+  const calTz = calendars.find((c) => c.id === e.ref.calendarId)?.timeZone;
   const sameDay = res.options.every((o) => !o.start || o.start.day === e.start?.day);
   const payload: ModifyCardPayload = {
     chatId,
@@ -91,6 +92,7 @@ export async function proposeChange(
     askScope: askScope && sameDay,
     ...(e.seriesId ? { seriesId: e.seriesId } : {}),
     ...(e.etag ? { etag: e.etag } : {}),
+    ...(calTz && calTz !== tz ? { calendarTz: calTz } : {}),
   };
   // «Все» — только изменения в пределах дня; перенос серии на другой день — R2
   if (req.scope === "all" && !sameDay) {

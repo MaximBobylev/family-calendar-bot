@@ -1,7 +1,7 @@
 // US-30 / US-32: отображение карточки создания — тело события, варианты дат кнопками, выбор для 29–31 числа.
 // Чистые функции: текст и кнопки по готовым вариантам, без ввода-вывода (tech-debt #10).
 
-import { localToUtc, parts, utcToLocal, type Day } from "../dates/calendar";
+import { localToUtc, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import type { InlineKeyboardButton } from "../telegram/types";
 import type { CreateOption } from "./create-logic";
 import { dateLabel, escapeHtml, hhmm, whenOf } from "./format";
@@ -85,9 +85,13 @@ export function createCard(
   return { text, buttons };
 }
 
-/** «🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)» — время сказано в другом поясе (tech-debt #26). */
+/**
+ * «🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)» — время сказано в другом поясе (tech-debt #26);
+ * иначе «🗓 В поясе календаря (Europe/Moscow): 11:00» — календарь в другом поясе, чем вы сейчас (поездка, US-07).
+ */
 export function zoneLine(o: CreateOption, locale: string): string | undefined {
-  if (!o.zone || !o.start || o.allDay) return undefined;
+  if (!o.start || o.allDay) return undefined;
+  if (!o.zone) return o.calendarTz ? calendarZoneLine(o.start, o.tz, o.calendarTz, locale) : undefined;
   const there = utcToLocal(localToUtc(o.start, o.tz), o.zone.tz);
   // Сейчас у пояса то же смещение, что у нашего, — сказать нечего
   if (there.day === o.start.day && there.minutes === o.start.minutes) return undefined;
@@ -96,6 +100,16 @@ export function zoneLine(o: CreateOption, locale: string): string | undefined {
     zone: escapeHtml(locale === "en" ? o.zone.en : o.zone.ru),
     myTime: hhmm(o.start.minutes),
     tz: o.tz,
+  });
+}
+
+/** Время в поясе календаря, если оно не совпадает с временем в текущем поясе (US-07: «оба времени в карточке»). */
+export function calendarZoneLine(start: Moment, tz: string, calendarTz: string, locale: string): string | undefined {
+  const there = utcToLocal(localToUtc(start, tz), calendarTz);
+  if (there.day === start.day && there.minutes === start.minutes) return undefined;
+  return t("calendarZoneNote", locale, {
+    tz: calendarTz,
+    time: there.day === start.day ? hhmm(there.minutes) : `${dateLabel(there.day, start.day, locale)}, ${hhmm(there.minutes)}`,
   });
 }
 

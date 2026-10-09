@@ -65,6 +65,8 @@ export interface CreateOption {
   series?: SeriesInfo;
   /** Время сказано в другом поясе («в 15 по Киеву») — в карточке показываем и его (tech-debt #26). */
   zone?: NamedZone;
+  /** Пояс календаря, если он не текущий пояс пользователя (поездка, другой город) — в карточке и его время (US-07). */
+  calendarTz?: string;
   /** Вариант из `start` от LLM (второе мнение), а не из нашего куска — выбор его = наш парсер ошибся (date_fix). */
   fromLlm?: true;
 }
@@ -314,6 +316,7 @@ function optionBase(draft: CreateDraft, cal: CalendarInfo, tz: string, locale: s
     title: draft.title ?? t("defaultTitle", locale),
     titleGiven: !!draft.title,
     tz,
+    ...(cal.timeZone && cal.timeZone !== tz ? { calendarTz: cal.timeZone } : {}),
     ...(draft.location ? { location: draft.location } : {}),
     ...(draft.description ? { description: draft.description } : {}),
   };

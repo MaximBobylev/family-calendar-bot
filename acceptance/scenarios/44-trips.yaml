@@ -20,6 +20,7 @@
                 - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
       - llm:
           "Поставь встречу завтра в 12": { tool: create_event, args: { start: "завтра в 12" } }
+          "Перенеси планёрку на 15": { tool: modify_event, args: { event: "планёрку" } }
           "Я в офисе до 6": { tool: unsupported, args: {} }
     - telegram: { from: 1001, text: "Мы в Тбилиси до воскресенья" }
     - expect_telegram:
@@ -28,7 +29,8 @@
     # Относительные даты — в поясе поездки: «завтра в 12» = 12:00 по Тбилиси
     - telegram: { from: 1001, text: "Поставь встречу завтра в 12" }
     - expect_telegram:
-        - { text_contains: ["Создать событие?", "чт, 8 октября, 12:00–13:00"] }
+        # Календарь — в московском поясе: в карточке и его время (US-07 AC)
+        - { text_contains: ["Создать событие?", "чт, 8 октября, 12:00–13:00", "🗓 В поясе календаря (Europe/Moscow): 11:00"] }
     - press: "Создать"
     - expect_telegram:
         - { method: editMessageText, text_contains: ["✅ Создано", "чт, 8 октября, 12:00–13:00"] }
@@ -38,8 +40,13 @@
         calendar: ivan@gmail.com
         count: 2
         events: [{ summary: "Встреча", start: "2026-10-08T12:00:00+04:00", end: "2026-10-08T13:00:00+04:00" }]
+    - telegram: { from: 1001, text: "Перенеси планёрку на 15" }
+    - expect_telegram:
+        - { text_contains: ["Перенести?", "Было: чт, 8 октября, 11:00–12:00", "Стало: чт, 8 октября, 15:00–16:00", "🗓 В поясе календаря (Europe/Moscow): 14:00"] }
+    - press: "Отмена"
     - telegram: { from: 1001, text: "Какой у меня часовой пояс?" }
     - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
         - { text_contains: ["🧳 Сейчас поездка: Asia/Tbilisi (там 11:00) до вс, 11 октября. Дом — Europe/Moscow."] }
     # Сводка — по поясу поездки (08:00 в Тбилиси = 04:00Z), с поездкой в шапке; планёрка 10:00 МСК = 11:00 там
     - clock: "2026-10-08T04:00:00Z"

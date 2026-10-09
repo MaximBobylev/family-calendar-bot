@@ -139,7 +139,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
   private async loadCalendars(): Promise<CalendarInfo[]> {
     const { results } = await this.db
       .prepare(
-        `SELECT c.id, c.account_id, c.provider_calendar_id, c.title, c.writable, c.is_default,
+        `SELECT c.id, c.account_id, c.provider_calendar_id, c.title, c.writable, c.is_default, c.time_zone,
                 (SELECT json_group_array(alias) FROM calendar_aliases al WHERE al.calendar_id = c.id AND al.user_id = a.user_id) AS aliases
          FROM calendars c
          JOIN provider_accounts a ON a.id = c.account_id
@@ -147,7 +147,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
          ORDER BY c.is_default DESC, c.title`,
       )
       .bind(this.userId)
-      .all<{ id: string; account_id: string; provider_calendar_id: string; title: string; writable: number; is_default: number; aliases: string | null }>();
+      .all<{
+        id: string;
+        account_id: string;
+        provider_calendar_id: string;
+        title: string;
+        writable: number;
+        is_default: number;
+        time_zone: string | null;
+        aliases: string | null;
+      }>();
     const only = this.onlyCalendarIds;
     return results
       .filter((r) => !only || only.includes(r.id))
@@ -159,6 +168,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
         writable: r.writable === 1,
         isDefault: this.defaultOverride ? r.id === this.defaultOverride : r.is_default === 1,
         aliases: (JSON.parse(r.aliases ?? "[]") as string[]).sort(),
+        ...(r.time_zone ? { timeZone: r.time_zone } : {}),
       }));
   }
 

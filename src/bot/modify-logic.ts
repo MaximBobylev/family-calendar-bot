@@ -42,6 +42,8 @@ export interface ModifyCardPayload {
   options: Change[];
   /** Кнопки «только эту / все» вместо «подтвердить». */
   askScope: boolean;
+  /** Пояс календаря события, если он не текущий пояс пользователя — новое время и в нём (US-07). */
+  calendarTz?: string;
 }
 
 const plus = addMinutes;

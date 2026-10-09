@@ -36,6 +36,7 @@ export const createMessages = {
   askWhen: { ru: "Когда поставить? Например: «завтра в 15».", en: "When? For example: “tomorrow at 3pm”." },
   askTime: { ru: "Во сколько?", en: "What time?" },
   // tech-debt #26: время в чужом поясе — в карточке оба времени; незнакомый пояс — спросить, а не отбросить
+  calendarZoneNote: { ru: "🗓 В поясе календаря ({tz}): {time}", en: "🗓 In the calendar's time zone ({tz}): {time}" },
   zoneNote: {
     ru: "🌍 {time} {zone} = {myTime} по вашему времени ({tz})",
     en: "🌍 {time} {zone} = {myTime} your time ({tz})",
