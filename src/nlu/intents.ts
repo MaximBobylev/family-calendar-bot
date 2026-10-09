@@ -189,18 +189,23 @@ export const TOOLS: ToolDefinition[] = [
 // Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
 // календарь до названия, два запроса в одном сообщении. Правила структуры даты `when` — до примеров: в конце промпта
 // они вытесняли правило календаря (замер 2026-10-08, раунд 2 llm-date-resolution-eval.md). Прогон: scripts/eval-intents.ts на testdata/nlu/intents.yaml.
-export const SYSTEM_PROMPT = `You route a user's message (Russian or English, often a voice transcript) to a calendar tool.
+const PROMPT_HEAD = `You route a user's message (Russian or English, often a voice transcript) to a calendar tool.
 Copy date/time words VERBATIM from the message — never drop the day, never compute or translate dates.
 Omit optional fields the user did not say. title is whatever names the event, even one word («стоматолог»); a bare «встреча» is not a title.
 calendar: only if the message refers to one of the user's calendars — return that name from the list; never guess. A person's calendar may be named in another case or by a short form of the name («в календарь Маше» → «Мария»).
 Two separate requests in one message → one tool call per request. Not about the user's calendar → "unsupported".
-In create_event also fill "when" — the date/time words of "start" as a structure, e.g. "Созвон с Петей завтра в 15:30 на полчаса" → "when":{"day":{"type":"relative_days","days":1},"time":{"hour":15,"minute":30}}.
+`;
+
+/** Раздел о структуре даты `when` — ≈ 4,5 тыс. токенов из ≈ 7 (tech-debt #27а). */
+const PROMPT_WHEN = `In create_event also fill "when" — the date/time words of "start" as a structure, e.g. "Созвон с Петей завтра в 15:30 на полчаса" → "when":{"day":{"type":"relative_days","days":1},"time":{"hour":15,"minute":30}}.
 
 DATE STRUCTURE (create_event.when) — kind=point:
 ${DATE_STRUCTURE_RULES}
 
 The examples below omit "when" for brevity — fill it anyway.
-Examples:
+`;
+
+const PROMPT_EXAMPLES = `Examples:
 "Созвон с Петей завтра в 15:30 на полчаса" → create_event {"start":"завтра в 15:30","duration":"на полчаса","title":"Созвон с Петей"}
 "Каждый понедельник в 10 планёрка" → create_event {"start":"Каждый понедельник в 10","title":"Планёрка"}
 "Отпуск с 10 по 20 ноября" → create_event {"start":"с 10 по 20 ноября","all_day":true,"title":"Отпуск"}
@@ -225,6 +230,20 @@ Examples:
 "Кто отвезёт Машу к стоматологу в четверг в 15?" → assign_task {"when":"в четверг в 15","task":"отвезти Машу к стоматологу"}   (asking who will do it = a task for anyone)
 "Стоматолог Вани в четверг в 16, отводит папа" → create_event {"start":"в четверг в 16","title":"Стоматолог Вани"}   (who takes the child is part of the event, not a separate task)
 "Tell Anya to buy milk" → assign_task {"assignee":"Anya","task":"buy milk"}   (task stays in the user's language)`;
+
+export const SYSTEM_PROMPT = PROMPT_HEAD + PROMPT_WHEN + PROMPT_EXAMPLES;
+
+/**
+ * Без структуры `when` — для звена с `dateStructure: false` (запасной Workers AI: промпт втрое короче по neurons,
+ * tech-debt #27а). Дату тогда сверяем с `start`, как до ревью дат.
+ */
+export const SYSTEM_PROMPT_NO_WHEN = PROMPT_HEAD + PROMPT_EXAMPLES;
+export const TOOLS_NO_WHEN: ToolDefinition[] = TOOLS.map((t) => {
+  if (t.function.name !== "create_event") return t;
+  const params = t.function.parameters as { properties: Record<string, unknown> };
+  const { when: _when, ...properties } = params.properties;
+  return { ...t, function: { ...t.function, parameters: { ...params, properties } } };
+});
 
 export interface ParsedIntent {
   intent: Intent;
@@ -252,9 +271,10 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
   const noThink = /qwen3/i.test(cfg.model) ? "\n/no_think" : "";
   // Названия календарей задают третьи лица (подписки) — как данные, экранированно и коротко
   const calendars = context.calendars.map((c) => JSON.stringify(c.slice(0, 100))).join(", ");
-  const system = `${overrides.systemPrompt ?? SYSTEM_PROMPT}\nUser's calendars: ${calendars}.${noThink}`;
+  const noWhen = cfg.dateStructure === false;
+  const system = `${overrides.systemPrompt ?? (noWhen ? SYSTEM_PROMPT_NO_WHEN : SYSTEM_PROMPT)}\nUser's calendars: ${calendars}.${noThink}`;
   const { systemPrompt: _p, tools, ...callOpts } = overrides;
-  const res = await callTools(cfg, system, text, tools ?? TOOLS, callOpts);
+  const res = await callTools(cfg, system, text, tools ?? (noWhen ? TOOLS_NO_WHEN : TOOLS), callOpts);
   return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls, rateHeaders: res.rateHeaders };
 }
 

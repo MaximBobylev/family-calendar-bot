@@ -15,6 +15,8 @@ export interface LlmConfig {
   /** Оценка цены, $ за 1M токенов; нет — COST_ESTIMATES (Workers AI). Бесплатные — 0. */
   inPerM?: number;
   outPerM?: number;
+  /** false — разбор команды без структуры даты `when` (промпт втрое короче; запасной Workers AI, tech-debt #27а). */
+  dateStructure?: boolean;
 }
 
 export interface ToolDefinition {

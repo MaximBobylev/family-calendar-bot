@@ -94,7 +94,9 @@ if (deepseekKey && env.LLM_PRIMARY?.trim() === "deepseek") {
   };
   llmChain.unshift(deepseek);
 }
-llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8" });
+// Запасной Workers AI — без структуры даты `when`: с ней промпт ≈ 7 тыс. токенов вместо ≈ 2,6, втрое больше neurons из
+// общих 10 000/сутки (tech-debt #27а); дату на этом звене сверяем с `start`
+llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8", dateStructure: false });
 
 const sttChain: Record<string, unknown>[] = [];
 const groqKey = env.GROQ_API_KEY?.trim();

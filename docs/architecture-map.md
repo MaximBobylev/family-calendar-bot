@@ -137,7 +137,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/help.ts` | Ревью R1 §4: `/help` и «что ты умеешь» без LLM (личка и группа), `/start` по состоянию (новый, с Google без дома, владелец, участник) |
 | `bot/typing.ts` | «печатает…» каждые 4 с до ответа |
 | **nlu/** | Понимание текста |
-| `nlu/intents.ts` | Реестр интентов: `SYSTEM_PROMPT`, `TOOLS`, разбор ответа LLM |
+| `nlu/intents.ts` | Реестр интентов: `SYSTEM_PROMPT`, `TOOLS` (и `*_NO_WHEN` — без структуры даты для звена с `dateStructure: false`, `test/intent-prompt.test.ts`), разбор ответа LLM |
 | `nlu/date-structure.ts` | Схема и правила «структуры даты» `when` для LLM (create_event, фото, замер `eval-llm-dates`) |
 | `nlu/llm.ts` | OpenAI-совместимый клиент LLM, цепочка с переключением на ошибке |
 | `nlu/intent-overrides.ts` | Детерминированные поправки интента («перенеси», «отмени», «когда …?») |
