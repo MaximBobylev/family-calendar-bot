@@ -98,3 +98,302 @@ images:
     title: ["Сони|рождения"]
     place: Ленина
     text: "Приглашение\nПриглашаем на день рождения Сони!\n25 октября в 15:00\nул. Ленина, 5, кв. 12\nБудут торт и аниматор :)"
+
+  # Рукописные и бытовые заметки «как фото телефоном» — генератор scripts/image-synth-hand.sh (шрифты OFL из google/fonts)
+  - id: "h01"
+    file: h01-sticky-monitor.jpg
+    kind: стикер на мониторе (рукописный)
+    now: "2026-10-12T12:00"   # понедельник: «чт» — однозначно ближайший четверг
+    tz: Europe/Moscow
+    event: true
+    start: "2026-10-15T16:30"
+    title: ["стоматолог"]
+    text: "Стоматолог\nчт 16:30!"
+  - id: "h02"
+    file: h02-wall-calendar.jpg
+    kind: настенный календарь-сетка с пометками
+    event: true
+    # дата — из положения пометки в сетке, не из текста; оба события допустимы (ДР — на весь день)
+    start: ["2026-10-21T19:00", "2026-10-17"]
+    title: ["собр|собрание|родит|Маме|ДР"]
+    text: "ОКТЯБРЬ 2026\nПн Вт Ср Чт Пт Сб Вс\n1 2 3 4\n5 6 7 8 9 10 11\n12 13 14 15 16 17 18\nМаме ДР\n19 20 21 19:00 22 23 24 25\nродит.\nсобр.\n26 27 28 29 30 31"
+  - id: "h03"
+    file: h03-fridge-note.jpg
+    kind: записка на холодильнике (рукописная, линейка)
+    event: true
+    start: "2026-10-09T18:15"
+    title: ["Ваню|забрать|бассейн"]
+    place: бассейн
+    text: "Забрать Ваню\nиз бассейна\nв пятницу в 18:15\nмама"
+  - id: "h04"
+    file: h04-school-diary.jpg
+    kind: школьный дневник (рукописный)
+    event: true
+    start: "2026-10-19T08:30"
+    title: ["экскурсия"]
+    place: школ
+    text: "Дни Предмет / задание Оценка, подпись\nПн 19.10 — экскурсия, сбор в 8:30 у школы\nМатем. — №214, 216\n5\nРус. яз. — упр. 87"
+  - id: "h05"
+    file: h05-whiteboard.jpg
+    kind: доска в офисе (маркер, блик)
+    event: true
+    start: "2026-10-14T11:00"
+    title: ["планёрка|планерка"]
+    text: "Планёрка перенесена\nна 11:00 среда\nQ4 план?\nотчёт Маше\nспринт 42"
+  - id: "h06"
+    file: h06-dentist-en.jpg
+    kind: листок в клетку (EN, рукописный)
+    event: true
+    start: "2026-10-13T15:00"
+    title: ["Dentist"]
+    text: "Dentist\nTue 3pm"
+  - id: "h07"
+    file: h07-call-day-after.jpg
+    kind: блокнот, «послезавтра в 9» (утро/вечер)
+    event: true
+    start: ["2026-10-10T09:00", "2026-10-10T21:00"]
+    title: ["Маше|позвонить|дач"]
+    text: "Позвонить Маше\nнасчёт дачи\nпослезавтра в 9"
+  - id: "h08"
+    file: h08-theatre-half-past.jpg
+    kind: записка карандашом, «в полвосьмого вечера» (дата разбита по строкам)
+    event: true
+    start: "2026-10-10T19:30"
+    title: ["театр"]
+    text: "Театр с Машей\nв субботу\nв полвосьмого\nвечера\nбилеты у меня!"
+  - id: "h09"
+    file: h09-shopping-list.jpg
+    kind: список покупок без даты
+    event: false
+    text: "Купить:\nмолоко 2\nхлеб\nяйца 10 шт\nсыр\nгречка 1 кг\nбананы\nкорм коту\nбатарейки АА"
+  - id: "h10"
+    file: h10-prescription.jpg
+    kind: рецепт врача с часами приёма (без события)
+    event: false
+    text: "РЕЦЕПТ\nДетская поликлиника, кабинет педиатра\nЧасы приёма: Пн–Пт 8:00–14:00, Сб 9:00–12:00\nПациент: Ваня, 8 лет\nRp.: Амоксициллин 250 мг\nпо 1 таб. 3 р/день\nпосле еды — 7 дней\nНурофен при t > 38,5\nПовт. осмотр по необх.\nДЛЯ РЕЦЕПТОВ\nПодпись"
+  - id: "h11"
+    file: h11-illegible-pencil.jpg
+    kind: трудная — неразборчивый карандаш, размытость
+    event: true
+    start: "2026-10-10T10:00"
+    title: ["футбол"]
+    text: "Ване на футбол в сб к 10:00,\nвзять форму и бутсы"
+  - id: "h12"
+    file: h12-steep-angle.jpg
+    kind: трудная — сильная перспектива (лист на столе)
+    event: true
+    start: "2026-10-23T10:40"
+    title: ["окулист"]
+    place: "7"
+    text: "Маша — окулист\n23 октября в 10:40\nкаб. 7, взять карту"
+
+  # Реальные картинки с Wikimedia Commons (свободные лицензии; источник, автор, лицензия — в записи и в LICENSES.md)
+  - id: "r01"
+    file: r01-alexandrov-1965.jpg
+    kind: "афиша концерта (скан, 1965)"
+    event: true
+    now: "1965-09-20T12:00"
+    tz: Europe/Moscow
+    start: "1965-10-04T18:30"
+    title: ["Александров|ансамбл"]
+    place: "Чайковского"
+    text: "Союз композиторов СССР\nГлавное политическое управление\nСоветской Армии и Военно-Морского Флота\nМинистерство культуры СССР\nМосковская Государственная Филармония\nПОНЕДЕЛЬНИК\n4\nоктября\nСЕЗОН\n1965—1966 гг.\nКОНЦЕРТНЫЙ ЗАЛ им. П. И. ЧАЙКОВСКОГО\n(пл. Маяковского, 20)\nНародный артист СССР, лауреат Государственной премии\nБорис Александрович АЛЕКСАНДРОВ\n(К 60-летию со дня рождения)\nДважды Краснознаменный имени А. В. Александрова\nАНСАМБЛЬ ПЕСНИ и ПЛЯСКИ СОВЕТСКОЙ АРМИИ\nХудожественный руководитель и главный дирижер—\nБ. А. АЛЕКСАНДРОВ\nПо окончании концерта чествование юбиляра\nНачало в 18 часов 30 минут\nТир. 1000 Типография «Красная звезда», Хорошевское шоссе, 38. Зак. 4979"
+    source: "https://commons.wikimedia.org/wiki/File:History_of_Alexandrov_Ensemble_by_mos.ru_06.jpg"
+    license: "CC BY 4.0"
+    author: "Главархив Москвы"
+  - id: "r02"
+    file: r02-shulzhenko-1972.jpg
+    kind: "афиша концерта (две даты)"
+    event: true
+    now: "1972-01-20T12:00"
+    tz: Europe/Moscow
+    start: ["1972-02-01T20:00", "1972-02-03T20:00"]
+    title: ["Шульженко"]
+    place: "Концертн"
+    text: "ЛЕНИНГРАДСКАЯ КОНЦЕРТНО-ГАСТРОЛЬНАЯ ОРГАНИЗАЦИЯ\nЛенинградский\nКОНЦЕРТНЫЙ ЗАЛ\nПЛ. ЛЕНИНА, ДОМ 1\nТРАМВАИ ТРОЛЛЕЙБУСЫ АВТОБУСЫ МЕТРО ДО ФИНЛЯНДСКОГО ВОКЗАЛА\nТЕЛ. Г2-09-44\nВторник 1, четверг 3 февраля 1972 г.\nНародная артистка Союза ССР\nКЛАВДИЯ\nШУЛЬЖЕНКО\nПартия фортепиано\nДавид АШКЕНАЗИ\nПУТЬ АКТРИСЫ\nРассказывает — кандидат филологических наук\nГлеб СКОРОХОДОВ\n(МОСКВА)\nНачало в 20 час. Билеты продаются в кассе Концертного зала и в районных театральных кассах ДТК с 11 до 20 час. Тел. кассы 42-09-44"
+    source: "https://commons.wikimedia.org/wiki/File:Sl2-2(123).jpg"
+    license: "CC BY 4.0"
+    author: "Главархив Москвы"
+  - id: "r05"
+    file: r05-invitation-lgu-1989.jpg
+    kind: "приглашение на встречу (машинопись + рукописное имя)"
+    event: true
+    now: "1989-02-20T12:00"
+    tz: Europe/Moscow
+    start: "1989-03-02T16:00"
+    title: ["встреч"]
+    place: "Чайковского"
+    text: "Глубокоуважаемый Софья Михайловна\nПартийное бюро экономического факультета приглашает Вас принять участие во встрече сотрудников и выпускников экономического факультета Ленгосуниверситета 40-х — начала 50-х годов с коллективом факультета 2 марта 1989 года в 16 часов в 401 аудитории по адресу ул. Чайковского 62.\nПросим рассказать об обстановке на факультете в 40-50-е годы\nСекретарь партбюро В.Т.Рязанов"
+    source: "https://commons.wikimedia.org/wiki/File:Приглашение_С.М._Фирсовой_на_встречу_сотрудников_и_выпускников_экономического_факультета_ЛГУ.png"
+    license: "CC0"
+    author: "не указан (CC0; см. страницу файла)"
+  - id: "r06"
+    file: r06-kremlin-ticket-1938.jpg
+    kind: "пригласительный билет на новогодний вечер (1938)"
+    event: true
+    now: "1938-12-20T12:00"
+    tz: Europe/Moscow
+    start: "1938-12-31T23:00"
+    title: ["вечер|Кремл"]
+    place: "Кремл"
+    text: "Пролетарии всех стран, соединяйтесь!\nПригласительный билет № 571\nТов. Игнатьев С. П.\nПравительство Союза ССР приглашает Вас на вечер, устраиваемый в Большом Кремлевском дворце.\nВечер состоится 31 декабря 1938 г. в 23 часа.\nМОСКВА — КРЕМЛЬ 1938 г.\nВход в Спасские и Боровицкие ворота\nГЕОРГИЕВСКИЙ ЗАЛ\nСТОЛ № 10.\nКомендант Управления Московского Кремля комбриг СПИРИДОНОВ"
+    source: "https://commons.wikimedia.org/wiki/File:Приглашение_С.П.Игнатьева,_1938_г.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Evgeniy Savitskiy"
+  - id: "r07"
+    file: r07-cabaret-banner.jpg
+    kind: "афиша-баннер на фасаде театра (фото, вечер, подсветка)"
+    event: true
+    now: "2014-01-05T12:00"
+    tz: Europe/Moscow
+    start: "2014-01-13T19:00"
+    title: ["Красотка|кабаре"]
+    place: "Театральн"
+    text: "13.01.2014 19:00\nЗВЕЗДЫ ТЕАТРА\nМОСКОВСКАЯ ОПЕРЕТТА\nПРЕДСТАВЛЯЮТ\nИМРЕ КАЛЬМАН ОПЕРЕТТА В 2-Х ДЕЙСТВИЯХ\nСПЕКТАКЛЬ ИДЕТ С УЧАСТИЕМ БАЛЕТА\nКРАСОТКА\nКАБАРЕ\n16+\nНА СЦЕНЕ РАМТ\nТЕАТРАЛЬНАЯ ПЛ., 2"
+    source: "https://commons.wikimedia.org/wiki/File:The_Beauty_of_Cabaret,_2014.1.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Gerarus"
+  - id: "r08"
+    file: r08-board-berezniki.jpg
+    kind: "трудная: доска объявлений на улице, афиша мелко в кадре (снег, перспектива)"
+    event: true
+    now: "2014-03-15T12:00"
+    tz: Asia/Yekaterinburg
+    start: "2014-03-24T19:00"
+    title: ["Тямаев|Фирдус|концерт"]
+    place: "Барда"
+    text: "КАЙЧАН? КАЙДА? НӘРСӘ?\n24\nМАРТА\n(пн)\nБЦКДС\nс.БАРДА\n19ч\nВпервые с концертной программой\nФИРДУС\nТЯМАЕВ\nжырлы-биюле, юмористик тамаша\nЦена билета 300 руб. Заказ по тел. 2-17-30\nБилеты продаются в кассе ДК (тел. 2-17-30)"
+    source: "https://commons.wikimedia.org/wiki/File:Доска_объявлений,_Березники,_Пермский_край_-_panoramio.jpg"
+    license: "CC BY 3.0"
+    author: "Николай Максимович"
+  - id: "r09"
+    file: r09-exhibition-stencil-1988.jpg
+    kind: "трудная: трафаретная афиша выставки, повёрнутый текст, время надстрочными цифрами"
+    event: true
+    now: "1988-03-10T12:00"
+    tz: Europe/Moscow
+    start: ["1988-03-20T10:00", "1988-03-20"]
+    title: ["выставк"]
+    place: "Прибой"
+    text: "20 МАРТА 10⁰⁰-15⁰⁰\nОКТЯБРЬСКИЙ РК ВЛКСМ\nВЫСТАВКА\nТАГАНРОГ\n20.3\nРОСТОВ\nСЕАНС\nДК З-Д «ПРИБОЙ»\nХУДОЖНИКИ РАЗНЫХ НАПРАВЛЕНИЙ"
+    source: "https://commons.wikimedia.org/wiki/File:1988_Odnodn_vistavka_Plakat.jpg"
+    license: "CC BY-SA 3.0"
+    author: "Николай Константинов"
+  - id: "r10"
+    file: r10-exhibition-spb-2026.jpg
+    kind: "афиша выставки (открытие в отдельное время)"
+    event: true
+    now: "2026-06-01T12:00"
+    tz: Europe/Moscow
+    start: ["2026-06-16T17:00", "2026-06-16"]
+    title: ["Переход|Ионаускас|выставк"]
+    place: "Большая Морская"
+    text: "САНКТ-ПЕТЕРБУРГСКИЙ СОЮЗ ХУДОЖНИКОВ\n18+\n16–28 июня 2026\nОткрытие выставки 16 июня в 17.00\nАРТУР ИОНАУСКАС\nФОТОТИПИЯ\nПЕРЕХОД\nКИНОЗАЛ\nСанкт-Петербург\nБольшая Морская, 38\nВыставочные залы работают с 12.00 до 19.00\n(понедельник — выходной)\n+7(812)315-74-26 bm38_spb@mail.ru"
+    source: "https://commons.wikimedia.org/wiki/File:Arturas_Jonauskas_Union_of_Artists_of_St-Petersburg_2026_Exhibition_poster_The_Transition.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Arthur Jonauskas"
+  - id: "r12"
+    file: r12-invite-gloucester-en.jpg
+    kind: "приглашение на выставку (EN, каллиграфия поверх текста)"
+    event: true
+    now: "2002-06-20T12:00"
+    tz: Europe/London
+    start: "2002-07-06"
+    title: ["Fedden|workshop|celebration"]
+    place: "Gloucester"
+    text: "6-20\nJULY\nGLOUCESTER\nCATHEDRAL\nA\n40\nYEARS\nOF THE\nBRYANT\nFEDDEN\nWORK-\nSHOPS\nCELEBRATION\n2002"
+    source: "https://commons.wikimedia.org/wiki/File:40YearsofBryantFeddenWorkshopsInvite.jpg"
+    license: "CC BY-SA 4.0"
+    author: "RussRandt"
+  - id: "r13"
+    file: r13-ticket-zappa-en.jpg
+    kind: "трудная: билет на концерт (EN), дата на оторванном корешке обрезана, без года"
+    event: true
+    now: "1978-01-10T12:00"
+    tz: Europe/London
+    start: "1978-01-27"
+    title: ["Zappa"]
+    place: "Hammersmith"
+    text: "ODEON HAMMERSMITH Tel. 01-748-4081\nManager: Philip Leivers\nADVANCE BOOKING TICKET\nCONCERT\nDATE\nTIME\nPRICE\nAs advised at the time of purchase. (See reverse). Please see full seating plan on display\n17\nCIRCLE\nBLOCK 8\nSEAT A44\nNO TICKET EXCHANGED NOR MONEY REFUNDED\nNO RE-ADMISSION\nTO BE RETAINED\nFRIDAY 27TH JANUA\nFRANK ZAP"
+    source: "https://commons.wikimedia.org/wiki/File:Frank_Zappa_Hammersmith_Odeon_Hammersmith_Ticket_1978.jpg"
+    license: "CC BY-SA 3.0"
+    author: "Roger green"
+  - id: "r14"
+    file: r14-ticket-fugazi-en.jpg
+    kind: "билет на концерт (EN), два времени: двери 16:00, начало 17:00"
+    event: true
+    now: "1995-10-01T12:00"
+    tz: America/Chicago
+    start: ["1995-10-15T17:00", "1995-10-15T16:00"]
+    title: ["Fugazi"]
+    place: "First Ave"
+    text: "a special EARLY MATINEE Concert featuring\nFUGAZI\nwith special guests to be announced\nFIRST AVENUE & 7TH STREET ENTRY\n701 FIRST AVE. NO.\nMINNEAPOLIS, MN\nSUNDAY • OCTOBER 15, 1995\nDOORS OPEN 4:00 PM • SHOWTIME 5:00 PM\nALL AGE CONCERT.\n$5.00 ADMISSION · $.58 CITY/STATE ADMISSION TAX\n$.07 OUT OF STATE ENTERTAINER'S TAX · $5.65 TOTAL\nSEC ROW SEAT\nGEN. ADM.\nOCT 15, 1995\nADMIT ONE THIS DATE ONLY\nNO REFUND PRICE NO EXCHANGE\n$5.65\n0137"
+    source: "https://commons.wikimedia.org/wiki/File:Fugazi_w_Lungfish,_Chisel_-_First_Avenue,_October_15,_1995.jpg"
+    license: "CC BY 2.0"
+    author: "Dave Toedter"
+  - id: "r15"
+    file: r15-golden-wedding-en.jpg
+    kind: "приглашение-меню на золотую свадьбу (EN, три даты)"
+    event: true
+    now: "1899-02-10T12:00"
+    tz: Europe/London
+    start: ["1899-02-23", "1899-02-25", "1899-02-27"]
+    title: ["Golden|wedding|Barratt"]
+    place: "Wood Green"
+    text: "CELEBRATION\nOF THE\nGOLDEN WEDDING\nOF\nMr. & Mrs. G. O. BARRATT,\nTHURSDAY, Feb. 23rd, 1899,\nSATURDAY, Feb. 25th, 1899,\nMONDAY, Feb. 27th, 1899.\nPRESIDENT: G. W. BARRATT, ESQ.\nHELD AT ....\nTHE HEAD ESTABLISHMENT,\nWOOD GREEN, N.\nMENU\nClear Ox Tail.\nTomato.\nCod & Oyster Sauce.\nBoiled Potatoes.\nRoast Beef & Horse Radish.\nBoiled Leg of Mutton & Caper Sauce.\nRoast Leg of Pork.\nBrussel Sprouts. Mashed Turnips.\nBaked Potatoes.\nRoast Fowl.\nYork Ham.\nJellies (various).\nBlancmange.\nFrench Pastry.\nIce Pudding\nDessert\nCheese. Salad."
+    source: "https://commons.wikimedia.org/wiki/File:Golden_Wedding_of_Mr_and_Mrs_G._O._Barratt.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Jgdc47B"
+  - id: "r16"
+    file: r16-wedding-invite-1873-en.jpg
+    kind: "трудная: свадебное приглашение (EN), готический каллиграфический шрифт"
+    event: true
+    now: "1873-03-20T12:00"
+    tz: America/Los_Angeles
+    start: "1873-04-06"
+    title: ["Marriage|wedding|Perkins|Ewart"]
+    place: "Colfax"
+    text: "Reverend A. W. Sweeney\nof Walla Walla\nRequests the\nHonor of Your Presence\nAt the Marriage of\nJames Allen Perkins\nto\nSarah Jane Ewart\nApril 6, 1873\nAt the\nColfax School House\nBestman · Dr. P. D. Bunnell\nMaid of Honor · Miss Nettie Taber"
+    source: "https://commons.wikimedia.org/wiki/File:James_Allen_Perkins_wedding_invitation,_Colfax,_Washington,_1873_-_DPLA_-_9349da21d9dbda403bdb0029a7fe8286.jpg"
+    license: "Public domain"
+    author: "неизвестен (DPLA)"
+  - id: "r17"
+    file: r17-notice-prosecutor-door.jpg
+    kind: "объявление на двери учреждения без события (негатив)"
+    event: false
+    now: "2020-05-01T12:00"
+    tz: Europe/Moscow
+    text: "УВАЖАЕМЫЕ ГРАЖДАНЕ!\nВ связи с неблагоприятной санитарно-эпидемиологической обстановкой на территории Санкт-Петербурга и Ленинградской области, вызванной распространением коронавирусной инфекции (COVID-19), обращаем ваше внимание, что наибольшей степени безопасности отвечает подача обращений бесконтактным способом, в связи с чем, рекомендуем подавать заявления и жалобы в органы прокуратуры:\n- через интернет-приемную (официальный сайт прокуратуры Ленинградской области);\n- ФГУП «Почта России»;\n- ящик приема граждан, расположенный в здании прокуратуры.\nВсеволожская городская прокуратура"
+    source: "https://commons.wikimedia.org/wiki/File:Прокуратура_Всеволожского_района_122302.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Erzianj jurnalist"
+  - id: "r18"
+    file: r18-museum-hours-rotated.jpg
+    kind: "трудная: табличка часов работы музея, фото повёрнуто на 90° (негатив)"
+    event: false
+    now: "2022-08-10T12:00"
+    tz: Asia/Sakhalin
+    text: "РЖД\nМУЗЕЙ РАБОТАЕТ\nСРЕДА 9.00 – 18.00\nЧЕТВЕРГ 9.00 – 18.00\nПЯТНИЦА 9.00 – 18.00\nСУББОТА 9.00 – 18.00\nВОСКРЕСЕНЬЕ 9.00 – 18.00\nПЕРЕРЫВ 12.00-13.00\nПОНЕДЕЛЬНИК\nВТОРНИК\nПРАЗДНИКИ\nВыходные дни"
+    source: "https://commons.wikimedia.org/wiki/File:Железнодорожный_музей_Южно-Сахалинск_расписание_2022-08.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Svetlov Artem"
+  - id: "r19"
+    file: r19-closed-handwritten-en.jpg
+    kind: "рукописное объявление «закрыто до дальнейшего уведомления» на рольставне (EN, негатив)"
+    event: false
+    now: "2020-03-31T12:00"
+    tz: Europe/London
+    text: "COVID-19\nSorry, Due to the Safety\nOf Our Staff and Customers\nwe are Closed until Further\nnotice.\nThank you"
+    source: "https://commons.wikimedia.org/wiki/File:COVID-19_closure_notice_-_2020-03-31_-_Andy_Mabbett.jpg"
+    license: "CC BY-SA 4.0"
+    author: "Andy Mabbett"
+  - id: "r20"
+    file: r20-chalkboard-ad-en.jpg
+    kind: "меловая доска-реклама у кафе (EN, «Open until 11», негатив)"
+    event: false
+    now: "2011-06-01T12:00"
+    tz: America/New_York
+    text: "GUINNESS\nESTD 1759\nDine In Brooklyn!\n-Pre-fixed 3 course\nLunch & Dinner\n($20.11 - $25)\n-A'la Carte Menu\n-Cappuccino & Dessert\nOpen Until 11"
+    source: "https://commons.wikimedia.org/wiki/File:Prefixed_menu.jpg"
+    license: "CC BY-SA 2.0"
+    author: "desultrix"

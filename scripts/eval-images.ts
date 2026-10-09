@@ -42,6 +42,13 @@ interface Img {
   title?: string[];
   place?: string;
   text: string;
+  /** «Сейчас» и пояс этой картинки (реальные афиши — свой год); нет — defaults. */
+  now?: string;
+  tz?: string;
+  /** Реальные картинки: откуда, лицензия, автор (testdata/images/LICENSES.md). */
+  source?: string;
+  license?: string;
+  author?: string;
 }
 const DIR = join(import.meta.dirname, "..", "testdata", "images");
 const SET = parseYaml(readFileSync(join(DIR, "index.yaml"), "utf8")) as { defaults: { now: string; tz: string }; images: Img[] };
@@ -178,9 +185,15 @@ async function viaProd(model: string, mime: string, bytes: ArrayBuffer): Promise
 
 // --- Оценка: как bot/ingest.ts proposeFromForeign ------------------------------------------------------------------------
 
-function resolvePoint(text: string | undefined): string | null {
+interface Clock {
+  now: string;
+  tz: string;
+}
+const clockOf = (img: Img | undefined): Clock => ({ now: img?.now ?? now, tz: img?.tz ?? tz });
+
+function resolvePoint(text: string | undefined, c: Clock): string | null {
   if (!text) return null;
-  return firstOf(parseDateFragment({ text, kind: "point", now, tz }));
+  return firstOf(parseDateFragment({ text, kind: "point", now: c.now, tz: c.tz }));
 }
 
 function firstOf(parsed: ReturnType<typeof parseDateFragment>): string | null {
@@ -217,15 +230,16 @@ function grade(img: Img, r: Result): Result {
   if (!r.ok || !r.answer) return r;
   const a = r.answer;
   const card = !a.noEvent && !!a.text;
-  const dates = foreignDateSpans(a.text, now, tz);
+  const c = clockOf(img);
+  const dates = foreignDateSpans(a.text, c.now, c.tz);
   const place = a.location ?? guessPlace(a.text);
   const title = a.title ?? heuristicTitle(dates.sentence, dates.fragments, place);
   // Как ingest.ts: наш кусок, структура `when` (или `start`) модели — второе мнение; у нас только день, у модели момент — модель
-  const pick = llmDateCheck(a.text, dates.point, { start: a.start, ...(a.when ? { when: a.when } : {}) }, parseLocal(now), tz).pick;
-  const ours = resolvePoint(pick.startText);
-  const alt = pick.altWhen ? firstOf(resolveDateStructure(pick.altWhen, "point", parseLocal(now), tz)) : resolvePoint(pick.altStartText);
+  const pick = llmDateCheck(a.text, dates.point, { start: a.start, ...(a.when ? { when: a.when } : {}) }, parseLocal(c.now), c.tz).pick;
+  const ours = resolvePoint(pick.startText, c);
+  const alt = pick.altWhen ? firstOf(resolveDateStructure(pick.altWhen, "point", parseLocal(c.now), c.tz)) : resolvePoint(pick.altStartText, c);
   const start = !ours?.includes("T") && alt?.includes("T") ? alt : ours;
-  const out: Result = { ...r, card, start, modelStart: resolvePoint(a.start), title, place };
+  const out: Result = { ...r, card, start, modelStart: resolvePoint(a.start, c), title, place };
   // Не-событие: верно, если карточки нет или в ней нет даты (бот спросит «когда?» — мягкая ошибка, считаем неверным)
   out.eventOk = img.event ? card : !card;
   if (img.event && card) {
@@ -255,8 +269,16 @@ const q = (xs: number[], p: number) => {
 function summary(rs: Result[]): void {
   console.log("| Модель | картинок | событие верно | дата/время (наш парсер) | дата по start модели | название | место | p50 / p95, с | ошибок |");
   console.log("|---|---|---|---|---|---|---|---|---|");
+  // Части набора: синтетика (01…), реальные с Commons (r…), рукописные (h…) — отдельными строками и итогом
+  const setOf = (id: string) => (id.startsWith("r") ? "реальные" : id.startsWith("h") ? "рукописные" : "синтетика");
+  const groups: [string, Result[]][] = [];
   for (const model of [...new Set(rs.map((r) => r.model))]) {
-    const m = rs.filter((r) => r.model === model);
+    const all = rs.filter((r) => r.model === model);
+    const sets = [...new Set(all.map((r) => setOf(r.id)))];
+    if (sets.length > 1) for (const set of sets) groups.push([`${model} · ${set}`, all.filter((r) => setOf(r.id) === set)]);
+    groups.push([sets.length > 1 ? `**${model} · всего**` : model, all]);
+  }
+  for (const [model, m] of groups) {
     const ok = m.filter((r) => r.ok);
     const ev = ok.filter((r) => r.card && SET.images.find((i) => i.id === r.id)?.event);
     const evAll = m.filter((r) => SET.images.find((i) => i.id === r.id)?.event).length;
