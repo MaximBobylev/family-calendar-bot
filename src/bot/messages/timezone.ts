@@ -41,6 +41,10 @@ export const timezoneMessages = {
   tzNotYetButton: { ru: "Ещё нет", en: "Not yet" },
   tzKeepButton: { ru: "Оставить {tz} навсегда", en: "Keep {tz} for good" },
   tzNotYet: { ru: "Хорошо, спрошу ещё через неделю.", en: "OK, I'll ask again in a week." },
+  tzUnknownPlace: {
+    ru: "Не знаю часовой пояс для «{place}». Укажите его в /settings → 🌍 Пояс (например, UTC+7).",
+    en: "I don't know the time zone of “{place}”. Set it in /settings → 🌍 Time zone (e.g. UTC+7).",
+  },
   tzDigestTrip: { ru: "🧳 Поездка: {tz} (дом — {home})", en: "🧳 Trip: {tz} (home — {home})" },
   settingsTzTrip: {
     ru: "🧳 Поездка: {tz} (сейчас {time}){until}; дом — {home}",

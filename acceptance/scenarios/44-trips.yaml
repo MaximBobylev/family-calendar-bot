@@ -183,3 +183,31 @@
     - clock: "2026-10-09T16:00:00Z"
     - tick: true
     - expect_no_telegram: true
+
+# Фразы, которые не узнал разбор без LLM, — интент set_timezone от модели; её пояс только проверяется
+- id: trip-via-llm-city-not-in-dictionary
+  story: US-07
+  steps:
+    - *setup
+    - llm:
+        "Я на неделю улетаю в Бангкок": { tool: set_timezone, args: { action: trip, place: "Бангкок", tz: "Asia/Bangkok", until: "на неделю" } }
+        "Мы в отпуске на Шире": { tool: set_timezone, args: { action: trip, place: "Шир", tz: "Middle/Earth" } }
+        "Ну всё, мы снова в Тбилиси": { tool: set_timezone, args: { action: trip, place: "Тбилиси", tz: "Asia/Bangkok" } }
+        "Отпуск закончился, мы приехали обратно": { tool: set_timezone, args: { action: return } }
+    - telegram: { from: 1001, text: "Я на неделю улетаю в Бангкок" }
+    - expect_telegram:
+        - { text_contains: ["🧳 Включил пояс поездки Asia/Bangkok (сейчас 14:00)", "ср, 14 октября спрошу, вернулись ли вы"] }
+    - expect_llm_requests: 1
+    # Выдуманный пояс — не угадываем
+    - telegram: { from: 1001, text: "Мы в отпуске на Шире" }
+    - expect_telegram:
+        - { text_contains: ["Не знаю часовой пояс для «Шир»", "/settings"] }
+    # Город из словаря важнее пояса от модели
+    - telegram: { from: 1001, text: "Ну всё, мы снова в Тбилиси" }
+    - expect_telegram:
+        - { text_contains: ["Пояс Asia/Tbilisi, там сейчас 11:00. Это поездка или переезд?"] }
+    - press: "Отмена"
+    - telegram: { from: 1001, text: "Отпуск закончился, мы приехали обратно" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["🏠 С возвращением! Вернул Europe/Moscow (сейчас 10:00)."] }

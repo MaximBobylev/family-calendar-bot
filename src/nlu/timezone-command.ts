@@ -3,6 +3,7 @@
 // Кейсы — testdata/nlu/timezone.yaml.
 
 import { parseDateFragment } from "../dates";
+import { addMonths, formatDate, parseLocal } from "../dates/calendar";
 import { ZONE_CITIES } from "../dates/lexicon";
 import { parseTimeZone } from "../dates/timezone";
 
@@ -34,8 +35,9 @@ export function placeTimeZone(place: string): string | undefined {
 }
 
 const PLACE = String.raw`(\S+(?:\s+\S+)?)`;
-const UNTIL_RU = String.raw`(?:\s+до\s+(.+))?`;
-const UNTIL_EN = String.raw`(?:\s+(?:until|till|through)\s+(.+))?`;
+/** Окончание: «до воскресенья» (без «до»), «на неделю» (как есть — длительность). */
+const UNTIL_RU = String.raw`(?:\s+(?:до\s+(.+)|(на\s+.+)))?`;
+const UNTIL_EN = String.raw`(?:\s+(?:(?:until|till|through)\s+(.+)|(for\s+.+)))?`;
 
 const WHERE = [
   /^(?:какой|который)\s+(?:у\s+меня\s+)?(?:сейчас\s+)?(?:часовой\s+)?пояс(?:\s+у\s+меня)?(?:\s+сейчас)?$/iu,
@@ -76,13 +78,25 @@ export function parseTimezoneCommand(text: string): TimezoneCommand | null {
   for (const re of [...TRIP_RU, ...TRIP_EN]) {
     const m = re.exec(s);
     const tz = m && placeTimeZone(m[1]!);
-    if (m && tz) return { kind: "trip", tz, place: m[1]!, ...(m[2] ? { until: m[2].trim() } : {}) };
+    const until = m?.[2] ?? m?.[3];
+    if (m && tz) return { kind: "trip", tz, place: m[1]!, ...(until ? { until: until.trim() } : {}) };
   }
   return null;
 }
 
-/** День окончания поездки («YYYY-MM-DD») по словам после «до»: дата, момент или конец периода; прошлое и не дата — нет. */
+/**
+ * День окончания поездки («YYYY-MM-DD») по словам после «до»: дата, момент или конец периода; «на неделю», «на 3 дня»,
+ * «на месяц» — сегодня плюс длительность. Прошлое и не дата — нет.
+ */
 export function tripUntil(text: string, now: string, tz: string): string | undefined {
+  if (/^(на|for)\s/i.test(text)) {
+    const d = parseDateFragment({ text, kind: "duration", now, tz });
+    const m = "duration" in d ? /^P(?:(\d+)M)?(?:(\d+)D)?$/.exec(d.duration) : null;
+    if (m && (m[1] || m[2])) {
+      const today = parseLocal(now).day;
+      return formatDate(addMonths(today, Number(m[1] ?? 0)) + Number(m[2] ?? 0));
+    }
+  }
   for (const variant of [text, `до ${text}`]) {
     const r = parseDateFragment({ text: variant, kind: "point", now, tz });
     if ("error" in r) continue;

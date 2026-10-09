@@ -27,6 +27,10 @@ describe("tripUntil — день окончания поездки в её по�
     ["конца недели", "2026-10-11"],
     ["Friday", "2026-10-09"],
     ["завтра", "2026-10-08"],
+    ["на неделю", "2026-10-14"],
+    ["на 3 дня", "2026-10-10"],
+    ["for a week", "2026-10-14"],
+    ["на месяц", "2026-11-07"],
   ])("%s → %s", (text, day) => expect(tripUntil(text, now, "Asia/Tbilisi")).toBe(day));
 
   it("не дата — нет", () => expect(tripUntil("ремонта", now, "Asia/Tbilisi")).toBeUndefined());

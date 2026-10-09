@@ -19,7 +19,7 @@ LLM получает текст + контекст (текущие дата/вр
 | `set_setting` | `setting` (enum), `value` | оба | нет; `confirmation_mode` — да | MVP |
 | `set_calendar_alias` | `calendar`, `alias?`, `make_default?` | `calendar` | нет | MVP |
 | `set_notifications` | `kind` (`today` / `tomorrow` / `week` / `before_event`), `enabled?`, `time?`, `weekday?`, `minutes_before?` | `kind` | нет | MVP |
-| `set_timezone` | `place` / `tz`, `mode` (`trip` / `permanent`)?, `until?`, `return_home?` | `place`/`tz` или `return_home` | да (кнопки «на поездку / навсегда», US-07) | R2: **без LLM** — `src/nlu/timezone-command.ts` до шага NLU (город из словаря; неизвестный город — обычной командой); tool в LLM не добавлен |
+| `set_timezone` | `place` / `tz`, `mode` (`trip` / `permanent`)?, `until?`, `return_home?` | `place`/`tz` или `return_home` | да (кнопки «на поездку / навсегда», US-07) | R2: сначала **без LLM** — `src/nlu/timezone-command.ts` до шага NLU (город из словаря); не узнал — tool `set_timezone` (`action` trip/move/return/where, `place`, `tz` IANA, `until`): пояс — город из словаря, иначе `tz` модели после проверки `Intl`; не знаем — подсказка про /settings |
 | `refresh_calendars` | — | — | нет | MVP |
 | `undo` | — | — | нет | MVP |
 | `provide_title` | `title` | `title` | нет | MVP, доступен **только** при ожидании названия (US-30) |

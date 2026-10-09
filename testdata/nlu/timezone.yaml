@@ -16,6 +16,8 @@ cases:
   - { text: "I'm in Berlin", kind: trip, tz: Europe/Berlin }
   - { text: "I am in London until Friday", kind: trip, tz: Europe/London, until: "Friday" }
   - { text: "Я в UTC+4", kind: trip, tz: Etc/GMT-4 }
+  - { text: "Я в Тбилиси на неделю", kind: trip, tz: Asia/Tbilisi, until: "на неделю" }
+  - { text: "I'm in Berlin for a week", kind: trip, tz: Europe/Berlin, until: "for a week" }
   # Переезд — домашний пояс
   - { text: "Я переехал в Тбилиси", kind: move, tz: Asia/Tbilisi }
   - { text: "Мы переехали в Белград", kind: move, tz: Europe/Belgrade }

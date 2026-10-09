@@ -58,8 +58,19 @@ export type Intent =
   | ModifyEventIntent
   | { name: "delete_event"; event?: string }
   | { name: "unsupported" }
+  | SetTimezoneIntent
   /** Несколько команд (US-12). parts — разбор каждой: «…, отводит папа» как create + assign — на деле одно событие (QA R1 NLU, A). */
   | { name: "multiple"; parts?: Intent[] };
+
+/** Пояс и поездки (US-07): фразы, которые не узнал детерминированный разбор (nlu/timezone-command.ts) — город не из
+ * словаря, непривычная формулировка. tz от модели только проверяется (Intl), город из словаря важнее. */
+export interface SetTimezoneIntent {
+  name: "set_timezone";
+  action: "trip" | "move" | "return" | "where";
+  place?: string;
+  tz?: string;
+  until?: string;
+}
 
 const str = (description: string) => ({ type: "string", description });
 
@@ -184,6 +195,28 @@ export const TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "set_timezone",
+      description:
+        "The USER says where they are now (a trip), that they moved, that they are back home, or asks their time zone: «я на неделю улетаю в Бангкок», «мы сейчас в Таиланде», «переехали в Лиссабон», «I'm back home», «какой у меня часовой пояс». A city of an event («встреча в Берлине») is NOT this.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["trip", "move", "return", "where"],
+            description: "trip — temporarily there; move — lives there now; return — back home; where — asks the time zone.",
+          },
+          place: str("City or country as the user said it. Omit for return/where."),
+          tz: str("IANA time zone of that place: «Asia/Bangkok», «Europe/Lisbon». Omit for return/where."),
+          until: str("Words for when the trip ends, verbatim: «до воскресенья», «на неделю». Omit if not said."),
+        },
+        required: ["action"],
+      },
+    },
+  },
 ];
 
 // Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
@@ -229,7 +262,10 @@ const PROMPT_EXAMPLES = `Examples:
 "Кто-то должен отвезти Ваню на плавание в субботу" → assign_task {"when":"в субботу","task":"отвезти Ваню на плавание"}
 "Кто отвезёт Машу к стоматологу в четверг в 15?" → assign_task {"when":"в четверг в 15","task":"отвезти Машу к стоматологу"}   (asking who will do it = a task for anyone)
 "Стоматолог Вани в четверг в 16, отводит папа" → create_event {"start":"в четверг в 16","title":"Стоматолог Вани"}   (who takes the child is part of the event, not a separate task)
-"Tell Anya to buy milk" → assign_task {"assignee":"Anya","task":"buy milk"}   (task stays in the user's language)`;
+"Tell Anya to buy milk" → assign_task {"assignee":"Anya","task":"buy milk"}   (task stays in the user's language)
+"Я на неделю улетаю в Бангкок" → set_timezone {"action":"trip","place":"Бангкок","tz":"Asia/Bangkok","until":"на неделю"}
+"Мы переехали в Таиланд" → set_timezone {"action":"move","place":"Таиланд","tz":"Asia/Bangkok"}
+"Встреча в Бангкоке завтра в 10" → create_event {"start":"завтра в 10","title":"Встреча в Бангкоке"}   (a city of an event is not the user's time zone)`;
 
 export const SYSTEM_PROMPT = PROMPT_HEAD + PROMPT_WHEN + PROMPT_EXAMPLES;
 
@@ -374,6 +410,16 @@ export function intentFromCalls(toolCalls: ToolCall[]): Intent {
       ...(task ? { task } : {}),
       ...(when ? { when } : {}),
     } as AssignTaskIntent;
+  }
+  if (call?.name === "set_timezone") {
+    const a = call.arguments;
+    const opt = (k: string) => (typeof a[k] === "string" && (a[k] as string).trim() ? (a[k] as string).trim() : undefined);
+    const action = ["trip", "move", "return", "where"].includes(String(a.action)) ? (a.action as SetTimezoneIntent["action"]) : undefined;
+    if (!action) return { name: "unsupported" };
+    const place = opt("place");
+    const tz = opt("tz");
+    const until = opt("until");
+    return { name: "set_timezone", action, ...(place ? { place } : {}), ...(tz ? { tz } : {}), ...(until ? { until } : {}) };
   }
   if (call?.name === "modify_event") {
     const a = call.arguments;

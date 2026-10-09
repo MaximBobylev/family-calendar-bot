@@ -24,6 +24,7 @@ import type { EventRequest } from "./find-event";
 import { t } from "./messages";
 import { startModify } from "./modify-event";
 import { readEvents } from "./read-events";
+import { handleTimezoneIntent } from "./timezone";
 import { withCalendar } from "./with-calendar";
 
 /** Интент → действие. Общий путь для текста, голоса и переслушанного голосового. */
@@ -40,6 +41,9 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       return;
     case "multiple":
       await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
+      return;
+    case "set_timezone":
+      await handleTimezoneIntent(ctx, user, chatId, conversationId, intent);
       return;
     case "assign_task":
       await startAssign(ctx, user, chatId, conversationId, text, intent);

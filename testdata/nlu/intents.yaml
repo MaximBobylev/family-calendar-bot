@@ -196,3 +196,14 @@ cases:
   - { id: as06, cat: assign, text: "Remind John to pick up the kids at 5pm", intent: assign_task }
   - { id: as07, cat: assign, text: "мои дела", intent: list_assignments }
   - { id: as08, cat: assign, text: "Что на мне завтра?", intent: list_assignments }
+  # --- set_timezone (US-07, R2): то, что не узнал разбор без LLM (город не из словаря, другая формулировка); и контраст ---
+  - { id: tz01, cat: timezone, text: "Я на неделю улетаю в Бангкок", intent: set_timezone }
+  - { id: tz02, cat: timezone, text: "Мы сейчас в Таиланде, на Пхукете", intent: set_timezone }
+  - { id: tz03, cat: timezone, text: "Переехали в Буэнос-Айрес насовсем", intent: set_timezone }
+  - { id: tz04, cat: timezone, text: "Отпуск закончился, мы приехали обратно", intent: set_timezone }
+  - { id: tz05, cat: timezone, text: "I'm in Tokyo for two weeks", intent: set_timezone }
+  - { id: tz06, cat: timezone, text: "В каком часовом поясе ты сейчас считаешь?", intent: [set_timezone, unsupported] }
+  - { id: tz07, cat: timezone_contrast, text: "Встреча в Бангкоке завтра в 10", intent: create_event }
+  - { id: tz08, cat: timezone_contrast, text: "Что у меня в Токио на следующей неделе?", intent: list_events }
+  - { id: tz09, cat: timezone_contrast, text: "Созвон с офисом в Сингапуре в пятницу в 9", intent: create_event }
+  - { id: tz10, cat: timezone_contrast, text: "Перенеси перелёт в Бангкок на субботу", intent: modify_event }

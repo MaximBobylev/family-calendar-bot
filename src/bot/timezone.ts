@@ -9,10 +9,12 @@ import { recordFeature } from "../db/features";
 import { cancelTripChecks, endTrip, scheduleTripCheck, setHomeTz, setTrip, setTripUntil } from "../db/settings";
 import { findUserById, type User } from "../db/users";
 import { rescheduleDigest } from "../jobs/digest";
-import { parseTimezoneCommand, tripUntil } from "../nlu/timezone-command";
+import { parseTimeZone } from "../dates/timezone";
+import type { SetTimezoneIntent } from "../nlu/intents";
+import { parseTimezoneCommand, placeTimeZone, type TimezoneCommand, tripUntil } from "../nlu/timezone-command";
 import type { DueJob } from "../scheduler";
 import type { AppContext } from "./context";
-import { dateLabel, hhmm } from "./format";
+import { dateLabel, escapeHtml, hhmm } from "./format";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
 import { TRIP_RECHECK_MS, tripCheckAt } from "./trip-logic";
@@ -43,6 +45,36 @@ const dayText = (ctx: AppContext, day: string, tz: string, locale: string) =>
 export async function handleTimezoneCommand(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string): Promise<boolean> {
   const cmd = parseTimezoneCommand(text);
   if (!cmd) return false;
+  await applyTimezoneCommand(ctx, user, chatId, conversationId, cmd);
+  return true;
+}
+
+/**
+ * Интент set_timezone от LLM — фраза, которую не узнал разбор без LLM (город не из словаря, другая формулировка). Пояс:
+ * город из словаря, иначе IANA-имя от модели после проверки (Intl); не знаем — подсказка про /settings, не угадываем.
+ */
+export async function handleTimezoneIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, intent: SetTimezoneIntent): Promise<void> {
+  if (intent.action === "where" || intent.action === "return") {
+    await applyTimezoneCommand(ctx, user, chatId, conversationId, { kind: intent.action });
+    return;
+  }
+  const tz = (intent.place ? placeTimeZone(intent.place) : undefined) ?? (intent.tz ? parseTimeZone(intent.tz) : undefined);
+  const place = intent.place ?? intent.tz ?? "";
+  if (!tz) {
+    await ctx.telegram.sendMessage(chatId, t("tzUnknownPlace", user.locale, { place: escapeHtml(place.slice(0, 60)) }), undefined, { html: true });
+    return;
+  }
+  const until = intent.action === "trip" && intent.until ? intent.until.replace(/^\s*(до|until|till)\s+/i, "") : undefined;
+  await applyTimezoneCommand(
+    ctx,
+    user,
+    chatId,
+    conversationId,
+    intent.action === "move" ? { kind: "move", tz, place } : { kind: "trip", tz, place, ...(until ? { until } : {}) },
+  );
+}
+
+async function applyTimezoneCommand(ctx: AppContext, user: User, chatId: number, conversationId: string, cmd: TimezoneCommand): Promise<void> {
   const l = user.locale;
   switch (cmd.kind) {
     case "where": {
@@ -53,24 +85,24 @@ export async function handleTimezoneCommand(ctx: AppContext, user: User, chatId:
           ? t("tzWhereTrip", l, { tz: trip.tz, time: timeIn(ctx, trip.tz), until: untilPart(ctx, trip.until, trip.tz, l), home: user.home_tz })
           : t("tzWhere", l, { tz: user.tz, time: timeIn(ctx, user.tz) }),
       );
-      return true;
+      return;
     }
     case "return":
       await returnHome(ctx, user, chatId);
-      return true;
+      return;
     case "move":
       await moveHome(ctx, user, chatId, cmd.tz);
-      return true;
+      return;
     case "trip": {
       // Пояс поездки — домашний: это возвращение
       if (cmd.tz === user.home_tz) {
         await returnHome(ctx, user, chatId);
-        return true;
+        return;
       }
       const until = cmd.until ? tripUntil(cmd.until, localNow(ctx, cmd.tz), cmd.tz) : undefined;
       if (until || user.trip?.tz === cmd.tz) {
         await startTrip(ctx, user, chatId, conversationId, cmd.tz, until ?? user.trip?.until);
-        return true;
+        return;
       }
       const id = await createPendingAction(ctx.db, {
         conversationId,
@@ -89,7 +121,7 @@ export async function handleTimezoneCommand(ctx: AppContext, user: User, chatId:
         ],
       });
       await attachMessage(ctx.db, id, sent.message_id);
-      return true;
+      return;
     }
   }
 }
