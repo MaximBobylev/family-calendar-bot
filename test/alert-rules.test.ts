@@ -17,6 +17,7 @@ function inputs(over: Partial<AlertInputs> = {}): AlertInputs {
     digestFailedDay: 0,
     ai: { calls: 0, errors: 0 },
     sync: { stale: 0, oldestStaleAt: null },
+    quotaLow: [],
     ...over,
   };
 }
@@ -29,8 +30,14 @@ const firing = (i: AlertInputs) =>
 describe("evaluateRules", () => {
   it("all quiet", () => {
     const rs = evaluateRules(inputs());
-    expect(rs.map((r) => r.key)).toEqual(["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale"]);
+    expect(rs.map((r) => r.key)).toEqual(["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale", "quota_low"]);
     expect(rs.every((r) => r.firing === false)).toBe(true);
+  });
+
+  it("quota_low: low quotas fire with counts; not evaluated — state kept", () => {
+    const r = evaluateRules(inputs({ quotaLow: ["OpenRouter: 4 запр. из 50", "DeepSeek: 0.40 $"] })).find((x) => x.key === "quota_low")!;
+    expect(r).toEqual({ key: "quota_low", firing: true, detail: "OpenRouter: 4 запр. из 50; DeepSeek: 0.40 $" });
+    expect(evaluateRules(inputs({ quotaLow: null })).find((x) => x.key === "quota_low")!.firing).toBeNull();
   });
 
   it.each<[string, Partial<AlertInputs>, string[]]>([

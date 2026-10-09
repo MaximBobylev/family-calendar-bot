@@ -43,9 +43,11 @@ export interface AlertInputs {
   ai: { calls: number; errors: number };
   /** Календари с получателями, не синхронизированные дольше порога режима (sync-health.ts: isSyncStale). */
   sync: { stale: number; oldestStaleAt: number | null };
+  /** Квоты ниже порога (quota-rules.ts: lowQuotas) — «OpenRouter: 4 запр. из 50»; null — не удалось оценить. */
+  quotaLow: string[] | null;
 }
 
-export const ALERT_KEYS = ["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale"] as const;
+export const ALERT_KEYS = ["webhook", "inbox_stuck", "inbox_failed", "jobs", "digest_failed", "ai_errors", "sync_stale", "quota_low"] as const;
 export type AlertKey = (typeof ALERT_KEYS)[number];
 
 export const ALERT_TITLES: Record<AlertKey, string> = {
@@ -56,6 +58,7 @@ export const ALERT_TITLES: Record<AlertKey, string> = {
   digest_failed: "дайджесты не доставлены",
   ai_errors: "ошибки LLM/STT",
   sync_stale: "синхронизация календарей",
+  quota_low: "квоты провайдеров на исходе",
 };
 
 export interface RuleResult {
@@ -115,6 +118,10 @@ export function evaluateRules(i: AlertInputs): RuleResult[] {
     firing: stale > 0,
     detail: `устарели: ${stale}${oldestStaleAt === null ? "" : `, старейший синк ${duration(now - oldestStaleAt)} назад`}`,
   });
+
+  // Пороги — в quota-rules.ts: OpenRouter бесплатных < 10, DeepSeek < $1, Workers AI > 80% (оценка или GraphQL)
+  const q = i.quotaLow;
+  out.push({ key: "quota_low", firing: q === null ? null : q.length > 0, detail: q === null ? "квоты не оценены" : q.join("; ") || "всё в норме" });
   return out;
 }
 

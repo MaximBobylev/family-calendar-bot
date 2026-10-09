@@ -8,15 +8,22 @@ import type { AppContext } from "../bot/context";
 import { alertCounts, loadAlertStates, saveAlertState } from "../db/alert-state";
 import { errorClass, log } from "../log";
 import { AI_WINDOW_MS, type AlertInputs, alertText, decide, evaluateRules } from "./alert-rules";
+import { lowQuotas } from "./quota-rules";
+import { quotaReport, quotaRows } from "./quotas";
 import { summarizeSync } from "./sync-health";
 
 export async function collectAlertInputs(ctx: AppContext, now: number): Promise<AlertInputs> {
-  const [webhook, inbox, lag, counts, syncRows] = await Promise.all([
+  const [webhook, inbox, lag, counts, syncRows, quotas] = await Promise.all([
     webhookStatus(ctx),
     inboxHealth(ctx.db, now),
     jobsLag(ctx.db, now),
     alertCounts(ctx.db, now, AI_WINDOW_MS),
     syncCalendars(ctx.db),
+    // Сбой оценки квот не должен мешать остальным правилам
+    quotaReport(ctx).catch((e) => {
+      log("alerts", { outcome: "quota_error", error: errorClass(e) });
+      return null;
+    }),
   ]);
   const sync = summarizeSync(syncRows, now);
   return {
@@ -28,6 +35,7 @@ export async function collectAlertInputs(ctx: AppContext, now: number): Promise<
     digestFailedDay: counts.digestFailedDay,
     ai: { calls: counts.aiCalls, errors: counts.aiErrors },
     sync: { stale: sync.stale, oldestStaleAt: sync.oldestStaleAt },
+    quotaLow: quotas ? lowQuotas(quotaRows(quotas)) : null,
   };
 }
 

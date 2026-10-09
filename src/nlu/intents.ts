@@ -3,7 +3,7 @@
 
 import { type DateStructure, parseDateStructure } from "../dates/structured";
 import { DATE_STRUCTURE_RULES, DATE_STRUCTURE_SCHEMA } from "./date-structure";
-import { callTools, type CallOptions, type LlmConfig, type ToolCall, type ToolDefinition } from "./llm";
+import { callTools, type CallOptions, type LlmConfig, LlmHttpError, type ToolCall, type ToolDefinition } from "./llm";
 
 export interface CreateEventIntent {
   name: "create_event";
@@ -258,6 +258,13 @@ export async function parseIntent(cfg: LlmConfig, text: string, context: IntentC
   return { intent: intentFromCalls(res.toolCalls), tokensIn: res.tokensIn, tokensOut: res.tokensOut, toolCalls: res.toolCalls, rateHeaders: res.rateHeaders };
 }
 
+/** Заголовки лимитов, увиденные цепочкой (и у упавших звеньев: 429 — самый ценный случай), — для панели «Квоты». */
+export interface SeenHeaders {
+  provider: string;
+  headers: Record<string, string>;
+  status: number;
+}
+
 /** Провайдер не ответил: статус/текст ошибки — для журнала. */
 export interface LlmAttemptError {
   provider: string;
@@ -272,12 +279,18 @@ export async function parseIntentChain(
   chain: LlmConfig[],
   text: string,
   context: IntentContext,
+  seen?: SeenHeaders[],
 ): Promise<{ parsed: ParsedIntent; via: LlmConfig; failed: LlmAttemptError[] }> {
   const failed: LlmAttemptError[] = [];
   for (const cfg of chain) {
     try {
-      return { parsed: await parseIntent(cfg, text, context), via: cfg, failed };
+      const parsed = await parseIntent(cfg, text, context);
+      if (seen && parsed.rateHeaders && Object.keys(parsed.rateHeaders).length)
+        seen.push({ provider: cfg.name ?? cfg.baseUrl, headers: parsed.rateHeaders, status: 200 });
+      return { parsed, via: cfg, failed };
     } catch (e) {
+      if (seen && e instanceof LlmHttpError && Object.keys(e.rateHeaders).length)
+        seen.push({ provider: cfg.name ?? cfg.baseUrl, headers: e.rateHeaders, status: e.status });
       failed.push({ provider: cfg.name ?? cfg.baseUrl, error: String(e instanceof Error ? e.message : e).slice(0, 300) });
     }
   }

@@ -26,6 +26,8 @@ export interface Transcript {
   text: string;
   language?: string;
   durationSec?: number;
+  /** Заголовки лимитов (Groq: x-ratelimit-*) — для панели «Квоты». */
+  rateHeaders?: Record<string, string>;
 }
 
 export async function transcribe(cfg: SttConfig, audio: ArrayBuffer): Promise<Transcript> {
@@ -90,7 +92,10 @@ async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Tra
   );
   if (!res.ok) throw new Error(`stt ${res.status}: ${await res.text()}`);
   const json = (await res.json()) as { text?: string; language?: string; duration?: number };
+  const rateHeaders: Record<string, string> = {};
+  for (const [k, v] of res.headers) if (/^(x-ratelimit|retry-after)/i.test(k)) rateHeaders[k] = v;
   return {
+    ...(Object.keys(rateHeaders).length ? { rateHeaders } : {}),
     text: (json.text ?? "").trim(),
     ...(json.language ? { language: json.language } : {}),
     ...(json.duration !== undefined ? { durationSec: json.duration } : {}),

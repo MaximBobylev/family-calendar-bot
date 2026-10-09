@@ -7,6 +7,7 @@
 //   GET  /admin/households            — дома: псевдонимы и счётчики (итерация 3)
 //   GET  /admin/households/:id        — дом: участники, приглашения (счётчики), групповые чаты (c-xxxxxx)
 //   GET  /admin/usage                 — расход AI по псевдонимам, против лимитов; контент → событие, inline
+//   GET  /admin/quotas                — остатки квот и балансов провайдеров (API, заголовки вызовов, оценка по журналу)
 //   GET  /admin/audit                 — журнал действий операторов
 // Вход — HTTP Basic (auth.ts); без JS, CSP default-src 'none'.
 
@@ -16,6 +17,7 @@ import { adminOperator, sameOrigin, unauthorized } from "./auth";
 import { NOTIFY_FLUSH_JOB } from "../sync/notify";
 import { PUSH_SYNC_JOB, SYNC_JOB, WATCH_RENEW_JOB } from "../sync/engine";
 import { TG_REMINDER_JOB } from "../sync/reminders";
+import { quotaReport } from "../ops/quotas";
 import { summarizeSync } from "../ops/sync-health";
 import { chatPseudonym, intentOf, maskError, maskResult, maskText, pseudonym, pseudonymKey } from "./mask";
 import * as q from "./queries";
@@ -24,6 +26,7 @@ import { healthBody } from "./views/health";
 import { householdDetailBody, householdsBody } from "./views/households";
 import { type JournalDetailView, journalDetailBody, journalListBody, REVEAL_REASONS } from "./views/journal";
 import { page } from "./views/layout";
+import { quotasBody } from "./views/quotas";
 import { syncBody } from "./views/sync";
 import { usageBody } from "./views/usage";
 import { webhookStatus } from "./webhook";
@@ -83,6 +86,7 @@ export async function handleAdmin(ctx: AppContext, request: Request, url: URL): 
     return render("Дом", "/admin/households", body);
   }
   if (path === "/admin/usage") return render("Расход", "/admin/usage", await usage(ctx, now, pseudo));
+  if (path === "/admin/quotas") return render("Квоты", "/admin/quotas", quotasBody(await quotaReport(ctx)));
   if (path === "/admin/audit") return render("Аудит", "/admin/audit", await audit(ctx, pseudo));
   return new Response("Not found", { status: 404 });
 }

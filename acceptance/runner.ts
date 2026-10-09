@@ -49,6 +49,10 @@ type Step =
   | { expect_llm_requests: number }
   /** Провайдер отвечает ошибкой (0 — снова работает): llm | llm-backup | stt | stt-openai. */
   | { provider_outage: { provider: string; status: number } }
+  /** Ответы эндпоинтов остатков квот: {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?}. */
+  | { fake_quotas: Record<string, unknown> }
+  /** Сколько запросов получили эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance) — проверка кеша; ключ — верный. */
+  | { expect_quota_requests: number }
   /** Сколько раз вызывался каждый провайдер с последнего сброса: {llm: 1, llm-backup: 1, stt-openai: 1, stt: 0}. */
   | { expect_provider_calls: Record<string, number> }
   | { google_account: { email: string; calendars: unknown[] } }
@@ -842,6 +846,14 @@ async function runScenario(s: Scenario): Promise<void> {
         throw new AssertionError(`${where}: ${list.length} voice re-hearings, expected ${step.expect_voice_rehearings}`);
     } else if ("provider_outage" in step) {
       await post(`${FAKES}/__fake/outage`, step.provider_outage);
+    } else if ("fake_quotas" in step) {
+      await post(`${FAKES}/__fake/quotas`, step.fake_quotas);
+    } else if ("expect_quota_requests" in step) {
+      const list = (await (await fetch(`${FAKES}/__fake/quotas/requests`)).json()) as { via: string; auth: string }[];
+      if (list.length !== step.expect_quota_requests)
+        throw new AssertionError(`${where}: ${list.length} quota endpoint requests, expected ${step.expect_quota_requests}`);
+      const bad = list.find((r) => r.auth !== "Bearer test-llm-key");
+      if (bad) throw new AssertionError(`${where}: quota endpoint ${bad.via} called without the provider key`);
     } else if ("expect_provider_calls" in step) {
       const llm = (await (await fetch(`${FAKES}/__fake/llm/requests`)).json()) as { _via?: string }[];
       const stt = (await (await fetch(`${FAKES}/__fake/stt/requests`)).json()) as { via: string }[];

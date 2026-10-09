@@ -7,7 +7,8 @@ import { recordUsage } from "../db/usage";
 import { saveIntent } from "../inbox";
 import type { User } from "../db/users";
 import { llmCostMicroUsd } from "../limits";
-import { type Intent, LlmChainError, parseIntentChain, type ParsedIntent } from "../nlu/intents";
+import { type Intent, LlmChainError, parseIntentChain, type ParsedIntent, type SeenHeaders } from "../nlu/intents";
+import { rememberRateHeaders } from "../ops/quotas";
 import type { AppContext } from "./context";
 import { withinLimit } from "./input/limit";
 import { t } from "./messages";
@@ -20,9 +21,10 @@ export async function parseCommandIntent(ctx: AppContext, user: User, chatId: nu
   const calendars = await calendarNamesOf(ctx.db, user.id);
   if (!(await withinLimit(ctx, user, "llm", chatId))) return null;
   let parsed: ParsedIntent;
+  const seen: SeenHeaders[] = [];
   try {
     // Команда — короткая фраза; длинный текст в LLM не шлём (стоимость, prompt injection)
-    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars });
+    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars }, seen);
     parsed = res.parsed;
     const via = res.via;
     const costs = {
@@ -59,6 +61,8 @@ export async function parseCommandIntent(ctx: AppContext, user: User, chatId: nu
     });
     await ctx.telegram.sendMessage(chatId, t("llmUnavailable", user.locale));
     return null;
+  } finally {
+    await rememberRateHeaders(ctx, seen);
   }
   if (ctx.progress) await saveIntent(ctx.db, ctx.progress.updateId, { text, intent: parsed.intent });
   return parsed.intent;

@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": { "types": ["node"] },
-  "include": [".", "../src/dates", "../src/crypto.ts", "../src/stt", "../src/calendar/match.ts", "../src/calendar/sync.ts", "../src/calendar/google-errors.ts", "../src/nlu/modify-hints.ts", "../src/limits.ts", "../src/voice/signals.ts", "../src/admin/mask.ts", "../src/admin/yaml-snippet.ts", "../src/ops/alert-rules.ts", "../src/log.ts", "../src/bot/create-logic.ts", "../src/bot/messages.ts", "../src/bot/messages"]
+  "include": [".", "../src/dates", "../src/crypto.ts", "../src/stt", "../src/calendar/match.ts", "../src/calendar/sync.ts", "../src/calendar/google-errors.ts", "../src/nlu/modify-hints.ts", "../src/limits.ts", "../src/voice/signals.ts", "../src/admin/mask.ts", "../src/admin/yaml-snippet.ts", "../src/ops/alert-rules.ts", "../src/ops/quota-rules.ts", "../src/log.ts", "../src/bot/create-logic.ts", "../src/bot/messages.ts", "../src/bot/messages"]
 }

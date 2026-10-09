@@ -10,6 +10,7 @@ import { sttCostMicroUsd } from "../../limits";
 import { fixTranscript, isEmptySpeech, SttChainError, transcribeChain, type Transcript } from "../../stt/whisper";
 import type { TgMessage } from "../../telegram/types";
 import type { AppContext } from "../context";
+import { rememberRateHeaders } from "../../ops/quotas";
 import { escapeHtml } from "../format";
 import { t } from "../messages";
 import { withinLimit } from "./limit";
@@ -47,6 +48,7 @@ export async function recognizeVoice(ctx: AppContext, user: User, message: TgMes
   try {
     const res = await transcribeChain(ctx.config.stt, audio);
     transcript = res.transcript;
+    if (transcript.rateHeaders) await rememberRateHeaders(ctx, [{ provider: res.via.name ?? res.via.baseUrl, headers: transcript.rateHeaders, status: 200 }]);
     const costs = res.via.perMin !== undefined ? { ...ctx.config.costs, sttPerMin: res.via.perMin } : ctx.config.costs;
     await recordUsage(ctx.db, {
       userId: user.id,

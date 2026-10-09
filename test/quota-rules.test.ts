@@ -1,0 +1,178 @@
+// Квоты провайдеров (src/ops/quota-rules.ts): разбор ответов OpenRouter /key, DeepSeek /user/balance, GraphQL
+// Cloudflare и заголовков Groq; пороги жёлтого и алерта; ни ключей, ни меток ключей в строках.
+
+import { describe, expect, it } from "vitest";
+import {
+  cloudflareGraphql,
+  GEMINI_RESET_TZ,
+  geminiRow,
+  groqAudioRow,
+  groqRows,
+  lowQuotas,
+  neuronsFromCost,
+  neuronsQuery,
+  parseDeepSeekBalance,
+  parseDuration,
+  parseNeurons,
+  parseOpenRouterKey,
+  shareLevel,
+  workersAiRow,
+  zoneDay,
+} from "../src/ops/quota-rules";
+
+const NOW = Date.parse("2026-10-09T15:30:00Z");
+const NEXT_UTC = Date.parse("2026-10-10T00:00:00Z");
+
+describe("OpenRouter /key", () => {
+  const key = (over: Record<string, unknown> = {}) => ({
+    data: {
+      label: "sk-or-v1-abc…xyz",
+      limit: null,
+      limit_reset: null,
+      limit_remaining: null,
+      usage: 1.25,
+      usage_daily: 0.01,
+      is_free_tier: true,
+      free_model_daily_requests: { used: 12, limit: 50, remaining: 38 },
+      ...over,
+    },
+  });
+
+  it("free daily requests from the API, reset at UTC midnight", () => {
+    const [free, paid] = parseOpenRouterKey(key(), NOW, 0);
+    expect(free).toMatchObject({ provider: "OpenRouter", remaining: 38, limit: 50, used: 12, source: "api", resetAt: NEXT_UTC, level: "ok", alert: false });
+    expect(paid).toMatchObject({ remaining: null, limit: null, level: "unknown" });
+    expect(paid!.note).toContain("$0.0100");
+    // Метка ключа — частично ключ: не показываем
+    expect(JSON.stringify(parseOpenRouterKey(key(), NOW, 0))).not.toContain("sk-or");
+  });
+
+  it("below 20% — warn; below 10 requests — alert", () => {
+    const [free] = parseOpenRouterKey(key({ free_model_daily_requests: { used: 41, limit: 50, remaining: 9 } }), NOW, 0);
+    expect(free).toMatchObject({ level: "warn", alert: true });
+    expect(lowQuotas([free!])).toEqual(["OpenRouter: 9 запр. из 50"]);
+    const [none] = parseOpenRouterKey(key({ free_model_daily_requests: { used: 50, limit: 50, remaining: 0 } }), NOW, 0);
+    expect(none!.level).toBe("crit");
+  });
+
+  it("older response without free_model_daily_requests — estimate from the journal and tier", () => {
+    const [free] = parseOpenRouterKey(key({ free_model_daily_requests: undefined, is_free_tier: false }), NOW, 7);
+    expect(free).toMatchObject({ source: "estimate", limit: 1000, used: 7, remaining: 993 });
+  });
+
+  it("key with a $ limit", () => {
+    const [, credit] = parseOpenRouterKey(key({ limit: 5, limit_remaining: 0.5, limit_reset: "monthly" }), NOW, 0);
+    expect(credit).toMatchObject({ unit: "$", remaining: 0.5, limit: 5, level: "warn" });
+    expect(credit!.note).toContain("сброс: monthly");
+  });
+
+  it("unexpected body — error", () => {
+    expect(() => parseOpenRouterKey({ error: { message: "x" } }, NOW, 0)).toThrow();
+  });
+});
+
+describe("DeepSeek /user/balance", () => {
+  it("balance per currency; below $1 or unavailable — alert", () => {
+    const ok = parseDeepSeekBalance(
+      { is_available: true, balance_infos: [{ currency: "USD", total_balance: "4.20", granted_balance: "0.00", topped_up_balance: "4.20" }] },
+      NOW,
+    );
+    expect(ok).toEqual([expect.objectContaining({ provider: "DeepSeek", remaining: 4.2, unit: "$", level: "ok", alert: false, source: "api" })]);
+    const low = parseDeepSeekBalance({ is_available: true, balance_infos: [{ currency: "USD", total_balance: "0.40" }] }, NOW);
+    expect(low[0]).toMatchObject({ level: "crit", alert: true });
+    expect(lowQuotas(low)).toEqual(["DeepSeek: 0.40 $"]);
+    const warn = parseDeepSeekBalance({ is_available: true, balance_infos: [{ currency: "USD", total_balance: "1.50" }] }, NOW);
+    expect(warn[0]!.level).toBe("warn");
+    const off = parseDeepSeekBalance({ is_available: false, balance_infos: [{ currency: "CNY", total_balance: "100" }] }, NOW);
+    expect(off[0]).toMatchObject({ unit: "¥", alert: true });
+    expect(off[0]!.note).toContain("is_available = false");
+  });
+
+  it("unexpected body — error", () => {
+    expect(() => parseDeepSeekBalance({ message: "Authentication Fails" }, NOW)).toThrow();
+  });
+});
+
+describe("Workers AI", () => {
+  it("GraphQL address and account only from a real Cloudflare base URL", () => {
+    expect(cloudflareGraphql("https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/v1")).toEqual({
+      url: "https://api.cloudflare.com/client/v4/graphql",
+      accountTag: "0123456789abcdef0123456789abcdef",
+    });
+    expect(cloudflareGraphql("http://fakes:9100/stt")).toBeNull();
+  });
+
+  it("query covers the UTC day so far", () => {
+    const body = JSON.parse(neuronsQuery("acc", Date.parse("2026-10-09T00:00:00Z"), NOW)) as { query: string; variables: Record<string, string> };
+    expect(body.query).toContain("aiInferenceAdaptiveGroups");
+    expect(body.query).toContain("totalNeurons");
+    expect(body.variables).toEqual({ a: "acc", from: "2026-10-09T00:00:00.000Z", to: "2026-10-09T15:30:00.000Z" });
+  });
+
+  it("sums neurons across models; access error surfaces as an exception", () => {
+    const json = {
+      data: { viewer: { accounts: [{ aiInferenceAdaptiveGroups: [{ sum: { totalNeurons: 1200.5 } }, { sum: { totalNeurons: 300 } }] }] } },
+      errors: null,
+    };
+    expect(parseNeurons(json)).toBe(1500.5);
+    expect(() => parseNeurons({ data: null, errors: [{ message: "not authorized for that account" }] })).toThrow("not authorized");
+  });
+
+  it("estimate: $0.011 per 1000 neurons; over 80% — alert", () => {
+    expect(neuronsFromCost(110)).toBe(10);
+    expect(workersAiRow(2500, "estimate", NOW)).toMatchObject({ remaining: 7500, limit: 10_000, used: 2500, level: "ok", alert: false, resetAt: NEXT_UTC });
+    const hot = workersAiRow(8500.4, "api", NOW);
+    expect(hot).toMatchObject({ remaining: 1500, level: "warn", alert: true, source: "api" });
+    expect(lowQuotas([hot])).toEqual(["Workers AI: 1500 neurons из 10000"]);
+    expect(workersAiRow(12_000, "estimate", NOW)).toMatchObject({ remaining: 0, level: "crit" });
+  });
+});
+
+describe("Groq headers", () => {
+  it("durations", () => {
+    expect(parseDuration("2m59.56s")).toBe(179_560);
+    expect(parseDuration("7.66s")).toBe(7660);
+    expect(parseDuration("1h2m3s")).toBe(3_723_000);
+    expect(parseDuration("250ms")).toBe(250);
+    expect(parseDuration("2")).toBe(2000);
+    expect(parseDuration("soon")).toBeNull();
+    expect(parseDuration(undefined)).toBeNull();
+  });
+
+  it("requests per day from the last call; reset = seen + duration", () => {
+    const seen = Date.parse("2026-10-09T15:00:00Z");
+    const rows = groqRows(
+      {
+        "x-ratelimit-limit-requests": "2000",
+        "x-ratelimit-remaining-requests": "1990",
+        "x-ratelimit-reset-requests": "1h0m0s",
+        "x-ratelimit-limit-tokens": "7200",
+      },
+      seen,
+    );
+    expect(rows).toEqual([
+      expect.objectContaining({ provider: "Groq", remaining: 1990, limit: 2000, source: "headers", at: seen, resetAt: seen + 3_600_000, level: "ok" }),
+    ]);
+    expect(groqRows({ "retry-after": "2" }, seen)).toEqual([]);
+  });
+
+  it("audio seconds today — estimate", () => {
+    expect(groqAudioRow(30_000, NOW)).toMatchObject({ used: 30, remaining: 28_770, limit: 28_800, source: "estimate" });
+  });
+});
+
+describe("Gemini and levels", () => {
+  it("calls since Pacific midnight, reset at the next one", () => {
+    const pt = zoneDay(NOW, GEMINI_RESET_TZ);
+    // 9 октября 2026 — летнее время, UTC−7
+    expect(pt).toEqual({ start: Date.parse("2026-10-09T07:00:00Z"), next: Date.parse("2026-10-10T07:00:00Z") });
+    expect(geminiRow(4, NOW)).toMatchObject({ used: 4, remaining: null, limit: null, level: "unknown", resetAt: pt.next });
+  });
+
+  it("share levels", () => {
+    expect(shareLevel(50, 100)).toBe("ok");
+    expect(shareLevel(19, 100)).toBe("warn");
+    expect(shareLevel(0, 100)).toBe("crit");
+    expect(shareLevel(null, 100)).toBe("unknown");
+  });
+});

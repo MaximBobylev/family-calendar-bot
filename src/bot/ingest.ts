@@ -16,7 +16,8 @@ import { icsToItem, type IcsItem } from "../ics/convert";
 import { parseIcs } from "../ics/parse";
 import { llmCostMicroUsd } from "../limits";
 import { log } from "../log";
-import { type CreateEventIntent, parseIntentChain } from "../nlu/intents";
+import { type CreateEventIntent, parseIntentChain, type SeenHeaders } from "../nlu/intents";
+import { rememberRateHeaders } from "../ops/quotas";
 import type { TgMessage } from "../telegram/types";
 import { understandImageChain } from "../vision/understand";
 import type { AppContext } from "./context";
@@ -111,8 +112,9 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
 async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: string): Promise<CreateEventIntent | undefined | null> {
   if (!(await withinLimit(ctx, user, "llm", chatId))) return null;
   const now = ctx.clock.now();
+  const seen: SeenHeaders[] = [];
   try {
-    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars: await calendarNamesOf(ctx.db, user.id) });
+    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars: await calendarNamesOf(ctx.db, user.id) }, seen);
     const { parsed, via } = res;
     const costs = {
       ...ctx.config.costs,
@@ -151,6 +153,8 @@ async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: s
       now,
     });
     return undefined;
+  } finally {
+    await rememberRateHeaders(ctx, seen);
   }
 }
 

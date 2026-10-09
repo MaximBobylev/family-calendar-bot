@@ -56,3 +56,30 @@ export async function usageWindow(db: D1Database, userId: string, kind: UsageRec
     .first<{ day_n: number; day_oldest: number | null; hour_n: number; hour_oldest: number | null }>();
   return { dayCount: row?.day_n ?? 0, dayOldest: row?.day_oldest ?? null, hourCount: row?.hour_n ?? 0, hourOldest: row?.hour_oldest ?? null };
 }
+
+export interface ProviderToday {
+  provider: string;
+  /** Вызовов с `utcStart` (полночь UTC) и с `altStart` (полночь в другом поясе, напр. сброс Gemini по Тихоокеанскому). */
+  n_utc: number;
+  n_alt: number;
+  cost_utc: number;
+  audio_ms_utc: number;
+}
+
+/** Расход по провайдерам за «сегодня» — для оценок квот (src/ops/quotas.ts). Ошибки цепочки (provider = chain) не тратят квоту провайдера. */
+export async function usageTodayByProvider(db: D1Database, utcStart: number, altStart: number): Promise<ProviderToday[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT provider,
+              coalesce(sum(created_at >= ?1), 0) AS n_utc,
+              coalesce(sum(created_at >= ?2), 0) AS n_alt,
+              coalesce(sum(CASE WHEN created_at >= ?1 THEN cost_micro_usd END), 0) AS cost_utc,
+              coalesce(sum(CASE WHEN created_at >= ?1 THEN audio_ms END), 0) AS audio_ms_utc
+       FROM usage_events
+       WHERE created_at >= min(?1, ?2) AND outcome = 'ok'
+       GROUP BY provider`,
+    )
+    .bind(utcStart, altStart)
+    .all<ProviderToday>();
+  return results;
+}

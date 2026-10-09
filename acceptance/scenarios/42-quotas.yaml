@@ -1,0 +1,102 @@
+# Панель «Квоты» (docs/admin-console.md, «Квоты»): остатки у провайдеров без траты квоты моделей — бесплатные
+# эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance; в dev это звенья «openrouter» и «deepseek» цепочки LLM),
+# заголовки лимитов настоящих вызовов (Groq) и оценки по журналу (Workers AI, Gemini). Ключи на странице не видны.
+# Низкий остаток — алерт владельцу quota_low. «Сейчас» — пт 9 октября 2026, 18:30 МСК.
+
+- id: quotas-panel-sources-and-cache
+  story: ADR-0002
+  steps:
+    - clock: "2026-10-09T15:30:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars: [{ id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - llm:
+        "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    # Голосовое — через Groq: его ответ несёт x-ratelimit-*-requests (суточные запросы)
+    - voice: { from: 1001, transcript: "Что у меня завтра?" }
+    - http_get:
+        path: "/admin/quotas"
+        basic_auth: "admin:test-admin-password"
+        text_contains:
+          - "Квоты провайдеров"
+          - "OpenRouter"
+          - "Бесплатные модели (:free), запросов в сутки"
+          - "38</b> из 50 (76%)"
+          - "DeepSeek"
+          - "$4.20"
+          - "Workers AI"
+          - "Бесплатные neurons в сутки (аккаунт)"
+          - "из 10000"
+          - "оценка по журналу"
+          - "Account Analytics: Read"
+          - "Groq"
+          - "1990</b> из 2000"
+          - "заголовки последнего вызова · 2026-10-09 15:30 UTC"
+          - "x-ratelimit-remaining-requests: 1990"
+          - "Gemini"
+          - "Вызовов сегодня (с 00:00 по Тихоокеанскому)"
+          - "2026-10-10 07:00 UTC"
+          - "Google Calendar API"
+          - "запрошены"
+        text_not_contains: ["test-llm-key", "test-stt-key", "test-gemini-key", "sk-or-v1", "не удалось получить"]
+    - expect_quota_requests: 2
+    # Повтор в течение минуты — из кеша, провайдеров не дёргаем
+    - http_get:
+        path: "/admin/quotas"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["из кеша", "38</b> из 50"]
+    - expect_quota_requests: 2
+    - clock: "2026-10-09T15:32:00Z"
+    - http_get: { path: "/admin/quotas", basic_auth: "admin:test-admin-password", text_contains: ["запрошены"] }
+    - expect_quota_requests: 4
+
+- id: quotas-provider-failure-does-not-break-page
+  story: ADR-0002
+  steps:
+    - clock: "2026-10-09T15:30:00Z"
+    - http_get: { path: "/admin/quotas", expect_status: 401 }
+    - fake_quotas: { openrouter_status: 500 }
+    - http_get:
+        path: "/admin/quotas"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["OpenRouter", "не удалось получить: HTTP 500", "DeepSeek", "$4.20", "Workers AI"]
+        text_not_contains: ["test-llm-key"]
+
+- id: quotas-low-alert-and-429-headers
+  story: ADR-0002
+  steps:
+    - clock: "2026-10-09T15:30:00Z"
+    - connected_user:
+        from: 1002
+        email: maria@gmail.com
+        calendars: [{ id: maria@gmail.com, summary: "Мария", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }]
+    - alerts: { expect_sent: [] }
+    - expect_no_telegram: true
+    # OpenRouter исчерпал бесплатные запросы (429 с заголовками лимита) — команда ушла в запасной DeepSeek
+    - provider_outage: { provider: llm, status: 429 }
+    - llm:
+        "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+    - telegram: { from: 1002, text: "Что у меня завтра?" }
+    - expect_provider_calls: { llm: 1, llm-backup: 1 }
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["Завтра, сб, 10 октября"] }
+    - fake_quotas:
+        openrouter: { data: { limit: null, usage: 0, usage_daily: 0, is_free_tier: true, free_model_daily_requests: { used: 46, limit: 50, remaining: 4 } } }
+        deepseek: { is_available: true, balance_infos: [{ currency: "USD", total_balance: "0.40", granted_balance: "0.00", topped_up_balance: "0.40" }] }
+    - clock: "2026-10-09T15:35:00Z"
+    - http_get:
+        path: "/admin/quotas"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ['<b class="warn">4</b> из 50', '<b class="err">$0.40</b>', "x-ratelimit-remaining: 0", '<span class="err">429</span>']
+    - alerts: { expect_sent: ["quota_low:fire"] }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains: ["🔴 Алерт: квоты провайдеров на исходе", "OpenRouter: 4 запр. из 50", "DeepSeek: 0.40 $"]
+          text_not_contains: ["test-llm-key", "sk-or"]
+    # Пополнили баланс, сутки сменились — «восстановлено»
+    - fake_quotas:
+        openrouter: { data: { limit: null, usage: 0, usage_daily: 0, is_free_tier: true, free_model_daily_requests: { used: 0, limit: 50, remaining: 50 } } }
+        deepseek: { is_available: true, balance_infos: [{ currency: "USD", total_balance: "10.00" }] }
+    - clock: "2026-10-10T00:05:00Z"
+    - alerts: { expect_sent: ["quota_low:resolve"] }

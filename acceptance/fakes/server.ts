@@ -43,6 +43,12 @@
 //   POST /__fake/vision/fixtures    — {"<содержимое картинки>": {text, tool?, args?} | {no_event: true, text?} | {error: status}}:
 //                                     ответ Gemini на картинку (inlineData image/*), US-66
 //   GET  /__fake/vision/requests    — запросы чтения картинок: [{content, mimeType, caption?}]
+//   GET  /llm/v1/key                — OpenRouter: лимиты ключа (звено «openrouter» цепочки LLM в dev), панель «Квоты»
+//   GET  /llm-backup/user/balance   — DeepSeek: баланс (звено «deepseek»)
+//   POST /__fake/quotas             — {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?}:
+//                                     ответы эндпоинтов остатков (status ≠ 0 — ошибка); сброс — к значениям по умолчанию
+//   GET  /__fake/quotas/requests    — запросы к эндпоинтам остатков: [{via, auth}] (проверка кеша и ключа)
+//   Ответы Groq (stt-openai) несут x-ratelimit-*-requests; LLM в outage 429 — x-ratelimit-limit/remaining/reset
 //   POST /__fake/reset              — сброс состояния
 //
 // Синхронизация и push Google (ADR-0005 §2, US-72):
@@ -121,6 +127,26 @@ let voiceRequests: { content: string }[] = [];
 type VisionFixture = { text?: string; tool?: string; args?: Record<string, unknown>; no_event?: boolean; error?: number };
 let visionFixtures = new Map<string, VisionFixture>();
 let visionRequests: { content: string; mimeType: string; caption?: string }[] = [];
+// --- Эндпоинты остатков квот (панель «Квоты») ---
+const QUOTAS_DEFAULT = {
+  openrouter: {
+    data: {
+      label: "sk-or-v1-fake…key",
+      limit: null,
+      limit_reset: null,
+      limit_remaining: null,
+      usage: 0.5,
+      usage_daily: 0,
+      is_free_tier: true,
+      free_model_daily_requests: { used: 12, limit: 50, remaining: 38 },
+    },
+  } as unknown,
+  deepseek: { is_available: true, balance_infos: [{ currency: "USD", total_balance: "4.20", granted_balance: "0.00", topped_up_balance: "4.20" }] } as unknown,
+  openrouter_status: 0,
+  deepseek_status: 0,
+};
+let quotas = structuredClone(QUOTAS_DEFAULT);
+let quotaRequests: { via: string; auth: string }[] = [];
 /** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
 let outages = new Map<string, number>();
 let revocations: { token: string; status: number }[] = [];
@@ -214,8 +240,8 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
 }
 
-function send(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "content-type": "application/json" });
+function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(status, { "content-type": "application/json", ...headers });
   res.end(JSON.stringify(body));
 }
 
@@ -274,6 +300,8 @@ const server = createServer(async (req, res) => {
       visionFixtures = new Map();
       visionRequests = [];
       outages = new Map();
+      quotas = structuredClone(QUOTAS_DEFAULT);
+      quotaRequests = [];
       telegramFiles = new Map();
       sttFixtures = new Map();
       nextEventId = 1;
@@ -410,7 +438,12 @@ const server = createServer(async (req, res) => {
       if (!entry) return send(res, 400, { error: { message: "fake stt: no fixture for the uploaded file" } });
       const fx = entry[1];
       if (fx.error) return send(res, fx.error, { error: { message: "fake stt error" } });
-      return send(res, 200, { text: fx.text ?? "", language: "russian", duration: 3 });
+      return send(
+        res,
+        200,
+        { text: fx.text ?? "", language: "russian", duration: 3 },
+        { "x-ratelimit-limit-requests": "2000", "x-ratelimit-remaining-requests": "1990", "x-ratelimit-reset-requests": "1h0m0s" },
+      );
     }
 
     // --- Whisper (Workers AI REST) ---
@@ -524,6 +557,21 @@ const server = createServer(async (req, res) => {
       return send(res, 200, acc?.calendars ?? []);
     }
 
+    // --- Остатки квот: OpenRouter /key, DeepSeek /user/balance ---
+    if (url.pathname === "/__fake/quotas" && req.method === "POST") {
+      quotas = { ...quotas, ...(await readJson(req)) } as typeof quotas;
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === "/__fake/quotas/requests") return send(res, 200, quotaRequests);
+    if ((url.pathname === "/llm/v1/key" || url.pathname === "/llm-backup/user/balance") && req.method === "GET") {
+      const openrouter = url.pathname === "/llm/v1/key";
+      quotaRequests.push({ via: openrouter ? "openrouter" : "deepseek", auth: req.headers.authorization ?? "" });
+      if (req.headers.authorization !== "Bearer test-llm-key") return send(res, 401, { error: { message: "fake: bad key" } });
+      const status = openrouter ? quotas.openrouter_status : quotas.deepseek_status;
+      if (status) return send(res, status, { error: { message: "fake quota endpoint outage" } });
+      return send(res, 200, openrouter ? quotas.openrouter : quotas.deepseek);
+    }
+
     // --- LLM (OpenAI-совместимый) ---
     const llmPath = /^\/(llm|llm-backup)\/v1\/chat\/completions$/.exec(url.pathname);
     if (llmPath && req.method === "POST") {
@@ -533,6 +581,14 @@ const server = createServer(async (req, res) => {
       const outage = outages.get(via);
       // status 200 — как OpenRouter при перегрузке: HTTP 200, ошибка в теле, без choices
       if (outage === 200) return send(res, 200, { error: { message: "fake upstream overload", code: 502 } });
+      // 429 — как OpenRouter на исчерпанной суточной квоте бесплатных моделей: заголовки лимита
+      if (outage === 429 && via === "llm")
+        return send(
+          res,
+          429,
+          { error: { message: "fake rate limit" } },
+          { "x-ratelimit-limit": "50", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1791590400000" },
+        );
       if (outage) return send(res, outage, { error: { message: "fake outage" } });
       const text = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? "";
       const fx = llmFixtures.get(text);

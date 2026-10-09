@@ -46,6 +46,7 @@ const NAV: [string, string][] = [
   ["/admin/households", "Дома"],
   ["/admin/journal", "Журнал"],
   ["/admin/usage", "Расход"],
+  ["/admin/quotas", "Квоты"],
   ["/admin/audit", "Аудит"],
 ];
 
@@ -67,7 +68,7 @@ export function page(opts: { title: string; active: string; operator: string; no
   th, td { text-align: left; padding: .35em .6em; border-bottom: 1px solid var(--line); vertical-align: top; }
   code, pre { font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-word; }
   pre { white-space: pre-wrap; padding: .8em 1em; border-radius: 8px; background: var(--tint); user-select: all; }
-  .muted { opacity: .65; } .err { color: #d33; }
+  .muted { opacity: .65; } .err { color: #d33; } .warn { color: #c78100; }
   .badge { display: inline-block; padding: .05em .5em; border-radius: 4px; font-size: .8em; font-weight: 600; color: #fff; }
   .badge.ok { background: #2a8a3e; } .badge.warn { background: #c78100; } .badge.crit { background: #d33; } .badge.unknown { background: #777; }
   .note { padding: .7em 1em; border-radius: 8px; background: var(--tint); }
