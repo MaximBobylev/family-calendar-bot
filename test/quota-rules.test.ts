@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  CF_LIMITS,
+  cfWindow,
   cloudflareGraphql,
+  d1Query,
+  d1Rows,
   GEMINI_RESET_TZ,
   geminiRow,
   groqAudioRow,
@@ -12,11 +16,18 @@ import {
   neuronsFromCost,
   neuronsQuery,
   parseDeepSeekBalance,
+  parseD1,
   parseDuration,
   parseNeurons,
   parseOpenRouterKey,
+  parseQueues,
+  parseWorkers,
+  queuesQuery,
+  queuesRows,
   shareLevel,
   workersAiRow,
+  workersQuery,
+  workersRows,
   zoneDay,
 } from "../src/ops/quota-rules";
 
@@ -125,6 +136,130 @@ describe("Workers AI", () => {
     expect(hot).toMatchObject({ remaining: 1500, level: "warn", alert: true, source: "api" });
     expect(lowQuotas([hot])).toEqual(["Workers AI: 1500 neurons из 10000"]);
     expect(workersAiRow(12_000, "estimate", NOW)).toMatchObject({ remaining: 0, level: "crit" });
+  });
+});
+
+describe("Cloudflare platform (GraphQL Analytics)", () => {
+  const ok = (account: Record<string, unknown>) => ({ data: { viewer: { accounts: [account] } }, errors: null });
+  const SCRIPT = "calendar-assist-bot";
+  const vars = (body: string) => JSON.parse(body) as { query: string; variables: Record<string, string> };
+
+  it("window: Free — the UTC day, Paid — the UTC month", () => {
+    expect(cfWindow("free", NOW)).toMatchObject({ from: Date.parse("2026-10-09T00:00:00Z"), reset: NEXT_UTC });
+    expect(cfWindow("paid", NOW)).toMatchObject({ from: Date.parse("2026-10-01T00:00:00Z"), reset: Date.parse("2026-11-01T00:00:00Z") });
+  });
+
+  it("queries name the documented datasets and the window", () => {
+    const from = Date.parse("2026-10-09T00:00:00Z");
+    const w = vars(workersQuery("acc", from, NOW));
+    expect(w.query).toContain("workersInvocationsAdaptive");
+    expect(w.query).toContain("cpuTimeP99");
+    expect(w.variables).toEqual({ a: "acc", from: "2026-10-09T00:00:00.000Z", to: "2026-10-09T15:30:00.000Z" });
+    const d = vars(d1Query("acc", from, NOW));
+    expect(d.query).toContain("d1AnalyticsAdaptiveGroups");
+    expect(d.query).toContain("d1StorageAdaptiveGroups");
+    expect(d.variables).toEqual({ a: "acc", from: "2026-10-09", to: "2026-10-09", sfrom: "2026-10-08" });
+    expect(vars(queuesQuery("acc", from, NOW)).query).toContain("billableOperations");
+  });
+
+  it("workers: account total, our script, CPU in ms from microseconds", () => {
+    const s = parseWorkers(
+      ok({
+        workersInvocationsAdaptive: [
+          { dimensions: { scriptName: SCRIPT }, sum: { requests: 832, errors: 2, subrequests: 301 }, quantiles: { cpuTimeP50: 2800, cpuTimeP99: 6500 } },
+          { dimensions: { scriptName: "other" }, sum: { requests: 168, errors: 0, subrequests: 0 }, quantiles: { cpuTimeP50: 100, cpuTimeP99: 900 } },
+        ],
+      }),
+      SCRIPT,
+    );
+    expect(s).toEqual({ requests: 1000, errors: 2, scripts: 2, ours: { requests: 832, errors: 2, subrequests: 301, cpuP50Ms: 2.8, cpuP99Ms: 6.5 } });
+    const [req, cpu] = workersRows(s, "free", SCRIPT, NOW);
+    expect(req).toMatchObject({
+      provider: "Workers",
+      used: 1000,
+      limit: 100_000,
+      remaining: 99_000,
+      source: "api",
+      resetAt: NEXT_UTC,
+      level: "ok",
+      alert: false,
+    });
+    expect(req!.note).toContain(`${SCRIPT}: 832 (ошибок 2, 0.2%; подзапросов 301)`);
+    expect(cpu).toMatchObject({ used: 6.5, limit: 10, remaining: 3.5, unit: "мс", level: "ok" });
+    expect(cpu!.alert).toBeUndefined();
+  });
+
+  it("workers: over 80% of the daily requests — alert; CPU over the limit — warn, not crit", () => {
+    const s = parseWorkers(
+      ok({
+        workersInvocationsAdaptive: [
+          { dimensions: { scriptName: SCRIPT }, sum: { requests: 85_000, errors: 0, subrequests: 0 }, quantiles: { cpuTimeP99: 25_800 } },
+        ],
+      }),
+      SCRIPT,
+    );
+    const [req, cpu] = workersRows(s, "free", SCRIPT, NOW);
+    expect(req).toMatchObject({ remaining: 15_000, level: "warn", alert: true });
+    expect(cpu).toMatchObject({ used: 25.8, remaining: 0, level: "warn" });
+    expect(lowQuotas([req!, cpu!])).toEqual(["Workers: 15000 запр. из 100000"]);
+    // Paid: месячное включённое
+    expect(workersRows(s, "paid", SCRIPT, NOW)[0]).toMatchObject({ limit: CF_LIMITS.paid.requests, alert: false, resetAt: Date.parse("2026-11-01T00:00:00Z") });
+  });
+
+  it("workers: our script idle — no CPU row", () => {
+    const s = parseWorkers(ok({ workersInvocationsAdaptive: [] }), SCRIPT);
+    expect(s.ours).toBeNull();
+    expect(workersRows(s, "free", SCRIPT, NOW)).toHaveLength(1);
+  });
+
+  it("d1: rows across databases, storage as the sum of per-database maxima", () => {
+    const s = parseD1(
+      ok({
+        d1AnalyticsAdaptiveGroups: [
+          { dimensions: { databaseId: "a" }, sum: { rowsRead: 4_000_000, rowsWritten: 85_000, readQueries: 10, writeQueries: 5 } },
+          { dimensions: { databaseId: "b" }, sum: { rowsRead: 671, rowsWritten: 2, readQueries: 1, writeQueries: 1 } },
+        ],
+        d1StorageAdaptiveGroups: [
+          { dimensions: { databaseId: "a" }, max: { databaseSizeBytes: 600_000 } },
+          { dimensions: { databaseId: "a" }, max: { databaseSizeBytes: 700_000 } },
+          { dimensions: { databaseId: "b" }, max: { databaseSizeBytes: 50_000 } },
+        ],
+      }),
+    );
+    expect(s).toEqual({ rowsRead: 4_000_671, rowsWritten: 85_002, queries: 17, databases: 2, bytes: 750_000 });
+    const [read, written, storage] = d1Rows(s, "free", NOW);
+    expect(read).toMatchObject({ provider: "D1", limit: 5_000_000, alert: true, level: "warn" });
+    expect(written).toMatchObject({ limit: 100_000, remaining: 14_998, alert: true, level: "warn" });
+    expect(storage).toMatchObject({ used: 0.8, limit: 5000, unit: "МБ", alert: false, resetAt: null });
+    expect(lowQuotas([read!, written!, storage!])).toEqual(["D1: 999329 строк из 5000000", "D1: 14998 строк из 100000"]);
+  });
+
+  it("d1: no storage data — no storage row", () => {
+    expect(d1Rows(parseD1(ok({ d1AnalyticsAdaptiveGroups: [] })), "free", NOW)).toHaveLength(2);
+  });
+
+  it("queues: billable operations by action against 10 000 a day", () => {
+    const s = parseQueues(
+      ok({
+        queueMessageOperationsAdaptiveGroups: [
+          { dimensions: { actionType: "WriteMessage" }, sum: { billableOperations: 94 } },
+          { dimensions: { actionType: "ReadMessage" }, sum: { billableOperations: 94 } },
+          { dimensions: { actionType: "DeleteMessage" }, sum: { billableOperations: 94 } },
+        ],
+      }),
+    );
+    expect(s.ops).toBe(282);
+    const [row] = queuesRows(s, "free", NOW);
+    expect(row).toMatchObject({ provider: "Queues", used: 282, remaining: 9718, limit: 10_000, alert: false });
+    expect(row!.note).toContain("WriteMessage 94, ReadMessage 94, DeleteMessage 94");
+    const [hot] = queuesRows({ ops: 8001, byAction: {} }, "free", NOW);
+    expect(hot!.alert).toBe(true);
+  });
+
+  it("access error and unexpected body surface as exceptions", () => {
+    expect(() => parseWorkers({ data: null, errors: [{ message: "authorization denied" }] }, SCRIPT)).toThrow("authorization denied");
+    expect(() => parseD1({ nope: 1 })).toThrow("неожиданный ответ GraphQL");
+    expect(() => parseQueues({ data: { viewer: { accounts: [] } } })).not.toThrow();
   });
 });
 

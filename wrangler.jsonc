@@ -18,7 +18,10 @@
     "TEST_MODE": "false",
     // Push-уведомления Google (events.watch → /google/push, ADR-0005 §2, docs/research/google-push.md).
     // "false" — только опрос: синк календаря раз в 5–15 мин тем же кодом. Включать после проверки на проде.
-    "GOOGLE_PUSH_ENABLED": "false"
+    "GOOGLE_PUSH_ENABLED": "false",
+    // Тариф Workers аккаунта для панели «Квоты» (лимиты Free — в сутки, Paid — включено в месяц): "free" | "paid".
+    // Через API тариф не узнать (нужно право Billing) — сменили тариф в Cloudflare, поменять и здесь.
+    "CF_WORKERS_PLAN": "free"
   },
 
   "ai": { "binding": "AI" },
@@ -65,6 +68,10 @@
         "TEST_MODE": "true",
         // Каналы events.watch открываются у фейка; push в сценариях шлёт шаг google_push
         "GOOGLE_PUSH_ENABLED": "true",
+        // Панель «Квоты»: GraphQL Analytics Cloudflare — фейк (в проде адрес и аккаунт — из адреса Workers AI)
+        "CF_WORKERS_PLAN": "free",
+        "CF_GRAPHQL_URL": "http://fakes:9100/cf/client/v4/graphql",
+        "CF_ACCOUNT_ID": "0123456789abcdef0123456789abcdef",
         "GOOGLE_CLIENT_ID": "test-client-id",
         "GOOGLE_CLIENT_SECRET": "test-client-secret",
         // Тестовый ключ (не секрет): 32 байта нулей в base64

@@ -119,7 +119,8 @@ export function evaluateRules(i: AlertInputs): RuleResult[] {
     detail: `устарели: ${stale}${oldestStaleAt === null ? "" : `, старейший синк ${duration(now - oldestStaleAt)} назад`}`,
   });
 
-  // Пороги — в quota-rules.ts: OpenRouter бесплатных < 10, DeepSeek < $1, Workers AI > 80% (оценка или GraphQL)
+  // Пороги — в quota-rules.ts: OpenRouter бесплатных < 10, DeepSeek < $1, Workers AI > 80% (оценка или GraphQL);
+  // Workers запросы, D1 строки, Queues операции > 80% суточного (Paid — месячного включённого)
   const q = i.quotaLow;
   out.push({ key: "quota_low", firing: q === null ? null : q.length > 0, detail: q === null ? "квоты не оценены" : q.join("; ") || "всё в норме" });
   return out;

@@ -1,6 +1,6 @@
-// Остатки квот провайдеров для /admin/quotas и алерта quota_low (docs/admin-console.md, «Квоты»): бесплатные
-// эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance, Cloudflare GraphQL), заголовки последних настоящих
-// вызовов и оценки по журналу. Квоту моделей не тратит. Ответы API — в кеше ops_state минуту; сбой одного провайдера
+// Остатки квот провайдеров и платформы Cloudflare для /admin/quotas и алерта quota_low (docs/admin-console.md, «Квоты»):
+// бесплатные эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance, GraphQL Analytics — Workers AI, Workers, D1,
+// Queues), заголовки последних настоящих вызовов и оценки по журналу. Квоту моделей не тратит. Ответы API — в кеше ops_state минуту; сбой одного провайдера
 // не ломает остальные. Адреса — из цепочек провайдеров конфигурации (ADR-0006), ключи на страницу не попадают.
 
 import type { AppContext } from "../bot/context";
@@ -9,7 +9,10 @@ import { usageTodayByProvider } from "../db/usage";
 import { fetchWithTimeout } from "../net/fetch";
 import type { SeenHeaders } from "../nlu/intents";
 import {
-  cloudflareGraphql,
+  type CfPlan,
+  cfWindow,
+  d1Query,
+  d1Rows,
   GEMINI_RESET_TZ,
   geminiRow,
   groqAudioRow,
@@ -17,11 +20,18 @@ import {
   neuronsFromCost,
   neuronsQuery,
   parseDeepSeekBalance,
+  parseD1,
   parseNeurons,
   parseOpenRouterKey,
+  parseQueues,
+  parseWorkers,
   type QuotaRow,
+  queuesQuery,
+  queuesRows,
   utcDayStart,
   workersAiRow,
+  workersQuery,
+  workersRows,
   zoneDay,
 } from "./quota-rules";
 
@@ -30,7 +40,8 @@ const CACHE_MS = 60_000;
 const TIMEOUT_MS = 3_000;
 const ESTIMATE_NOTE =
   "оценка по журналу бота (стоимость вызовов Workers AI ÷ $0.011 за 1000 neurons); вызовы скриптов замеров и других Worker'ов аккаунта не видны. " +
-  "Точно — если токену LLM_API_KEY дать право Account Analytics: Read";
+  "Точно — если у токена аналитики (CF_ANALYTICS_TOKEN или LLM_API_KEY) есть право Account Analytics: Read";
+const NO_ACCESS_HINT = " — токену CF_ANALYTICS_TOKEN (или LLM_API_KEY) нужно право Account Analytics: Read";
 
 export interface QuotaProbe {
   provider: string;
@@ -48,11 +59,15 @@ export interface QuotaReport {
   cached: boolean;
   probes: QuotaProbe[];
   headers: SeenRateHeaders[];
+  /** Тариф Workers из конфигурации (vars.CF_WORKERS_PLAN); null — аккаунт Cloudflare неизвестен. */
+  cfPlan: CfPlan | null;
 }
 
 /** Ответ API или ошибка — то, что лежит в кеше. */
 type Got = { ok: true; json: unknown } | { ok: false; error: string };
-type Fetched = Partial<Record<"openrouter" | "deepseek" | "cloudflare", Got>>;
+/** cloudflare — neurons Workers AI; cf_* — платформа (Workers, D1, Queues). */
+const SOURCES = ["openrouter", "deepseek", "cloudflare", "cf_workers", "cf_d1", "cf_queues"] as const;
+type Fetched = Partial<Record<(typeof SOURCES)[number], Got>>;
 
 interface Endpoint {
   url: string;
@@ -69,18 +84,20 @@ function endpoints(ctx: AppContext): Partial<Record<keyof Fetched, Endpoint>> & 
   if (or) out.openrouter = { url: `${or.baseUrl.replace(/\/+$/, "")}/key`, init: auth(or.apiKey) };
   const ds = byName("deepseek");
   if (ds) out.deepseek = { url: `${ds.baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "")}/user/balance`, init: auth(ds.apiKey) };
-  const cf = all.filter((c) => c.name === "workers-ai").map((c) => ({ c, gql: cloudflareGraphql(c.baseUrl) }));
-  const withGql = cf.find((x) => x.gql);
-  if (withGql?.gql) {
+  const cf = ctx.config.cloudflare;
+  if (cf) {
+    out.keys.push(cf.apiKey);
     const now = ctx.clock.now();
-    out.cloudflare = {
-      url: withGql.gql.url,
-      init: {
-        method: "POST",
-        headers: { authorization: `Bearer ${withGql.c.apiKey}`, "content-type": "application/json" },
-        body: neuronsQuery(withGql.gql.accountTag, utcDayStart(now), now),
-      },
-    };
+    const from = cfWindow(cf.plan, now).from;
+    const gql = (body: string): Endpoint => ({
+      url: cf.graphqlUrl,
+      init: { method: "POST", headers: { authorization: `Bearer ${cf.apiKey}`, "content-type": "application/json" }, body },
+    });
+    // neurons — только если Workers AI в цепочках: страница о нём молчит, если его нет
+    if (all.some((c) => c.name === "workers-ai")) out.cloudflare = gql(neuronsQuery(cf.accountTag, utcDayStart(now), now));
+    out.cf_workers = gql(workersQuery(cf.accountTag, from, now));
+    out.cf_d1 = gql(d1Query(cf.accountTag, from, now));
+    out.cf_queues = gql(queuesQuery(cf.accountTag, from, now));
   }
   return out;
 }
@@ -115,7 +132,7 @@ async function fetchAll(ctx: AppContext, now: number): Promise<{ fetched: Fetche
     }
   }
   const ep = endpoints(ctx);
-  const names = (["openrouter", "deepseek", "cloudflare"] as const).filter((n) => ep[n]);
+  const names = SOURCES.filter((n) => ep[n]);
   const got = await Promise.all(names.map((n) => getJson(ep[n]!, ep.keys)));
   const fetched: Fetched = Object.fromEntries(names.map((n, i) => [n, got[i]]));
   await setOpsState(ctx.db, CACHE_KEY, JSON.stringify(fetched), now);
@@ -123,15 +140,19 @@ async function fetchAll(ctx: AppContext, now: number): Promise<{ fetched: Fetche
 }
 
 /** Разбор ответа: неожиданный формат — ошибка провайдера, а не падение страницы. */
-function rowsOf(provider: string, got: Got | undefined, parse: (json: unknown) => QuotaRow[]): QuotaProbe {
+function rowsOf(provider: string, got: Got | undefined, parse: (json: unknown) => QuotaRow[], prefix = ""): QuotaProbe {
   if (!got) return { provider, rows: [] };
-  if (!got.ok) return { provider, rows: [], error: got.error };
+  const fail = (msg: string) => ({ provider, rows: [], error: prefix ? gqlError(prefix + msg) : msg });
+  if (!got.ok) return fail(got.error);
   try {
     return { provider, rows: parse(got.json) };
   } catch (e) {
-    return { provider, rows: [], error: String(e instanceof Error ? e.message : e).slice(0, 200) };
+    return fail(String(e instanceof Error ? e.message : e).slice(0, 200));
   }
 }
+
+/** Ошибка доступа GraphQL — с подсказкой, какое право дать токену. */
+const gqlError = (msg: string) => (/not authorized|authorization denied|permission/i.test(msg) ? msg + NO_ACCESS_HINT : msg);
 
 export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
   const now = ctx.clock.now();
@@ -160,23 +181,35 @@ export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
 
   if (has([...llm, ...stt], "workers-ai")) {
     const estimate = neuronsFromCost(usage.get("workers-ai")?.cost_utc ?? 0);
-    const cf = fetched.cloudflare;
+    const ai = fetched.cloudflare;
     let probe: QuotaProbe;
-    if (cf?.ok) {
+    if (ai?.ok) {
       try {
-        probe = { provider: "Workers AI", rows: [workersAiRow(parseNeurons(cf.json), "api", fetchedAt, `по журналу бота ≈ ${Math.round(estimate)}`)] };
+        probe = { provider: "Workers AI", rows: [workersAiRow(parseNeurons(ai.json), "api", fetchedAt, `по журналу бота ≈ ${Math.round(estimate)}`)] };
       } catch (e) {
         probe = {
           provider: "Workers AI",
           rows: [workersAiRow(estimate, "estimate", now, ESTIMATE_NOTE)],
-          error: `GraphQL: ${String(e instanceof Error ? e.message : e).slice(0, 160)}`,
+          error: gqlError(`GraphQL: ${String(e instanceof Error ? e.message : e).slice(0, 160)}`),
         };
       }
     } else {
-      probe = { provider: "Workers AI", rows: [workersAiRow(estimate, "estimate", now, ESTIMATE_NOTE)], ...(cf ? { error: `GraphQL: ${cf.error}` } : {}) };
+      probe = {
+        provider: "Workers AI",
+        rows: [workersAiRow(estimate, "estimate", now, ESTIMATE_NOTE)],
+        ...(ai ? { error: gqlError(`GraphQL: ${ai.error}`) } : {}),
+      };
     }
     probes.push(probe);
   }
+
+  // Платформа Cloudflare: Workers, D1, Queues — по строке ошибки на продукт
+  const cf = ctx.config.cloudflare;
+  if (cf) {
+    probes.push(rowsOf("Workers", fetched.cf_workers, (j) => workersRows(parseWorkers(j, cf.scriptName), cf.plan, cf.scriptName, fetchedAt), "GraphQL: "));
+    probes.push(rowsOf("D1", fetched.cf_d1, (j) => d1Rows(parseD1(j), cf.plan, fetchedAt), "GraphQL: "));
+    probes.push(rowsOf("Queues", fetched.cf_queues, (j) => queuesRows(parseQueues(j), cf.plan, fetchedAt), "GraphQL: "));
+  } else probes.push({ provider: "Workers, D1, Queues", rows: [], off: "аккаунт Cloudflare неизвестен: нет звена Workers AI с адресом api.cloudflare.com" });
 
   if (has(stt, "groq")) {
     const seen = headers.find((h) => h.provider === "groq");
@@ -189,7 +222,7 @@ export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
     probes.push({ provider: "Gemini", rows: [geminiRow(calls, now)] });
   } else probes.push({ provider: "Gemini", rows: [], off: "VOICE_CHAIN пуст (GEMINI_API_KEY не задан)" });
 
-  return { now, fetchedAt, cached, probes, headers };
+  return { now, fetchedAt, cached, probes, headers, cfPlan: cf?.plan ?? null };
 }
 
 /** Строки всех провайдеров — для алерта. */

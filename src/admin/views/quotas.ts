@@ -1,4 +1,4 @@
-// Панель «Квоты»: остатки у провайдеров LLM/STT/голоса (docs/admin-console.md, «Квоты»). Источник у каждой строки
+// Панель «Квоты»: остатки у провайдеров LLM/STT/голоса и платформы Cloudflare — Workers, D1, Queues (docs/admin-console.md, «Квоты»). Источник у каждой строки
 // свой — API, заголовки последнего вызова или оценка по журналу; ключей на странице нет (src/ops/quotas.ts).
 
 import type { QuotaReport } from "../../ops/quotas";
@@ -53,15 +53,25 @@ export function quotasBody(v: QuotaReport): string {
         .join("<br>")}</code>`,
     ),
   ]);
+  const plan =
+    v.cfPlan === null
+      ? ""
+      : `<p>Тариф Cloudflare Workers: <b>${v.cfPlan === "paid" ? "Paid" : "Free"}</b> — из конфигурации (<code>CF_WORKERS_PLAN</code> в wrangler.jsonc): API тариф не сообщает. ${
+          v.cfPlan === "paid"
+            ? "Лимиты — включённое в месяц (с 1-го числа UTC; цикл оплаты может начинаться с другого числа), сверх — платно."
+            : "Лимиты Workers, D1 и Queues — суточные, сброс в 00:00 UTC; превышение — отказ до сброса."
+        } Алерт — израсходовано больше 80%.</p>`;
   return `<h1>Квоты провайдеров</h1>
-<p class="muted">Остатки бесплатных квот и балансов. Квоту моделей страница не тратит: только бесплатные эндпоинты остатков, заголовки настоящих вызовов бота и наш журнал. Ответы API — ${v.cached ? "из кеша" : "запрошены"} ${esc(fmtAge(v.fetchedAt, v.now))} (кеш 1 мин). Жёлтым — меньше 20% остатка.</p>
+<p class="muted">Остатки бесплатных квот и балансов. Квоту моделей страница не тратит: только бесплатные эндпоинты остатков, GraphQL Analytics Cloudflare, заголовки настоящих вызовов бота и наш журнал. Ответы API — ${v.cached ? "из кеша" : "запрошены"} ${esc(fmtAge(v.fetchedAt, v.now))} (кеш 1 мин). Жёлтым — меньше 20% остатка.</p>
+${plan}
 ${table(["Провайдер", "Что", "Осталось", "Израсходовано", "Сброс", "Источник", "Примечание"], rows, "провайдеры не настроены")}
 <h2>Заголовки лимитов последних вызовов</h2>
 ${table(["Провайдер", "Когда", "Статус", "Заголовки"], headers, "вызовов с заголовками x-ratelimit-* ещё не было")}
 <h2>Где остатков не узнать</h2>
 <ul>
   <li><b>Gemini</b> — API остатка нет; дневной лимит модели на бесплатном тарифе виден только в AI Studio (Rate limits), сброс в 00:00 по Тихоокеанскому времени. Здесь — наш расход за эти сутки.</li>
-  <li><b>Workers AI</b> — точный расход neurons даёт только GraphQL Analytics (<code>aiInferenceAdaptiveGroups</code>), токену нужно право <i>Account Analytics: Read</i>; без него — оценка по журналу бота (без скриптов замеров и других Worker'ов аккаунта).</li>
+  <li><b>Workers AI, Workers, D1, Queues</b> — только GraphQL Analytics (<code>aiInferenceAdaptiveGroups</code>, <code>workersInvocationsAdaptive</code>, <code>d1AnalyticsAdaptiveGroups</code>/<code>d1StorageAdaptiveGroups</code>, <code>queueMessageOperationsAdaptiveGroups</code>); токену (<code>CF_ANALYTICS_TOKEN</code>, иначе <code>LLM_API_KEY</code>) нужно право <i>Account Analytics: Read</i>. Без него neurons — оценка по журналу бота (без скриптов замеров и других Worker'ов аккаунта), остальное — ошибка в строке. Данные аналитики запаздывают на минуты.</li>
+  <li><b>Cron Triggers</b> — счётчика нет: у нас 1 расписание (раз в минуту) из 5 на аккаунт Free; его вызовы входят в «Запросов» Workers.</li>
   <li><b>Groq</b> — эндпоинта остатка нет; суточные запросы — из заголовков последнего распознавания, секунды аудио — по журналу.</li>
   <li><b>Google Calendar API</b> — квота проекта (запросы в минуту на пользователя и на проект) видна только в Google Cloud Console; её превышение бот показывает как «Google просит подождать» (US-14).</li>
   <li><b>Telegram Bot API</b> — квоты нет, только ограничения частоты отправки (≈30 сообщений в секунду, 1 в секунду в один чат) без счётчика.</li>

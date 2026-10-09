@@ -15,6 +15,9 @@ interface __BaseEnv_Env {
 	STT_MODEL: "fake-whisper" | "@cf/openai/whisper-large-v3-turbo";
 	TEST_MODE: "true" | "false";
 	GOOGLE_PUSH_ENABLED: "true" | "false";
+	CF_WORKERS_PLAN: "free";
+	CF_GRAPHQL_URL?: "http://fakes:9100/cf/client/v4/graphql";
+	CF_ACCOUNT_ID?: "0123456789abcdef0123456789abcdef";
 	CLOUDFLARE_ACCOUNT_ID: string;
 	CLOUDFLARE_API_TOKEN: string;
 	TELEGRAM_BOT_TOKEN: string;
@@ -46,6 +49,9 @@ declare namespace Cloudflare {
 		STT_MODEL: "fake-whisper";
 		TEST_MODE: "true";
 		GOOGLE_PUSH_ENABLED: "true";
+		CF_WORKERS_PLAN: "free";
+		CF_GRAPHQL_URL: "http://fakes:9100/cf/client/v4/graphql";
+		CF_ACCOUNT_ID: "0123456789abcdef0123456789abcdef";
 		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		TELEGRAM_BOT_TOKEN: string;

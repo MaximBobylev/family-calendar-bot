@@ -3,6 +3,7 @@
 import { type KeyRing, keyRing } from "./crypto";
 import type { CostEstimates, UsageLimits } from "./limits";
 import type { LlmConfig } from "./nlu/llm";
+import { type CfPlan, cloudflareGraphql } from "./ops/quota-rules";
 import type { SttConfig } from "./stt/whisper";
 import type { VoiceConfig } from "./voice/understand";
 
@@ -42,7 +43,23 @@ export interface Config {
   vision: VoiceConfig[];
   limits: UsageLimits;
   costs: CostEstimates;
+  /** GraphQL Analytics Cloudflare для /admin/quotas (Workers AI, Workers, D1, Queues); null — аккаунт неизвестен. */
+  cloudflare: CloudflareAnalytics | null;
 }
+
+export interface CloudflareAnalytics {
+  graphqlUrl: string;
+  accountTag: string;
+  /** CF_ANALYTICS_TOKEN, иначе токен звена Workers AI (LLM_API_KEY): нужно право Account Analytics: Read. */
+  apiKey: string;
+  /** Тариф Workers (vars.CF_WORKERS_PLAN): через API его не узнать — по умолчанию Free. */
+  plan: CfPlan;
+  /** Имя нашего Worker'а в аналитике — `name` из wrangler.jsonc. */
+  scriptName: string;
+}
+
+/** `name` из wrangler.jsonc: так Worker называется в аналитике Workers (scriptName). */
+export const WORKER_SCRIPT_NAME = "calendar-assist-bot";
 
 /**
  * Лимиты вызовов на пользователя (tech-debt #4), скользящие час и сутки по usage_events. Превышение — вежливый
@@ -72,6 +89,13 @@ export function loadConfig(env: Env): Config {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  const llm = parseChain<LlmConfig>(env.LLM_CHAIN, "LLM_CHAIN") ?? [
+    { name: "workers-ai", baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL },
+  ];
+  // Тот же API-токен Cloudflare, что и для LLM
+  const stt = parseChain<SttConfig>(env.STT_CHAIN, "STT_CHAIN") ?? [
+    { name: "workers-ai", kind: "workers-ai", baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
+  ];
   return {
     telegramApiBase: env.TELEGRAM_API_BASE,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN,
@@ -90,16 +114,28 @@ export function loadConfig(env: Env): Config {
     testMode: env.TEST_MODE === "true",
     googlePushEnabled: env.GOOGLE_PUSH_ENABLED === "true",
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
-    llm: parseChain<LlmConfig>(env.LLM_CHAIN, "LLM_CHAIN") ?? [{ name: "workers-ai", baseUrl: env.LLM_BASE, apiKey: env.LLM_API_KEY, model: env.LLM_MODEL }],
-    // Тот же API-токен Cloudflare, что и для LLM
-    stt: parseChain<SttConfig>(env.STT_CHAIN, "STT_CHAIN") ?? [
-      { name: "workers-ai", kind: "workers-ai", baseUrl: env.STT_BASE, apiKey: env.LLM_API_KEY, model: env.STT_MODEL },
-    ],
+    llm,
+    stt,
     voice: parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? [],
     vision: (parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? []).filter((c) => c.kind === "gemini"),
     limits: USAGE_LIMITS,
     costs: COST_ESTIMATES,
+    cloudflare: cloudflareAnalytics(env, [...llm, ...stt]),
   };
+}
+
+/**
+ * Аккаунт и адрес GraphQL — из адреса звена Workers AI (…/accounts/<id>/ai); CF_GRAPHQL_URL и CF_ACCOUNT_ID их
+ * перекрывают (dev: фейк, ADR-0006). Токен — CF_ANALYTICS_TOKEN, иначе токен того же звена.
+ */
+function cloudflareAnalytics(env: Env, links: { name?: string; baseUrl: string; apiKey: string }[]): CloudflareAnalytics | null {
+  const ai = links.filter((c) => c.name === "workers-ai");
+  const derived = ai.map((c) => cloudflareGraphql(c.baseUrl)).find((g) => g !== null) ?? null;
+  const graphqlUrl = env.CF_GRAPHQL_URL?.trim() || derived?.url;
+  const accountTag = env.CF_ACCOUNT_ID?.trim() || derived?.accountTag;
+  const apiKey = env.CF_ANALYTICS_TOKEN?.trim() || ai[0]?.apiKey || env.LLM_API_KEY;
+  if (!graphqlUrl || !accountTag || !apiKey) return null;
+  return { graphqlUrl, accountTag, apiKey, plan: (env.CF_WORKERS_PLAN as string | undefined) === "paid" ? "paid" : "free", scriptName: WORKER_SCRIPT_NAME };
 }
 
 /** JSON-массив провайдеров из секрета (собирает scripts/deploy.ts). Битый или пустой — ошибка конфигурации, не тихий откат. */

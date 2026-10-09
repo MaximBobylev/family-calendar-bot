@@ -45,7 +45,10 @@
 //   GET  /__fake/vision/requests    — запросы чтения картинок: [{content, mimeType, caption?}]
 //   GET  /llm/v1/key                — OpenRouter: лимиты ключа (звено «openrouter» цепочки LLM в dev), панель «Квоты»
 //   GET  /llm-backup/user/balance   — DeepSeek: баланс (звено «deepseek»)
-//   POST /__fake/quotas             — {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?}:
+//   POST /cf/client/v4/graphql      — GraphQL Analytics Cloudflare (CF_GRAPHQL_URL в dev): набор — по имени в запросе
+//                                     (aiInferenceAdaptiveGroups, workersInvocationsAdaptive, d1…, queueMessageOperations…)
+//   POST /__fake/quotas             — {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?,
+//                                     cf_ai? | cf_workers? | cf_d1? | cf_queues?: содержимое accounts[0], cf_error?: текст ошибки GraphQL}:
 //                                     ответы эндпоинтов остатков (status ≠ 0 — ошибка); сброс — к значениям по умолчанию
 //   GET  /__fake/quotas/requests    — запросы к эндпоинтам остатков: [{via, auth}] (проверка кеша и ключа)
 //   Ответы Groq (stt-openai) несут x-ratelimit-*-requests; LLM в outage 429 — x-ratelimit-limit/remaining/reset
@@ -144,6 +147,35 @@ const QUOTAS_DEFAULT = {
   deepseek: { is_available: true, balance_infos: [{ currency: "USD", total_balance: "4.20", granted_balance: "0.00", topped_up_balance: "4.20" }] } as unknown,
   openrouter_status: 0,
   deepseek_status: 0,
+  // GraphQL Analytics: содержимое viewer.accounts[0] по набору
+  cf_ai: {
+    aiInferenceAdaptiveGroups: [
+      { dimensions: { modelId: "@cf/qwen/qwen3-30b-a3b-fp8" }, sum: { totalNeurons: 1200 } },
+      { dimensions: { modelId: "@cf/openai/whisper-large-v3-turbo" }, sum: { totalNeurons: 34.4 } },
+    ],
+  } as unknown,
+  cf_workers: {
+    workersInvocationsAdaptive: [
+      {
+        dimensions: { scriptName: "calendar-assist-bot" },
+        sum: { requests: 3000, errors: 3, subrequests: 4500 },
+        quantiles: { cpuTimeP50: 1800, cpuTimeP99: 6500 },
+      },
+      { dimensions: { scriptName: "other-worker" }, sum: { requests: 500, errors: 0, subrequests: 0 }, quantiles: { cpuTimeP50: 900, cpuTimeP99: 2000 } },
+    ],
+  } as unknown,
+  cf_d1: {
+    d1AnalyticsAdaptiveGroups: [{ dimensions: { databaseId: "db-1" }, sum: { rowsRead: 250000, rowsWritten: 12000, readQueries: 4000, writeQueries: 1500 } }],
+    d1StorageAdaptiveGroups: [{ dimensions: { databaseId: "db-1" }, max: { databaseSizeBytes: 12_500_000 } }],
+  } as unknown,
+  cf_queues: {
+    queueMessageOperationsAdaptiveGroups: [
+      { dimensions: { actionType: "WriteMessage" }, sum: { billableOperations: 700 } },
+      { dimensions: { actionType: "ReadMessage" }, sum: { billableOperations: 700 } },
+      { dimensions: { actionType: "DeleteMessage" }, sum: { billableOperations: 700 } },
+    ],
+  } as unknown,
+  cf_error: "",
 };
 let quotas = structuredClone(QUOTAS_DEFAULT);
 let quotaRequests: { via: string; auth: string }[] = [];
@@ -570,6 +602,26 @@ const server = createServer(async (req, res) => {
       const status = openrouter ? quotas.openrouter_status : quotas.deepseek_status;
       if (status) return send(res, status, { error: { message: "fake quota endpoint outage" } });
       return send(res, 200, openrouter ? quotas.openrouter : quotas.deepseek);
+    }
+
+    if (url.pathname === "/cf/client/v4/graphql" && req.method === "POST") {
+      const body = (await readJson(req)) as { query?: string };
+      const q = body.query ?? "";
+      const kind = q.includes("aiInferenceAdaptiveGroups")
+        ? "ai"
+        : q.includes("workersInvocationsAdaptive")
+          ? "workers"
+          : q.includes("d1AnalyticsAdaptiveGroups")
+            ? "d1"
+            : q.includes("queueMessageOperationsAdaptiveGroups")
+              ? "queues"
+              : "unknown";
+      quotaRequests.push({ via: `cloudflare:${kind}`, auth: req.headers.authorization ?? "" });
+      if (req.headers.authorization !== "Bearer test-llm-key") return send(res, 200, { data: null, errors: [{ message: "fake: authentication error" }] });
+      // Как настоящий API: ошибка доступа — HTTP 200 с errors
+      if (quotas.cf_error || kind === "unknown") return send(res, 200, { data: null, errors: [{ message: quotas.cf_error || "fake: unknown dataset" }] });
+      const acc = { ai: quotas.cf_ai, workers: quotas.cf_workers, d1: quotas.cf_d1, queues: quotas.cf_queues }[kind];
+      return send(res, 200, { data: { viewer: { accounts: [acc] } }, errors: null });
     }
 
     // --- LLM (OpenAI-совместимый) ---

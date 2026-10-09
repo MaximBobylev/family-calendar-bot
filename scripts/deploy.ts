@@ -158,6 +158,10 @@ if (oldKeys) secrets.TOKEN_ENCRYPTION_KEYS_OLD = oldKeys;
 // Алерты (tech-debt #7): свой чат — только если задан; иначе бот шлёт первому из ALLOWED_TELEGRAM_IDS
 const opsChat = env.OPS_CHAT_ID?.trim();
 if (opsChat) secrets.OPS_CHAT_ID = opsChat;
+// Панель «Квоты» (Workers, D1, Queues, neurons): токен только с Account Analytics: Read — если задан; иначе Worker
+// пробует LLM_API_KEY. Токен деплоя (CLOUDFLARE_API_TOKEN) Worker'у не передаём: у него права на правку
+const analyticsToken = env.CF_ANALYTICS_TOKEN?.trim();
+if (analyticsToken) secrets.CF_ANALYTICS_TOKEN = analyticsToken;
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
   const v = env[name]?.trim();
   if (v) secrets[name] = v;

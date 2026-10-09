@@ -1,11 +1,32 @@
 // Живая проверка эндпоинтов остатков квот (панель «Квоты», src/ops/quota-rules.ts) — ручной запуск, не тест:
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/probe-quotas.ts
-// Только бесплатные эндпоинты: OpenRouter /key, DeepSeek /user/balance, GraphQL Cloudflare — квоту моделей не тратит.
+// Только бесплатные эндпоинты: OpenRouter /key, DeepSeek /user/balance, GraphQL Cloudflare (Workers AI, Workers, D1,
+// Queues) — квоту моделей не тратит. CF_WORKERS_PLAN=paid — лимиты Paid (по умолчанию Free).
 // Печатает разобранные числа; ключи и метки ключей — никогда.
-import { cloudflareGraphql, neuronsQuery, parseDeepSeekBalance, parseNeurons, parseOpenRouterKey, type QuotaRow, utcDayStart } from "../src/ops/quota-rules";
+import {
+  type CfPlan,
+  cfWindow,
+  cloudflareGraphql,
+  d1Query,
+  d1Rows,
+  neuronsQuery,
+  parseD1,
+  parseDeepSeekBalance,
+  parseNeurons,
+  parseOpenRouterKey,
+  parseQueues,
+  parseWorkers,
+  type QuotaRow,
+  queuesQuery,
+  queuesRows,
+  utcDayStart,
+  workersQuery,
+  workersRows,
+} from "../src/ops/quota-rules";
 
 const env = process.env;
-const keys = ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "LLM_API_KEY", "CLOUDFLARE_API_TOKEN"].map((k) => env[k]?.trim() ?? "").filter((k) => k.length >= 4);
+const TOKENS = ["CF_ANALYTICS_TOKEN", "LLM_API_KEY", "CLOUDFLARE_API_TOKEN"];
+const keys = ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", ...TOKENS].map((k) => env[k]?.trim() ?? "").filter((k) => k.length >= 4);
 const scrub = (s: string) => keys.reduce((t, k) => t.split(k).join("<key>"), s).slice(0, 300);
 const now = Date.now(); // скрипт, не логика бота: внедряемых часов здесь нет
 
@@ -36,12 +57,22 @@ const ds = env.DEEPSEEK_API_KEY?.trim();
 if (ds) await probe("DeepSeek /user/balance", "https://api.deepseek.com/user/balance", bearer(ds), (j) => parseDeepSeekBalance(j, now));
 else console.log("DeepSeek: DEEPSEEK_API_KEY не задан");
 
-// GraphQL — тем же токеном, что у Worker'а (LLM_API_KEY): так видно, хватает ли ему права Account Analytics: Read
+// GraphQL — теми токенами, что может получить Worker (CF_ANALYTICS_TOKEN, иначе LLM_API_KEY), и токеном деплоя для
+// сравнения: так видно, у какого из них есть право Account Analytics: Read
 const account = env.CLOUDFLARE_ACCOUNT_ID?.trim();
 const gql = account ? cloudflareGraphql(`https://api.cloudflare.com/client/v4/accounts/${account}/ai`) : null;
-for (const tokenName of ["LLM_API_KEY", "CLOUDFLARE_API_TOKEN"]) {
+const plan: CfPlan = env.CF_WORKERS_PLAN === "paid" ? "paid" : "free";
+const win = cfWindow(plan, now);
+const SCRIPT = "calendar-assist-bot";
+for (const tokenName of TOKENS) {
   const token = env[tokenName]?.trim();
   if (!gql || !token) continue;
+  const post = (body: string): RequestInit => ({ method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body });
+  await probe(`Workers GraphQL (${tokenName})`, gql.url, post(workersQuery(gql.accountTag, win.from, now)), (j) =>
+    workersRows(parseWorkers(j, SCRIPT), plan, SCRIPT, now),
+  );
+  await probe(`D1 GraphQL (${tokenName})`, gql.url, post(d1Query(gql.accountTag, win.from, now)), (j) => d1Rows(parseD1(j), plan, now));
+  await probe(`Queues GraphQL (${tokenName})`, gql.url, post(queuesQuery(gql.accountTag, win.from, now)), (j) => queuesRows(parseQueues(j), plan, now));
   await probe(
     `Workers AI GraphQL (${tokenName})`,
     gql.url,

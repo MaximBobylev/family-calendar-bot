@@ -1,4 +1,5 @@
-// Остатки квот провайдеров (docs/admin-console.md, «Квоты»): чистые функции — ответ API, заголовки лимитов
+// Остатки квот провайдеров и платформы Cloudflare (docs/admin-console.md, «Квоты»): чистые функции — ответ API,
+// GraphQL Analytics (Workers AI, Workers, D1, Queues), заголовки лимитов
 // последнего вызова или журнал → строки панели и алерта. Ключей и их меток (label) здесь нет и быть не должно.
 
 import { localToUtc, utcToLocal } from "../dates/calendar";
@@ -177,16 +178,25 @@ export function neuronsQuery(accountTag: string, from: number, to: number): stri
   });
 }
 
-/** Ответ GraphQL → сумма neurons. Ошибка доступа (у токена нет Account Analytics: Read) — исключение с текстом. */
-export function parseNeurons(json: unknown): number {
-  const j = json as {
-    data?: { viewer?: { accounts?: { aiInferenceAdaptiveGroups?: { sum?: { totalNeurons?: unknown } }[] }[] } };
-    errors?: { message?: string }[];
-  } | null;
+/**
+ * Первый аккаунт из ответа GraphQL Analytics. errors (нет права Account Analytics: Read, неизвестное поле) — исключение
+ * с текстом первой ошибки: так строка панели покажет причину.
+ */
+export function gqlAccount(json: unknown): Record<string, unknown> {
+  const j = json as { data?: { viewer?: { accounts?: Record<string, unknown>[] } } | null; errors?: { message?: string }[] | null } | null;
   if (j?.errors?.length) throw new Error(String(j.errors[0]?.message ?? "graphql error").slice(0, 200));
   const accounts = j?.data?.viewer?.accounts;
   if (!Array.isArray(accounts)) throw new Error("неожиданный ответ GraphQL");
-  return (accounts[0]?.aiInferenceAdaptiveGroups ?? []).reduce((a, g) => a + (num(g.sum?.totalNeurons) ?? 0), 0);
+  return accounts[0] ?? {};
+}
+
+type Groups = { dimensions?: Record<string, unknown>; sum?: Record<string, unknown>; max?: Record<string, unknown>; quantiles?: Record<string, unknown> }[];
+const groups = (acc: Record<string, unknown>, name: string): Groups => (Array.isArray(acc[name]) ? (acc[name] as Groups) : []);
+const sumOf = (gs: Groups, part: "sum" | "max", field: string) => gs.reduce((a, g) => a + (num(g[part]?.[field]) ?? 0), 0);
+
+/** Ответ GraphQL → сумма neurons. Ошибка доступа (у токена нет Account Analytics: Read) — исключение с текстом. */
+export function parseNeurons(json: unknown): number {
+  return sumOf(groups(gqlAccount(json), "aiInferenceAdaptiveGroups"), "sum", "totalNeurons");
 }
 
 /** Оценка neurons по журналу: стоимость вызовов Workers AI считается по прайсу Workers AI (config.ts COST_ESTIMATES). */
@@ -209,6 +219,248 @@ export function workersAiRow(usedNeurons: number, source: QuotaSource, now: numb
     alert: used > WORKERS_AI_FREE_NEURONS * WORKERS_AI_ALERT_SHARE,
     ...(note ? { note } : {}),
   };
+}
+
+// --- Платформа Cloudflare: Workers, D1, Queues (GraphQL Analytics) ---------------------------------------------
+
+/**
+ * Тариф аккаунта Workers. Через GraphQL его не узнать (а REST /subscriptions требует права Billing) — задаётся
+ * в wrangler.jsonc (vars.CF_WORKERS_PLAN), по умолчанию Free.
+ */
+export type CfPlan = "free" | "paid";
+
+/**
+ * Лимиты тарифов (developers.cloudflare.com, 2026-10): Free — в сутки, сброс 00:00 UTC; Paid — включено в месяц
+ * (сверх — платно, не отказ). Workers Paid: 10 млн запросов/мес; D1 Paid: 25 млрд чтений и 50 млн записей строк/мес;
+ * Queues: Free 10 000 операций/сутки, Paid 1 млн/мес. Хранилище D1 — 5 ГБ на обоих (на Paid — включено).
+ */
+export const CF_LIMITS = {
+  free: { requests: 100_000, cpuMs: 10, d1Read: 5_000_000, d1Write: 100_000, d1Bytes: 5e9, queueOps: 10_000 },
+  paid: { requests: 10_000_000, cpuMs: 30_000, d1Read: 25_000_000_000, d1Write: 50_000_000, d1Bytes: 5e9, queueOps: 1_000_000 },
+} as const satisfies Record<CfPlan, Record<string, number>>;
+
+/** Израсходовано больше этой доли суточного (Paid — месячного включённого) — алерт quota_low. */
+export const CF_ALERT_SHARE = 0.8;
+
+const MB = 1_000_000;
+
+/** Окно счёта: Free — сутки UTC; Paid — календарный месяц UTC (цикл оплаты может начинаться с другого числа). */
+export function cfWindow(plan: CfPlan, now: number): { from: number; reset: number; label: string } {
+  if (plan === "free") return { from: utcDayStart(now), reset: nextUtcMidnight(now), label: "в сутки" };
+  const d = new Date(now);
+  return { from: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1), reset: Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1), label: "в месяц (включено)" };
+}
+
+const isoDate = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+/** Workers: запросы, ошибки и подзапросы по скриптам аккаунта; CPU p50/p99 (мкс) — по каждому скрипту. */
+export function workersQuery(accountTag: string, from: number, to: number): string {
+  return JSON.stringify({
+    query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: {accountTag: $a}) {
+      workersInvocationsAdaptive(limit: 1000, filter: {datetime_geq: $from, datetime_leq: $to}) {
+        dimensions { scriptName } sum { requests errors subrequests } quantiles { cpuTimeP50 cpuTimeP99 } } } } }`,
+    variables: { a: accountTag, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
+  });
+}
+
+/** D1: строки и запросы по базам за окно; размер баз — максимум за последние сутки (метрика дневная). */
+export function d1Query(accountTag: string, from: number, to: number): string {
+  return JSON.stringify({
+    query: `query($a: String!, $from: Date!, $to: Date!, $sfrom: Date!) { viewer { accounts(filter: {accountTag: $a}) {
+      d1AnalyticsAdaptiveGroups(limit: 1000, filter: {date_geq: $from, date_leq: $to}) {
+        dimensions { databaseId } sum { rowsRead rowsWritten readQueries writeQueries } }
+      d1StorageAdaptiveGroups(limit: 1000, filter: {date_geq: $sfrom, date_leq: $to}) { dimensions { databaseId } max { databaseSizeBytes } } } } }`,
+    variables: { a: accountTag, from: isoDate(from), to: isoDate(to), sfrom: isoDate(to - DAY_MS) },
+  });
+}
+
+/** Queues: оплачиваемые операции (запись, чтение, удаление — по 64 КБ; повтор — ещё чтение) по типу. */
+export function queuesQuery(accountTag: string, from: number, to: number): string {
+  return JSON.stringify({
+    query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: {accountTag: $a}) {
+      queueMessageOperationsAdaptiveGroups(limit: 1000, filter: {datetime_geq: $from, datetime_leq: $to}) {
+        dimensions { actionType } sum { billableOperations } } } } }`,
+    variables: { a: accountTag, from: new Date(from).toISOString(), to: new Date(to).toISOString() },
+  });
+}
+
+export interface WorkersStats {
+  requests: number;
+  errors: number;
+  scripts: number;
+  /** Наш Worker; null — запросов за окно не было. */
+  ours: { requests: number; errors: number; subrequests: number; cpuP50Ms: number | null; cpuP99Ms: number | null } | null;
+}
+
+export function parseWorkers(json: unknown, scriptName: string): WorkersStats {
+  const gs = groups(gqlAccount(json), "workersInvocationsAdaptive");
+  const mine = gs.filter((g) => g.dimensions?.scriptName === scriptName);
+  const ms = (v: unknown) => {
+    const n = num(v);
+    return n === null ? null : n / 1000;
+  };
+  const maxQ = (field: string) =>
+    mine.reduce<number | null>((a, g) => {
+      const v = ms(g.quantiles?.[field]);
+      return v === null ? a : Math.max(a ?? 0, v);
+    }, null);
+  return {
+    requests: sumOf(gs, "sum", "requests"),
+    errors: sumOf(gs, "sum", "errors"),
+    scripts: new Set(gs.map((g) => String(g.dimensions?.scriptName ?? "?"))).size,
+    ours: mine.length
+      ? {
+          requests: sumOf(mine, "sum", "requests"),
+          errors: sumOf(mine, "sum", "errors"),
+          subrequests: sumOf(mine, "sum", "subrequests"),
+          cpuP50Ms: maxQ("cpuTimeP50"),
+          cpuP99Ms: maxQ("cpuTimeP99"),
+        }
+      : null,
+  };
+}
+
+export interface D1Stats {
+  rowsRead: number;
+  rowsWritten: number;
+  queries: number;
+  databases: number;
+  /** Сумма размеров баз; null — данных о хранилище нет. */
+  bytes: number | null;
+}
+
+export function parseD1(json: unknown): D1Stats {
+  const acc = gqlAccount(json);
+  const a = groups(acc, "d1AnalyticsAdaptiveGroups");
+  const st = groups(acc, "d1StorageAdaptiveGroups");
+  // Размер — максимум по каждой базе за окно, затем сумма баз
+  const size = new Map<string, number>();
+  for (const g of st) {
+    const id = String(g.dimensions?.databaseId ?? "?");
+    size.set(id, Math.max(size.get(id) ?? 0, num(g.max?.databaseSizeBytes) ?? 0));
+  }
+  return {
+    rowsRead: sumOf(a, "sum", "rowsRead"),
+    rowsWritten: sumOf(a, "sum", "rowsWritten"),
+    queries: sumOf(a, "sum", "readQueries") + sumOf(a, "sum", "writeQueries"),
+    databases: new Set([...a, ...st].map((g) => String(g.dimensions?.databaseId ?? "?"))).size,
+    bytes: st.length ? [...size.values()].reduce((x, y) => x + y, 0) : null,
+  };
+}
+
+export interface QueueStats {
+  ops: number;
+  byAction: Record<string, number>;
+}
+
+export function parseQueues(json: unknown): QueueStats {
+  const gs = groups(gqlAccount(json), "queueMessageOperationsAdaptiveGroups");
+  const byAction: Record<string, number> = {};
+  for (const g of gs) {
+    const k = String(g.dimensions?.actionType ?? "?");
+    byAction[k] = (byAction[k] ?? 0) + (num(g.sum?.billableOperations) ?? 0);
+  }
+  return { ops: Object.values(byAction).reduce((a, b) => a + b, 0), byAction };
+}
+
+const planNote = (plan: CfPlan) => (plan === "free" ? "тариф Workers Free" : "тариф Workers Paid: сверх включённого — платно");
+
+/** Строка «израсходовано из лимита» платформы: алерт — больше 80%. */
+function usageRow(provider: string, metric: string, used: number, limit: number, unit: string, resetAt: number | null, at: number, note: string): QuotaRow {
+  const left = Math.max(0, limit - used);
+  return {
+    provider,
+    metric,
+    remaining: left,
+    limit,
+    used,
+    unit,
+    resetAt,
+    source: "api",
+    at,
+    level: shareLevel(left, limit),
+    alert: used > limit * CF_ALERT_SHARE,
+    note,
+  };
+}
+
+const pct = (part: number, whole: number) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : "0%");
+
+export function workersRows(s: WorkersStats, plan: CfPlan, scriptName: string, at: number): QuotaRow[] {
+  const L = CF_LIMITS[plan];
+  const w = cfWindow(plan, at);
+  const ours = s.ours
+    ? `${scriptName}: ${s.ours.requests} (ошибок ${s.ours.errors}, ${pct(s.ours.errors, s.ours.requests)}; подзапросов ${s.ours.subrequests})`
+    : `${scriptName}: запросов не было`;
+  const rows = [
+    usageRow(
+      "Workers",
+      `Запросов ${w.label} (аккаунт, все Worker'ы)`,
+      s.requests,
+      L.requests,
+      "запр.",
+      w.reset,
+      at,
+      `${planNote(plan)}; Worker'ов: ${s.scripts}, ошибок всего ${s.errors}; ${ours}. Считаются и cron, и очередь`,
+    ),
+  ];
+  const p99 = s.ours?.cpuP99Ms ?? null;
+  if (p99 !== null) {
+    // Лимит CPU — на один вызов: «осталось» — запас p99 до лимита. Выше лимита — жёлтый, не красный: Cloudflare
+    // допускает всплески (2026-10-09 на Free p99 25.8 мс при 0 ошибок); оборванные вызовы видны в ошибках
+    const left = Math.max(0, L.cpuMs - p99);
+    const level = shareLevel(left, L.cpuMs);
+    rows.push({
+      provider: "Workers",
+      metric: `CPU на вызов, p99 (${scriptName})`,
+      remaining: Math.round(left * 10) / 10,
+      limit: L.cpuMs,
+      used: Math.round(p99 * 10) / 10,
+      unit: "мс",
+      resetAt: null,
+      source: "api",
+      at,
+      level: level === "crit" ? "warn" : level,
+      note: `p50 ${s.ours?.cpuP50Ms === null || s.ours?.cpuP50Ms === undefined ? "?" : s.ours.cpuP50Ms.toFixed(1)} мс; лимит — на один вызов (${plan === "free" ? "Free: 10 мс" : "Paid: 30 с по умолчанию"}), ожидание сети не считается`,
+    });
+  }
+  return rows;
+}
+
+export function d1Rows(s: D1Stats, plan: CfPlan, at: number): QuotaRow[] {
+  const L = CF_LIMITS[plan];
+  const w = cfWindow(plan, at);
+  const note = `${planNote(plan)}; баз: ${s.databases}, запросов ${s.queries}; превышение на Free — запросы к D1 отклоняются до 00:00 UTC`;
+  const rows = [
+    usageRow("D1", `Строк прочитано ${w.label} (аккаунт)`, s.rowsRead, L.d1Read, "строк", w.reset, at, note),
+    usageRow("D1", `Строк записано ${w.label} (аккаунт)`, s.rowsWritten, L.d1Write, "строк", w.reset, at, note),
+  ];
+  if (s.bytes !== null) {
+    const usedMb = Math.round((s.bytes / MB) * 10) / 10;
+    const limitMb = Math.round(L.d1Bytes / MB);
+    rows.push({ ...usageRow("D1", "Хранилище (все базы)", usedMb, limitMb, "МБ", null, at, "размер баз за последние сутки; 5 ГБ на аккаунт"), alert: false });
+  }
+  return rows;
+}
+
+export function queuesRows(s: QueueStats, plan: CfPlan, at: number): QuotaRow[] {
+  const L = CF_LIMITS[plan];
+  const w = cfWindow(plan, at);
+  const parts = Object.entries(s.byAction)
+    .map(([k, v]) => `${k} ${v}`)
+    .join(", ");
+  return [
+    usageRow(
+      "Queues",
+      `Операций ${w.label} (аккаунт)`,
+      s.ops,
+      L.queueOps,
+      "опер.",
+      w.reset,
+      at,
+      `${planNote(plan)}; ${parts || "операций не было"}; сообщение = запись + чтение + удаление, повтор — ещё чтение`,
+    ),
+  ];
 }
 
 // --- Заголовки лимитов (Groq и др.) ---------------------------------------------------------------------------
