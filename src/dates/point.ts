@@ -120,6 +120,13 @@ export function readClockTime(
         m = next.v;
         n++;
       }
+      // «в 18 часов 30 минут», «в 7 ч 15 мин утра» — минуты словом после часов (афиши, tech-debt #28)
+      const mt = tokens[i + n + 1];
+      if (m === 0 && HOUR_WORDS.has(word(tokens[i + n]) ?? "") && mt?.t === "num" && (mt.form === "digit" || mt.form === "card") && mt.v <= 59 &&
+        UNITS.get(word(tokens[i + n + 2]) ?? "") === "minute") {
+        const tail = readMeridiemTail(tokens, i + n + 3);
+        return { time: checkTime({ h: tok.v, m: mt.v, ...(tail.mer ? { mer: tail.mer } : {}) }), n: n + 3 + tail.n };
+      }
       const tail = readMeridiemTail(tokens, i + n);
       if (!context && !tail.mer && tail.n === 0) return null;
       return { time: checkTime({ h: tok.v, m, ...(tail.mer ? { mer: tail.mer } : {}) }), n: n + tail.n };

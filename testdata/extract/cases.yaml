@@ -95,3 +95,10 @@ cases:
   - { kind: point, text: "Завтра в 9 стендап по Зуму", expect: { point: "Завтра в 9" } }
   - { kind: point, text: "Созвон в 15 по проекту", expect: { point: "в 15" } }
   - { kind: point, text: "Встреча в 10 по Ленинградскому проспекту", expect: { point: "в 10" } }
+  # Вёрстка афиш (tech-debt #28): дни диапазоном перед месяцем — не время; порядковое в адресе — не число месяца
+  - { kind: point, text: "Выставка 16–28 июня 2026", expect: {} }
+  - { kind: point, text: "6-20 JULY Gloucester Cathedral", expect: {} }
+  - { kind: point, text: "First Avenue & 7th Street Entry", expect: {} }
+  - { kind: point, text: "Party on the 7th floor at 5pm", expect: { point: "at 5pm" } }
+  - { kind: point, text: "Начало в 18 часов 30 минут", expect: { point: "в 18 часов 30 минут" } }
+  - { kind: point, text: "Встреча в 9-15 у входа", expect: { point: "в 9-15" } }

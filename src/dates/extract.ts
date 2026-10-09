@@ -4,7 +4,7 @@
 // Незнакомое слово («с Петей», «банк») обрывает кусок — названия в даты не попадают.
 
 import { parseDateFragment } from "./index";
-import { FILLERS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
+import { FILLERS, MONTHS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
 import type { ParseResult, ValueKind } from "./types";
 
 export interface ExtractedSpans {
@@ -32,6 +32,15 @@ const isUsable = (r: ParseResult) => !("error" in r) || r.error === "in_past";
 const NEGATION = /^(не|not)$/i;
 /** Порядковое перед днём недели: «в первый понедельник ноября», «last Friday of the month» — парсер этого не знает. */
 const ORDINAL = /^(перв|втор|трет|четв[её]рт|пят(ый|ая|ую|ое|ой)$|последн|first$|second$|third$|fourth$|fifth$|last$)/i;
+/** «16–28 июня», «6-20 JULY» — дни месяца диапазоном, а не время 16:28 (вёрстка афиш, tech-debt #28). */
+const DAY_SPAN = /^\d{1,2}\s*[–—-]\s*\d{1,2}$/;
+/** «7TH STREET», «2nd floor» — порядковое в адресе, а не число месяца. */
+const ADDRESS_ORDINAL = /^\d{1,3}(st|nd|rd|th)$/i;
+const ADDRESS_WORDS = /^(street|st|avenue|ave|av|floor|fl|road|rd|boulevard|blvd|lane|ln|place|pl|row|grade|precinct|district)$/i;
+
+const notEventDate = (fragment: string, last: string, after: string, len: number) =>
+  (len === 1 && DAY_SPAN.test(fragment) && MONTHS.has(after.toLowerCase())) || (ADDRESS_ORDINAL.test(last) && ADDRESS_WORDS.test(after));
+
 /** «через неделю после дня рождения» — сдвиг от неизвестного события, а не от сегодня. */
 const RELATIVE_START = /^(через|спустя|in)$/i;
 const ANCHOR_AFTER = /^(после|after|before)$/i;
@@ -92,7 +101,8 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
         const after = ws[j] ?? "";
         if (kind === "point" && ORDINAL.test(before) && WEEKDAYS.has(ws[i]!.toLowerCase())) unsure = true;
         else if (kind === "point" && RELATIVE_START.test(ws[i]!) && ANCHOR_AFTER.test(after)) unsure = true;
-        else if (!NEGATION.test(before)) {
+        // Отрицаемый кусок, дни диапазоном перед месяцем, порядковое в адресе — не дата события: слова съедаем молча
+        else if (!NEGATION.test(before) && !(kind === "point" && notEventDate(fragment, ws[j - 1]!, after, j - i))) {
           points.push(fragment);
           const zone = kind === "point" ? unknownZoneAt(ws, j) : undefined;
           if (zone) {

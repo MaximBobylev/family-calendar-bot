@@ -71,11 +71,12 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
   const title = intent?.title ?? heuristicTitle(dates.sentence, dates.fragments, location);
-  // Шаг 5 ревью дат: дата — из структуры модели (она видит весь текст и отличает дату события от прочих), наш парсер
-  // проверяет; расходятся — оба кнопками. Пересланное — модель первой; фото — наш разбор дословного текста первым:
-  // мультимодальная модель «исправляет» время (синтетика голоса 2026-10-05). Нет структуры — как раньше, `start`
+  // Шаг 5 ревью дат: дата — из структуры модели (она видит весь текст и вёрстку: дату в клетке календаря, «вечера»
+  // отдельной строкой, «16–28 июня» — не время), наш парсер проверяет; расходятся — оба кнопками, модель первой.
+  // Фото — тоже: замер 41 картинки (2026-10-09, tech-debt #28) — 28/33 против 24/33 с нашим разбором первым, без
+  // регрессий (и у Gemini на 12 синтетических). Нет структуры — как раньше, `start` (наш кусок первым)
   const llm = intent ? { start: intent.start, ...(intent.when ? { when: intent.when } : {}) } : {};
-  const check = llmDateCheck(src.text, dates.point, llm, parseLocal(localNow), tz, src.useLlm);
+  const check = llmDateCheck(src.text, dates.point, llm, parseLocal(localNow), tz, true);
   const source = src.useLlm ? "forward" : "image";
   log("date_check", { source, llm: check.llm, agreement: check.agreement });
   const start = check.pick;

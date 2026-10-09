@@ -150,3 +150,18 @@
           args: { title: "Шахматный клуб", start: "первый понедельник ноября в 17:00", when: { day: { type: nth_weekday, n: 1, weekday: MO, month: 11 }, time: { hour: 17, minute: 0 } } }
     - expect_telegram:
         - { text_contains: ["Создать событие?", "<b>Шахматный клуб</b>", "пн, 2 ноября, 17:00–18:00"] }
+
+- id: photo-model-date-first-when-parser-differs
+  story: US-66
+  steps:
+    - *setup
+    # tech-debt #28: пометка в клетке 21 настенного календаря — в тексте только «19:00 родит. собр.», день видит лишь
+    # модель (структура `when`). Для фото дата модели первой, наш вариант (сегодня в 19:00) — вторым (замер 2026-10-09)
+    - photo:
+        from: 1001
+        content: "img-wall-calendar"
+        seen:
+          text: "ОКТЯБРЬ 2026\n19:00 родит. собр."
+          args: { title: "Родительское собрание", start: "21 октября 19:00", when: { day: { type: date, day: 21, month: 10 }, time: { hour: 19, minute: 0 } } }
+    - expect_telegram:
+        - { text_contains: ["Когда именно?", "<b>Родительское собрание</b>"], buttons: ["ср, 21 октября, 19:00–20:00", "ср, 7 октября, 19:00–20:00", "Отмена"] }

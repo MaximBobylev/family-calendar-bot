@@ -216,6 +216,8 @@ interface Result {
   /** Карточка: событие предложено (create_event и есть видимый текст). */
   card?: boolean;
   start?: string | null;
+  /** Начало, если первой — дата модели (llmFirst). */
+  llmFirstStart?: string | null;
   /** Начало по полю start от модели (справочно: прод берёт дату из текста). */
   modelStart?: string | null;
   title?: string;
@@ -239,7 +241,9 @@ function grade(img: Img, r: Result): Result {
   const ours = resolvePoint(pick.startText, c);
   const alt = pick.altWhen ? firstOf(resolveDateStructure(pick.altWhen, "point", parseLocal(c.now), c.tz)) : resolvePoint(pick.altStartText, c);
   const start = !ours?.includes("T") && alt?.includes("T") ? alt : ours;
-  const out: Result = { ...r, card, start, modelStart: resolvePoint(a.start, c), title, place };
+  // Если первой ставить дату модели (llmFirst, как у пересланного): структура/start модели, нет — наш кусок
+  const llmFirstStart = alt && alt !== "past" ? alt : ours;
+  const out: Result = { ...r, card, start, llmFirstStart, modelStart: resolvePoint(a.start, c), title, place };
   // Не-событие: верно, если карточки нет или в ней нет даты (бот спросит «когда?» — мягкая ошибка, считаем неверным)
   out.eventOk = img.event ? card : !card;
   if (img.event && card) {
@@ -267,8 +271,10 @@ const q = (xs: number[], p: number) => {
   return (v[Math.min(v.length - 1, Math.ceil(p * v.length) - 1)]! / 1000).toFixed(1);
 };
 function summary(rs: Result[]): void {
-  console.log("| Модель | картинок | событие верно | дата/время (наш парсер) | дата по start модели | название | место | p50 / p95, с | ошибок |");
-  console.log("|---|---|---|---|---|---|---|---|---|");
+  console.log(
+    "| Модель | картинок | событие верно | дата/время (наш парсер) | дата, модель первой | дата по start модели | название | место | p50 / p95, с | ошибок |",
+  );
+  console.log("|---|---|---|---|---|---|---|---|---|---|");
   // Части набора: синтетика (01…), реальные с Commons (r…), рукописные (h…) — отдельными строками и итогом
   const setOf = (id: string) => (id.startsWith("r") ? "реальные" : id.startsWith("h") ? "рукописные" : "синтетика");
   const groups: [string, Result[]][] = [];
@@ -282,11 +288,13 @@ function summary(rs: Result[]): void {
     const ok = m.filter((r) => r.ok);
     const ev = ok.filter((r) => r.card && SET.images.find((i) => i.id === r.id)?.event);
     const evAll = m.filter((r) => SET.images.find((i) => i.id === r.id)?.event).length;
+    const want = (r: Result) => [SET.images.find((i) => i.id === r.id)?.start ?? []].flat();
+    const llmFirstOk = ev.filter((r) => want(r).includes(r.llmFirstStart ?? ""));
     const startByModel = ev.filter((r) => [SET.images.find((i) => i.id === r.id)?.start ?? []].flat().includes(r.modelStart ?? ""));
     const placed = ev.filter((r) => r.placeOk !== undefined);
     const lat = ok.filter((r) => r.model !== "oracle").map((r) => r.ms);
     console.log(
-      `| ${model} | ${m.length} | ${pct(ok.filter((r) => r.eventOk).length, m.length)} | ${pct(ev.filter((r) => r.startOk).length, evAll)} | ` +
+      `| ${model} | ${m.length} | ${pct(ok.filter((r) => r.eventOk).length, m.length)} | ${pct(ev.filter((r) => r.startOk).length, evAll)} | ${pct(llmFirstOk.length, evAll)} | ` +
         `${pct(startByModel.length, evAll)} | ${pct(ev.filter((r) => r.titleOk).length, evAll)} | ${pct(placed.filter((r) => r.placeOk).length, placed.length)} | ` +
         `${q(lat, 0.5)} / ${q(lat, 0.95)} | ${m.filter((r) => !r.ok).length} |`,
     );
@@ -296,7 +304,7 @@ function summary(rs: Result[]): void {
     if (r.ok && r.eventOk && r.startOk !== false && r.titleOk !== false) continue;
     const a = r.answer;
     console.log(
-      `- ${r.model} ${r.id}: ${r.ok ? `${a?.noEvent ? "no_event" : "create_event"} title «${r.title ?? ""}» start(text)=${r.start} start(model «${a?.start ?? ""}»)=${r.modelStart} | текст: «${(a?.text ?? "").replace(/\n/g, " / ").slice(0, 160)}»` : `ERR ${r.error}`}`,
+      `- ${r.model} ${r.id}: ${r.ok ? `${a?.noEvent ? "no_event" : "create_event"} title «${r.title ?? ""}» start(text)=${r.start} llmFirst=${r.llmFirstStart} start(model «${a?.start ?? ""}»)=${r.modelStart} | текст: «${(a?.text ?? "").replace(/\n/g, " / ").slice(0, 160)}»` : `ERR ${r.error}`}`,
     );
   }
 }
