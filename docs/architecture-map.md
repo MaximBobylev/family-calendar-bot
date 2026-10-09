@@ -137,6 +137,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/typing.ts` | «печатает…» каждые 4 с до ответа |
 | **nlu/** | Понимание текста |
 | `nlu/intents.ts` | Реестр интентов: `SYSTEM_PROMPT`, `TOOLS`, разбор ответа LLM |
+| `nlu/date-structure.ts` | Схема и правила «структуры даты» `when` для LLM (create_event, фото, замер `eval-llm-dates`) |
 | `nlu/llm.ts` | OpenAI-совместимый клиент LLM, цепочка с переключением на ошибке |
 | `nlu/intent-overrides.ts` | Детерминированные поправки интента («перенеси», «отмени», «когда …?») |
 | `nlu/modify-hints.ts` | Что именно менять/какое событие — из текста, без LLM |
@@ -149,7 +150,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `dates/duration.ts`, `recurrence.ts` | Длительности; правила повторения |
 | `dates/rrule.ts` | Ближайшие даты серии, RRULE для Google, описание словами |
 | `dates/extract.ts` | Фрагменты дат из всего сообщения, `cleanTitle`, `looksAllDay`; `unsure` / `unknownZone` — не угадывать |
-| `dates/zone.ts` | Явный пояс во фрагменте: «по Киеву», «UTC+4», «London time», «по местному» (`readZone`, `namedZone` для карточки) |
+| `dates/structured.ts` | Структура даты от LLM (`when`): строгая проверка и разрешение нашими правилами (`resolvePointOrRange`) — второе мнение в сверке дат |
+| `dates/zone.ts` | Явный пояс во фрагменте: «по Киеву», «UTC+4», «London time», «по местному» (`readZone`, `namedZone` для карточки, `zoneByTz` — подпись пояса из структуры LLM) |
 | `dates/calendar.ts`, `timezone.ts`, `daily.ts` | Календарная арифметика и пояса; ввод пояса; «ЧЧ:ММ каждый день» |
 | **calendar/** | Доменная модель календаря (ADR-0003) |
 | `calendar/model.ts` | `CalendarEvent`, `CalendarProvider`, провайдер-нейтральные ошибки |

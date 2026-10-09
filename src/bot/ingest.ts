@@ -4,7 +4,7 @@
 // чужого текста: только извлечённые поля. Чистая логика — ingest-logic.ts, src/ics/*.
 
 import type { CalendarProvider } from "../calendar/model";
-import { formatMoment, utcToLocal } from "../dates/calendar";
+import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
 import { looksAllDay } from "../dates/extract";
 import { calendarNamesOf } from "../db/accounts";
 import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
@@ -21,7 +21,7 @@ import type { TgMessage } from "../telegram/types";
 import { understandImageChain } from "../vision/understand";
 import type { AppContext } from "./context";
 import { startCreate } from "./create-event";
-import { type CreateDraft, resolveCalendar, startCheck } from "./create-logic";
+import { type CreateDraft, llmDateCheck, resolveCalendar } from "./create-logic";
 import { cancelCards } from "./dialog";
 import { escapeHtml, whenOf } from "./format";
 import { type ForwardOrigin, forwardOrigin } from "./forwarded";
@@ -70,11 +70,14 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
   const title = intent?.title ?? heuristicTitle(dates.sentence, dates.fragments, location);
-  // Сверка с `start` от модели (ревью 2026-10-08): разные даты — варианты кнопками
-  const check = startCheck(src.text, dates.point, intent?.start);
-  log("date_check", { source: "foreign", agreement: check.agreement });
+  // Шаг 5 ревью дат: дата — из структуры модели (она видит весь текст и отличает дату события от прочих), наш парсер
+  // проверяет; расходятся — оба кнопками. Пересланное — модель первой; фото — наш разбор дословного текста первым:
+  // мультимодальная модель «исправляет» время (синтетика голоса 2026-10-05). Нет структуры — как раньше, `start`
+  const llm = intent ? { start: intent.start, ...(intent.when ? { when: intent.when } : {}) } : {};
+  const check = llmDateCheck(src.text, dates.point, llm, parseLocal(localNow), tz, src.useLlm);
+  const source = src.useLlm ? "forward" : "image";
+  log("date_check", { source, llm: check.llm, agreement: check.agreement });
   const start = check.pick;
-  const startText = start.startText;
   const draft: CreateDraft = {
     ...start,
     ...(dates.duration ? { durationText: dates.duration } : {}),
@@ -82,9 +85,9 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
     ...(location ? { location } : {}),
     ...(intent?.allDay || looksAllDay(title ?? "") ? { allDay: true } : {}),
     description: sourceDescription(src.sourceLine, src.quote ?? src.text, (url) => t("ingestLink", user.locale, { url })),
-    dateCheck: { source: src.useLlm ? "forward" : "image", agreement: check.agreement },
+    dateCheck: { source, agreement: check.agreement, llm: check.llm },
   };
-  if (!startText) {
+  if (!start.startText && !start.altWhen) {
     // Даты нет — спросить «Когда?»; ответ дополнит этот же черновик (dialog.ts, US-12)
     await mergeDialogState(
       ctx.db,

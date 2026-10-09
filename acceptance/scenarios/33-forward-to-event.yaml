@@ -131,3 +131,38 @@
         - { text_contains: ["Выполнить как команду?"] }
         - { method: editMessageText, text_contains: ["Выполняю"] }
         - { text_contains: ["Удалить?", "Планёрка"] }
+
+# Ревью парсера дат, шаг 5: дата пересланного — из структуры `when` модели (её считает наш код), наш парсер проверяет.
+
+- id: forward-date-from-model-structure
+  story: US-65
+  steps:
+    - *setup
+    # Порядковый день недели наш парсер не берёт (unsure) — дата из структуры модели
+    - llm:
+        "Собрание родителей в первый понедельник ноября в 19:00, каб. 12":
+          tool: create_event
+          args: { start: "в первый понедельник ноября в 19:00", title: "Собрание родителей", when: { day: { type: nth_weekday, n: 1, weekday: MO, month: 11 }, time: { hour: 19, minute: 0 } } }
+    - telegram: { from: 1001, text: "Собрание родителей в первый понедельник ноября в 19:00, каб. 12", forwarded: true }
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { text_contains: ["пересланное"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - text_contains: ["Создать событие?", "<b>Собрание родителей</b>", "пн, 2 ноября, 19:00–20:00", "📍 каб. 12"]
+          buttons: ["Создать", "Отмена"]
+
+- id: forward-model-and-parser-disagree-model-first
+  story: US-65
+  steps:
+    - *setup
+    # Модель и наш парсер дали разные даты — обе кнопками, дата модели первой (она видит весь текст)
+    - llm:
+        "Кружок в четверг в 18:00":
+          tool: create_event
+          args: { start: "в четверг в 18:00", title: "Кружок", when: { day: { type: weekday, weekday: FR }, time: { hour: 18, minute: 0 } } }
+    - telegram: { from: 1001, text: "Кружок в четверг в 18:00", forwarded: true }
+    - press: "📅 Создать событие из этого"
+    - expect_telegram:
+        - { text_contains: ["Похоже на событие"] }
+        - { method: editMessageText, text_contains: ["Создаю событие"] }
+        - { text_contains: ["Когда именно?", "<b>Кружок</b>"], buttons: ["пт, 9 октября, 18:00–19:00", "чт, 8 октября, 18:00–19:00", "Отмена"] }

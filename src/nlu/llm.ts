@@ -75,7 +75,8 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
         ],
         tools,
         tool_choice: "required",
-        max_tokens: opts.maxTokens ?? 300,
+        // Запас под структуру даты `when` в create_event (≈ 50–100 токенов, ревью дат шаг 4)
+        max_tokens: opts.maxTokens ?? 400,
         ...cfg.extraBody,
         ...opts.extraBody,
       }),

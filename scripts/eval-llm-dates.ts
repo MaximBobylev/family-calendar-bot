@@ -1,10 +1,12 @@
 // Замер: может ли DeepSeek разрешать даты без нашей грамматики (ревью парсера дат, шаг 4).
 // A «LLM разрешает» — модель сама отдаёт итог в формате корпуса; B «LLM структурирует, резолвит наш код» — модель отдаёт
-// AST-подобную структуру, итог считает resolvePointOrRange (src/dates/point.ts). Итоги — docs/research/llm-date-resolution-eval.md.
+// структуру (src/nlu/date-structure.ts), итог считает наш код (src/dates/structured.ts); C — то же поле `when` внутри настоящего
+// вызова разбора команды (SYSTEM_PROMPT + TOOLS бота, «Поставь встречу <фрагмент>», только point). Итоги — docs/research/llm-date-resolution-eval.md.
 //
 // Запуск (ключ DEEPSEEK_API_KEY есть только в сервисе deploy; платная модель — только с разрешения владельца):
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-llm-dates.ts --modes A,B --sample 300 --out reports/llm-dates/sample.json
 //   … --full [--kinds point,range]        — весь корпус;  --holdout — testdata/dates/holdout-*.yaml;  --ids a,b — выборочно
+//   … --modes C --kinds point               — структура в вызове интента, как в проде (раунд 2)
 //   … --dry-run                            — только список кейсов и число вызовов (без ключа, можно в сервисе test)
 //   … --report reports/llm-dates/a.json[,b.json] [--failures 20] — сводка по сохранённым прогонам, без вызовов
 //   --model deepseek-flash (по умолчанию), --concurrency 3, --seed 7
@@ -14,8 +16,10 @@ import { dirname } from "node:path";
 import { parseDateFragment } from "../src/dates";
 import { parseLocal, weekday } from "../src/dates/calendar";
 import { extractDateSpans } from "../src/dates/extract";
-import { type Ast, type DateAst, type Period, resolvePointOrRange, type TimeAst, type WeekdayMod } from "../src/dates/point";
-import type { DayPart, ParseResult, ParseValue, ValueKind, Weekday } from "../src/dates/types";
+import { resolveRawStructure } from "../src/dates/structured";
+import type { DayPart, ParseResult, ParseValue, ValueKind } from "../src/dates/types";
+import { DATE_STRUCTURE_RULES, DATE_STRUCTURE_SCHEMA } from "../src/nlu/date-structure";
+import { parseIntent } from "../src/nlu/intents";
 import { CORPUS_DIR, type CorpusCase, canonical, loadCorpus, loadFiles } from "../test/support/date-corpus";
 
 const arg = (name: string) => {
@@ -65,42 +69,11 @@ TIME ZONES: an explicit zone («в 15:00 по Киеву», «по МСК», «�
 UNPARSEABLE: vague («на днях», «скоро», «когда-нибудь», «в середине недели», «после работы»), deadlines («до пятницы», «к обеду», «к утру», «к концу недели/дня», «к следующей неделе», «by end of day», «EOD»), unknown words. Typos only from a closed list («завтро», «пятнцу», «tommorow»); real different words («пятно», «завтрак») → unparseable. Latin look-alike letters inside Russian words are fine. «пара» = 2; «через недельку/часик» = неделю/час; «после завтра» = послезавтра; «будущая/след. неделя» = следующая.
 SHIFT/DURATION/RECURRENCE: «на час позже» +PT1H, «на полчаса раньше» -PT30M, «на неделю вперёд» +P7D, no direction → later; «на сутки позже» +PT24H. «часа на три» PT3H, «на весь день» all_day. «каждую вторую среду» → weekly, interval 2, by_day [WE]; «каждую вторую среду месяца» → monthly, by_day [WE], by_set_pos 2; time by the hour rules («каждый понедельник в 3» → "15:00"); «31 числа каждого месяца» → warning skips_short_months; «каждое утро в 8» → daily 08:00.`;
 
-const SYSTEM_B = `You convert a date/time fragment for a calendar bot into a STRUCTURE. You do NOT compute dates: our code applies the rules (hours without am/pm, past times, nearest weekday, ambiguity, time zones). Copy numbers as said. Call the tool "structure" once.
+// Режим B — те же правила и схема, что у поля `when` в create_event (src/nlu/date-structure.ts): замер мерит прод
+const SYSTEM_B = `You convert a date/time fragment for a calendar bot into a STRUCTURE. Call the tool "structure" once.
 ${INPUT_DOC}
+${DATE_STRUCTURE_RULES}`;
 
-Fields (omit what is not said):
-- unparseable: true — vague («на днях», «скоро», «в середине недели», «после работы»); deadlines («до пятницы», «к обеду», «к утру», «к концу недели/дня», «к следующей неделе», «by end of day», «EOD»); «в начале/середине/конце месяца/недели» when kind=point; unknown words; misspellings outside a closed list («завтро», «пятнцу», «tommorow» are fine); real words that only look like dates («пятно», «завтрак»); English «night» alone («Jazz Night»); an unknown city/zone; anything these fields cannot express.
-- day: {type: "relative_days", days} — сегодня 0, завтра 1, послезавтра 2, вчера -1, «через 3 дня» 3, «через неделю» 7, «через сутки в 10» 1 (only with an hour).
-       {type: "relative_months", months} — «через месяц».
-       {type: "weekday", weekday: MO..SU, which} — which: none «в пятницу»; this «в эту/ближайшую пятницу», «this Friday»; next «в следующую пятницу», «next Friday»; next_week «в пятницу на следующей неделе», «next week Friday»; plus_week «в понедельник через неделю», «через неделю в понедельник».
-       {type: "date", day, month?, year?, weekday?} — «14 октября», «14.10», «на 14-е» (no month), «в среду 14-го» (weekday WE).
-- time: {hour, minute, meridiem?, special?} — hour exactly as said («в 3» → 3, «в 15» → 15, «9pm» → 9 + pm). meridiem only from a word attached to the time: «утра»/am → am; «вечера»/pm → pm; «дня» → day; «ночи» → night. полдень/noon → special noon, hour 12; полночь/midnight → special midnight, hour 0. «полтретьего» → 2:30, «без пятнадцати три» → 2:45, «без десяти семь» → 6:50, «в пять минут восьмого» → 7:05, «в час» → 1:00, «в обед» → 13:00, «first thing», «первым делом», «с утра пораньше» → 9:00 am. «около/где-то/часов в» — just the time. «15-30», «15.30», «в 15 30» → 15:30.
-- part_of_day: morning (утром, с утра, в первой половине дня, in the morning) | day (днём, во второй половине дня) | afternoon (после обеда, после полудня, afternoon) | late_afternoon (ближе к вечеру, к вечеру, под вечер, late afternoon) | evening (вечером, вечерком, tonight, English «tomorrow night»/«friday night»/«at night») | night (ночью, Russian only). With a time: «в пятницу вечером в 7» → part evening + hour 7 (no meridiem). «завтра в 2 ночи» → time 2 meridiem night (no part).
-- in_minutes: real-time offset — «через час» 60, «через полтора часа» 90, «in 2 hours» 120, «через сутки» 1440 (without an hour).
-- interval: {start: time, end: time} — «с 10 до 12», «10-12», «from 1 to 2pm» (meridiem only on end, as said), «с 23 до 2». Plus day if named.
-- alt_time: time — only for «A-15» with A < 15 («в 9-15»): interval A–15 AND alt_time A:15. «в 16-15», «в 20-30» → plain time 16:15 / 20:30.
-- date_range: {from: {day, month?, year?}, to: {day, month?, year?}} — «с 10 по 20 ноября».
-- period: {type, which?, month?, days?, unit?, segment?}:
-    week — «на этой неделе», «на неделе», «до конца недели», «покажи неделю», «this week» (which this); «на следующей неделе», «next week» (which next).
-    weekend — «в выходные», «на выходных», «на этих выходных», «this weekend» (this); «на следующих выходных» (next).
-    month — «в этом месяце» (this), «в следующем месяце» (next), «в ноябре» (month 11).
-    next_days — «ближайшие 3 дня» (days 3), «на две недели вперёд» (days 14).
-    segment — unit week|month, segment begin|middle|end, which auto (no qualifier) | this («этого/этой») | next («следующего/следующей») or month N («в конце ноября»).
-    A weekday «на следующей неделе» → day.weekday with which next_week, not a period.
-- by: true — «к»/«by» + a date or hour: «к пятнице», «by Friday», «к 5 ноября», «к 18», «к вечеру» (+ part late_afternoon).
-- timezone: IANA zone, only if a zone is named: «по Киеву» Europe/Kyiv, «по МСК»/«мск» Europe/Moscow, «London time» Europe/London, «по UTC+4» Etc/GMT-4, «по Europe/Berlin». Known cities: Moscow, Kyiv, Minsk, Kaliningrad, Yekaterinburg, Novosibirsk, Tbilisi, Yerevan, Almaty, Tashkent, Baku, Warsaw, Berlin, Prague, Paris, London, Lisbon, Belgrade, Istanbul, Dubai, New York, Los Angeles, São Paulo, Buenos Aires; another city → unparseable. «по местному», «local time» → omit.`;
-
-const TIME_SCHEMA = {
-  type: "object",
-  properties: {
-    hour: { type: "integer" },
-    minute: { type: "integer" },
-    meridiem: { type: "string", enum: ["am", "pm", "day", "night"] },
-    special: { type: "string", enum: ["noon", "midnight"] },
-  },
-  required: ["hour", "minute"],
-};
-const ABS_SCHEMA = { type: "object", properties: { day: { type: "integer" }, month: { type: "integer" }, year: { type: "integer" } }, required: ["day"] };
 const WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 const PARTS = ["morning", "day", "afternoon", "late_afternoon", "evening", "night"];
 
@@ -157,50 +130,7 @@ const TOOL_A = {
 
 const TOOL_B = {
   type: "function",
-  function: {
-    name: "structure",
-    description: "Structure of the date/time fragment.",
-    parameters: {
-      type: "object",
-      properties: {
-        unparseable: { type: "boolean" },
-        day: {
-          type: "object",
-          properties: {
-            type: { type: "string", enum: ["relative_days", "relative_months", "weekday", "date"] },
-            days: { type: "integer" },
-            months: { type: "integer" },
-            weekday: { type: "string", enum: WEEKDAYS },
-            which: { type: "string", enum: ["none", "this", "next", "next_week", "plus_week"] },
-            day: { type: "integer" },
-            month: { type: "integer" },
-            year: { type: "integer" },
-          },
-          required: ["type"],
-        },
-        time: TIME_SCHEMA,
-        part_of_day: { type: "string", enum: PARTS },
-        in_minutes: { type: "integer" },
-        interval: { type: "object", properties: { start: TIME_SCHEMA, end: TIME_SCHEMA }, required: ["start", "end"] },
-        alt_time: TIME_SCHEMA,
-        date_range: { type: "object", properties: { from: ABS_SCHEMA, to: ABS_SCHEMA }, required: ["from", "to"] },
-        period: {
-          type: "object",
-          properties: {
-            type: { type: "string", enum: ["week", "weekend", "month", "next_days", "segment"] },
-            which: { type: "string", enum: ["this", "next", "auto"] },
-            month: { type: "integer" },
-            days: { type: "integer" },
-            unit: { type: "string", enum: ["week", "month"] },
-            segment: { type: "string", enum: ["begin", "middle", "end"] },
-          },
-          required: ["type"],
-        },
-        by: { type: "boolean" },
-        timezone: { type: "string" },
-      },
-    },
-  },
+  function: { name: "structure", description: "Structure of the date/time fragment.", parameters: DATE_STRUCTURE_SCHEMA },
 };
 
 // --- Вызов DeepSeek -------------------------------------------------------------------------------
@@ -223,7 +153,14 @@ const userMessage = (c: CorpusCase) => {
   return `fragment: «${c.input.text}»\nkind: ${c.input.kind}\nnow: ${c.input.now} (${WD_EN[weekday(n.day)]})\ntz: ${c.input.tz}`;
 };
 
-async function callModel(mode: "A" | "B", c: CorpusCase): Promise<Call> {
+type Mode = "A" | "B" | "C";
+const MODES: Mode[] = ["A", "B", "C"];
+
+/** Режим C: фраза создания события целиком — как команда пользователя боту. */
+const commandOf = (text: string) => (/[а-яё]/i.test(text) || !text.trim() ? `Поставь встречу ${text}` : `Schedule a meeting ${text}`);
+
+async function callModel(mode: Mode, c: CorpusCase): Promise<Call> {
+  if (mode === "C") return callIntent(c);
   const t0 = Date.now();
   for (let attempt = 0; ; attempt++) {
     try {
@@ -266,11 +203,28 @@ async function callModel(mode: "A" | "B", c: CorpusCase): Promise<Call> {
   }
 }
 
+/** Режим C: настоящий вызов разбора команды (SYSTEM_PROMPT + TOOLS бота, как parseIntent) — поле `when` у create_event. */
+async function callIntent(c: CorpusCase): Promise<Call> {
+  const t0 = Date.now();
+  const cfg = { baseUrl: "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY ?? "", model: MODEL, extraBody: { thinking: { type: "disabled" } } };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await parseIntent(cfg, commandOf(c.input.text), { calendars: [] });
+      const call = res.toolCalls?.find((t) => t.name === "create_event");
+      const usage = { prompt_tokens: res.tokensIn, completion_tokens: res.tokensOut };
+      const intent = call?.name ?? res.toolCalls?.[0]?.name ?? "none";
+      return { ms: Date.now() - t0, usage, args: { intent, ...(call ? { start: call.arguments.start, when: call.arguments.when } : {}) } };
+    } catch (e) {
+      if (attempt >= 3) return { ms: Date.now() - t0, error: String(e).slice(0, 200) };
+      await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+    }
+  }
+}
+
 // --- Ответ → ParseResult --------------------------------------------------------------------------
 
 type Obj = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 /** Режим A: значения модели → формат корпуса (лишние поля отбрасываются). */
 function fromA(a: Obj): ParseResult {
@@ -303,109 +257,18 @@ function fromA(a: Obj): ParseResult {
   return ok.length === 1 ? ok[0]! : { ambiguous: ok };
 }
 
-class Invalid extends Error {}
-
-function timeOf(t: unknown): TimeAst | undefined {
-  if (!t || typeof t !== "object") return undefined;
-  const o = t as Obj;
-  if (o.special === "noon") return { h: 12, m: 0, special: "noon" };
-  if (o.special === "midnight") return { h: 0, m: 0, special: "midnight" };
-  const h = num(o.hour) ?? 0;
-  const m = num(o.minute) ?? 0;
-  // Как checkTime в point.ts: 24:00 — полночь, иначе вне диапазона — invalid_time
-  if (h > 24 || h < 0 || m > 59 || m < 0 || (h === 24 && m !== 0)) throw new Invalid();
-  if (h === 24) return { h: 0, m: 0, special: "midnight" };
-  return { h, m, ...(str(o.meridiem) ? { mer: o.meridiem as TimeAst["mer"] } : {}) };
-}
-const absOf = (o: Obj) => ({ d: num(o.day) ?? 0, ...(num(o.month) ? { m: num(o.month)! } : {}), ...(num(o.year) ? { y: num(o.year)! } : {}) });
-const MOD: Record<string, WeekdayMod> = { none: "none", this: "this", next: "next", next_week: "nextWeek", plus_week: "plusWeek" };
-
-/** Режим B: структура модели → AST point.ts (тот же, что строит грамматика). */
-function astOfB(s: Obj, kind: "point" | "range"): Ast | "unparseable" | "invalid_time" {
-  if (s.unparseable === true) return "unparseable";
-  try {
-    const ast: Ast = {};
-    const d = s.day as Obj | undefined;
-    if (d) {
-      let date: DateAst | undefined;
-      if (d.type === "relative_days") date = { k: "rel", days: num(d.days) ?? 0 };
-      else if (d.type === "relative_months") date = { k: "relMonths", months: num(d.months) ?? 0 };
-      else if (d.type === "weekday" && str(d.weekday)) date = { k: "wd", wd: d.weekday as Weekday, mod: MOD[str(d.which) ?? "none"] ?? "none" };
-      else if (d.type === "date") date = { k: "abs", abs: absOf(d), ...(str(d.weekday) ? { wd: d.weekday as Weekday } : {}) };
-      if (date) ast.date = date;
-    }
-    const time = timeOf(s.time);
-    if (time) ast.time = time;
-    if (str(s.part_of_day)) ast.part = s.part_of_day as DayPart;
-    if (num(s.in_minutes) !== undefined) ast.relMinutes = num(s.in_minutes)!;
-    const iv = s.interval as Obj | undefined;
-    if (iv?.start && iv.end) ast.interval = { start: timeOf(iv.start)!, end: timeOf(iv.end)! };
-    const alt = timeOf(s.alt_time);
-    if (alt && ast.interval) ast.altTime = alt;
-    const dr = s.date_range as Obj | undefined;
-    if (dr?.from && dr.to) {
-      const to = absOf(dr.to as Obj);
-      const from = absOf(dr.from as Obj);
-      ast.dateRange = { from: { ...from, m: from.m ?? to.m }, to };
-    }
-    const p = s.period as Obj | undefined;
-    if (p) {
-      const which = str(p.which);
-      let period: Period | undefined;
-      switch (p.type) {
-        case "week":
-          ast.week = which === "next" ? "next" : "this";
-          // «на неделе» при создании — один день (vagueWeek); для чтения не влияет
-          if (ast.week === "this" && kind === "point") ast.vagueWeek = true;
-          break;
-        case "weekend":
-          period = { k: "weekend", which: which === "next" ? "next" : "this" };
-          break;
-        case "month":
-          period = { k: "month", which: num(p.month) ?? (which === "next" ? "next" : "this") };
-          break;
-        case "next_days":
-          period = { k: "nextDays", n: num(p.days) ?? 1 };
-          break;
-        case "segment":
-          period = {
-            k: "segment",
-            unit: p.unit === "week" ? "week" : "month",
-            seg: (str(p.segment) ?? "begin") as "begin",
-            which: num(p.month) ?? (which as "this" | "next" | "auto" | undefined) ?? "auto",
-          };
-          break;
-      }
-      if (period) ast.period = period;
-      // День недели + «на следующей неделе» — как делает грамматика
-      if (ast.week && ast.date?.k === "wd") {
-        if (ast.week === "next") ast.date.mod = "nextWeek";
-        delete ast.week;
-        delete ast.vagueWeek;
-      }
-    }
-    if (s.by === true) ast.byDate = true;
-    if (str(s.timezone)) {
-      try {
-        new Intl.DateTimeFormat("en-US", { timeZone: str(s.timezone) });
-        ast.tz = str(s.timezone)!;
-      } catch {
-        return "unparseable";
-      }
-    }
-    return ast;
-  } catch (e) {
-    if (e instanceof Invalid) return "invalid_time";
-    throw e;
-  }
+/** Режим C: не create_event или нет/испорчена структура — бот переспросит (для замера — «не разобрал»). */
+function fromC(a: Obj, c: CorpusCase): ParseResult | "unsupported" {
+  if (c.input.kind !== "point") return "unsupported";
+  if (a.intent !== "create_event") return { error: "unparseable" };
+  return resolveRawStructure(a.when, "point", c.input.now, c.input.tz) ?? { error: "unparseable" };
 }
 
 function fromB(s: Obj, c: CorpusCase): ParseResult | "unsupported" {
   const kind = c.input.kind;
   if (kind !== "point" && kind !== "range") return "unsupported";
-  const ast = astOfB(s, kind);
-  if (ast === "unparseable" || ast === "invalid_time") return { error: ast };
-  return resolvePointOrRange(ast, kind, parseLocal(c.input.now), c.input.tz);
+  // Испорченная структура в боте отбрасывается (второго мнения нет) — для замера это «не разобрал»
+  return resolveRawStructure(s, kind, c.input.now, c.input.tz) ?? { error: "unparseable" };
 }
 
 // --- Оценка ---------------------------------------------------------------------------------------
@@ -417,7 +280,7 @@ interface Row {
   now: string;
   text: string;
   status?: string;
-  mode: "A" | "B";
+  mode: Mode;
   expect: ParseResult;
   got?: ParseResult | "unsupported";
   args?: Record<string, unknown>;
@@ -475,7 +338,7 @@ function table(rows: Row[], key: (r: Row) => string, title: string) {
   for (const r of rows) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
   console.log(`\n### ${title}\n\n| группа | режим | n | exact | any (≈ решающая) | first |\n|---|---|---|---|---|---|`);
   for (const [g, rs] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    for (const mode of ["A", "B"] as const) {
+    for (const mode of MODES) {
       const m = rs.filter((r) => r.mode === mode && r.got !== "unsupported");
       if (!m.length) continue;
       const s = m.map((r) => score(r.expect, r.got));
@@ -490,7 +353,7 @@ function report(rows: Row[], failures: number) {
   console.log(
     `\n## Сводка (${rows.length} строк)\n\n| режим | n | покрыто | exact | any | first | ошибки вызова | p50 мс | p95 мс | ток. вход/выход (ср.) | кеш-хит | $ (низк.–выс.) |\n|---|---|---|---|---|---|---|---|---|---|---|---|`,
   );
-  for (const mode of ["A", "B"] as const) {
+  for (const mode of MODES) {
     const m = rows.filter((r) => r.mode === mode);
     if (!m.length) continue;
     const cov = m.filter((r) => r.got !== "unsupported");
@@ -510,7 +373,7 @@ function report(rows: Row[], failures: number) {
   table(rows, nowGroup, "По «сейчас»");
   table(rows, (r) => expGroup(r.expect), "По виду ожидания");
   // Ошибки ожидания: модель вернула ту же ошибку? И ложные ошибки — модель отказалась там, где есть значение
-  for (const mode of ["A", "B"] as const) {
+  for (const mode of MODES) {
     const m = rows.filter((r) => r.mode === mode && r.got && r.got !== "unsupported");
     const falseErr = m.filter((r) => !("error" in r.expect) && "error" in (r.got as ParseResult)).length;
     const missedErr = m.filter((r) => "error" in r.expect && !("error" in (r.got as ParseResult))).length;
@@ -522,12 +385,12 @@ function report(rows: Row[], failures: number) {
     );
   }
   if (failures) {
-    for (const mode of ["A", "B"] as const) {
+    for (const mode of MODES) {
       const bad = rows.filter((r) => r.mode === mode && r.got !== "unsupported" && !score(r.expect, r.got).exact);
       console.log(`\n## Неточные ${mode} (${bad.length}), первые ${failures}\n`);
       for (const r of bad.slice(0, failures)) {
         console.log(
-          `- ${r.id} «${r.text}» (${r.kind}, ${r.now}): ждали ${canonical(r.expect)}; ${r.error ? `сбой ${r.error}` : `получили ${canonical(r.got)}`}${mode === "B" && r.args ? `; структура ${JSON.stringify(r.args)}` : ""}`,
+          `- ${r.id} «${r.text}» (${r.kind}, ${r.now}): ждали ${canonical(r.expect)}; ${r.error ? `сбой ${r.error}` : `получили ${canonical(r.got)}`}${mode !== "A" && r.args ? `; структура ${JSON.stringify(r.args)}` : ""}`,
         );
       }
     }
@@ -621,7 +484,7 @@ async function main() {
     return;
   }
 
-  const modes = list(arg("modes") ?? "A,B") as ("A" | "B")[];
+  const modes = list(arg("modes") ?? "A,B") as Mode[];
   const kinds = list(arg("kinds"));
   const ids = list(arg("ids"));
   let cases: CorpusCase[];
@@ -631,7 +494,8 @@ async function main() {
   if (kinds.length) cases = cases.filter((c) => kinds.includes(c.input.kind));
   if (ids.length) cases = cases.filter((c) => ids.includes(c.id));
 
-  const jobs = cases.flatMap((c) => modes.filter((m) => m === "A" || c.input.kind === "point" || c.input.kind === "range").map((m) => ({ c, m })));
+  const covered = (m: Mode, c: CorpusCase) => m === "A" || c.input.kind === "point" || (m === "B" && c.input.kind === "range");
+  const jobs = cases.flatMap((c) => modes.filter((m) => covered(m, c)).map((m) => ({ c, m })));
   const count = (key: (c: CorpusCase) => string) => {
     const m = new Map<string, number>();
     for (const c of cases) m.set(key(c), (m.get(key(c)) ?? 0) + 1);
@@ -646,7 +510,7 @@ async function main() {
 
   const rows: Row[] = cases.flatMap((c) =>
     modes
-      .filter((m) => m === "B" && c.input.kind !== "point" && c.input.kind !== "range")
+      .filter((m) => !covered(m, c))
       .map((m) => ({
         id: c.id,
         file: c.file,
@@ -663,7 +527,7 @@ async function main() {
   await pool(jobs, Number(arg("concurrency") ?? 3), async ({ c, m }) => {
     const call = await callModel(m, c);
     let got: ParseResult | undefined;
-    if (call.args) got = m === "A" ? fromA(call.args) : (fromB(call.args, c) as ParseResult);
+    if (call.args) got = (m === "A" ? fromA(call.args) : m === "B" ? fromB(call.args, c) : fromC(call.args, c)) as ParseResult;
     rows.push({
       id: c.id,
       file: c.file,

@@ -68,8 +68,9 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     // Ответ пользователя дополнит этот же черновик (US-12)
     // Второе мнение LLM о дате — только для первой карточки: ответ на вопрос дополняет наш кусок
     // Вопрос о незнакомом поясе — один раз: ответ — уже время по своему поясу
-    const { altStartText: _alt, unknownZone: _zone, ...rest } = a.draft;
-    const draft = res.keepStart ? rest : { ...rest, startText: undefined };
+    // Структура LLM, по которой спросили время, уже в startText словами («02.11.2026») — ответ дополнит её
+    const { altStartText: _alt, altWhen: _when, llmFirst: _first, unknownZone: _zone, ...rest } = a.draft;
+    const draft = res.keepStart ? { ...rest, ...(res.startText ? { startText: res.startText } : {}) } : { ...rest, startText: undefined };
     await mergeDialogState(
       ctx.db,
       a.conversationId,

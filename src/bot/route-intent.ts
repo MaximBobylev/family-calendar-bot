@@ -1,7 +1,7 @@
 // Интент → обработчик фичи (создание, изменение, удаление, поиск, список). Общий путь для текста, голоса,
 // переслушанного голосового и пересланного после «Выполнить». Даты и «что менять» — из текста детерминированно.
 
-import { formatMoment, utcToLocal } from "../dates/calendar";
+import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, extractRecurrenceSpan, looksAllDay } from "../dates/extract";
 import { mergeDialogState } from "../db/conversations";
 import { log } from "../log";
@@ -17,7 +17,7 @@ import { assignOverride } from "./assign/logic";
 import { assignmentApplies, startAssign } from "./assign/start";
 import type { AppContext } from "./context";
 import { draftFromIntent, startCreate, type CreateDraft } from "./create-event";
-import { startCheck } from "./create-logic";
+import { llmDateCheck } from "./create-logic";
 import { startDelete } from "./delete-event";
 import { lookupEvent } from "./event-lookup";
 import type { EventRequest } from "./find-event";
@@ -55,10 +55,14 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
       const rec = extractRecurrenceSpan(famText, localNow, user.home_tz);
       const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.home_tz, "point");
-      // Сверка с `start` от LLM (ревью 2026-10-08): разные даты — варианты кнопками
-      // Незнакомый пояс («в 15 по Варне»): `start` от LLM его тоже не пересчитает — спрашиваем время по своему поясу
-      const check = rec ? undefined : startCheck(famText, spans.point, spans.unknownZone ? undefined : intent.start);
-      if (check) log("date_check", { source: "message", agreement: check.agreement, unsure: spans.unsure, unknown_zone: spans.unknownZone ? true : undefined });
+      // Сверка с LLM (ревью 2026-10-08): структура `when` (или `start`) — второе мнение; разные даты — варианты кнопками
+      // Незнакомый пояс («в 15 по Варне»): LLM его тоже не пересчитает — спрашиваем время по своему поясу
+      const llm = spans.unknownZone ? {} : { start: intent.start, ...(intent.when ? { when: intent.when } : {}) };
+      const check = rec ? undefined : llmDateCheck(famText, spans.point, llm, parseLocal(localNow), user.home_tz);
+      if (check) {
+        const unknownZone = spans.unknownZone ? true : undefined;
+        log("date_check", { source: "message", llm: check.llm, agreement: check.agreement, unsure: spans.unsure, unknown_zone: unknownZone });
+      }
       const start = check?.pick ?? {};
       const startText = start.startText;
       const durationText = spans.duration ?? intent.duration;
@@ -79,13 +83,14 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
         ...draftFromIntent(intent),
         startText,
         altStartText: start.altStartText,
+        altWhen: start.altWhen,
         recurrenceText: rec?.span,
         title,
         durationText,
         allDay: intent.allDay || looksAllDay(famText) || undefined,
         family: fam.family,
         unknownZone: spans.unknownZone,
-        dateCheck: check ? { source: "message", agreement: check.agreement } : undefined,
+        dateCheck: check ? { source: "message", agreement: check.agreement, llm: check.llm } : undefined,
       };
       for (const k of Object.keys(draft) as (keyof CreateDraft)[]) if (draft[k] === undefined) delete draft[k];
       await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));

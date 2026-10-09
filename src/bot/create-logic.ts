@@ -5,9 +5,10 @@ import { findCalendarByName } from "../calendar/match";
 import type { CalendarInfo, EventRef } from "../calendar/model";
 import { addMinutes, formatMoment, parseLocal, type Day, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
-import { parseDateFragment, type ParseValue, type Recurrence } from "../dates";
+import { parseDateFragment, type ParseResult, type ParseValue, type Recurrence } from "../dates";
 import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
-import { namedZone, type NamedZone } from "../dates/zone";
+import { type DateStructure, resolveDateStructure, structureHasValue } from "../dates/structured";
+import { namedZone, type NamedZone, zoneByTz } from "../dates/zone";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
 import { t } from "./messages";
@@ -17,6 +18,10 @@ export interface CreateDraft {
   startText?: string;
   /** Дата словами LLM (`start`), если она не совпадает с найденной в тексте: второе мнение — варианты кнопками. */
   altStartText?: string;
+  /** Структура даты от LLM (`when`, разрешает наш код): второе мнение вместо `start`, когда модель её дала (ревью дат, шаг 4). */
+  altWhen?: DateStructure;
+  /** Пересланное и фото (шаг 5): дата модели — первым вариантом, наш парсер — проверка (расходятся — оба кнопками). */
+  llmFirst?: true;
   /** Правило повторения как сказано: «каждый понедельник в 10» (US-32). */
   recurrenceText?: string;
   title?: string;
@@ -39,6 +44,8 @@ export type DateSource = "message" | "forward" | "image";
 export interface DateCheckInfo {
   source: DateSource;
   agreement: StartAgreement;
+  /** Чем было второе мнение LLM: структура `when` или строка `start` (нет — none). */
+  llm?: LlmDateSide;
 }
 
 /** Разрешённый вариант события — хранится в карточке. */
@@ -125,8 +132,44 @@ export function pickStart(text: string, point: string | undefined, llmStart: str
   return startCheck(text, point, llmStart).pick;
 }
 
-/** Как сошлись наш кусок и `start` от LLM — для лога `date_check` (ревью 2026-10-08, шаг 3: доля расхождений). */
-export type StartAgreement = "none" | "ours_only" | "llm_only" | "agree" | "llm_invented" | "differ";
+/**
+ * Как сошлись наш кусок и LLM — для лога `date_check` (ревью 2026-10-08, шаг 3: доля расхождений). llm_unsure — модель
+ * сама сказала «не выражается / не разобрал» в структуре `when`.
+ */
+export type StartAgreement = "none" | "ours_only" | "llm_only" | "agree" | "llm_invented" | "differ" | "llm_unsure";
+export type LlmDateSide = "when" | "start" | "none";
+
+/** Значения результата как множество — для «совпали ли» наш кусок и структура. */
+const valueKeys = (r: ParseResult) => ("error" in r ? [] : "ambiguous" in r ? r.ambiguous : [r]).map((v) => JSON.stringify(v)).sort();
+
+/**
+ * Сверка с LLM (ревью дат, шаги 4–5): есть структура `when` — она второе мнение (даты считает наш код, ADR-0005 п.3);
+ * нет (бесплатная модель её не дала или испортила) — как раньше, строка `start` (startCheck). Сравниваются итоговые даты,
+ * а не слова. llmFirst — пересланное и фото: дата модели первой, наш парсер проверяет.
+ */
+export function llmDateCheck(
+  text: string,
+  point: string | undefined,
+  llm: { start?: string; when?: DateStructure },
+  now: Moment,
+  tz: string,
+  llmFirst = false,
+): { pick: Pick<CreateDraft, "startText" | "altStartText" | "altWhen" | "llmFirst">; agreement: StartAgreement; llm: LlmDateSide } {
+  const when = llm.when;
+  if (!when) {
+    const c = startCheck(text, point, llm.start);
+    return { ...c, llm: llm.start?.trim() ? "start" : "none" };
+  }
+  const own = point ? { startText: point } : {};
+  if (!structureHasValue(when)) return { pick: own, agreement: point ? "llm_unsure" : "none", llm: "when" };
+  const first = llmFirst ? { llmFirst: true as const } : {};
+  if (!point) return { pick: { altWhen: when, ...first }, agreement: "llm_only", llm: "when" };
+  const ours = parseDateFragment({ text: point, kind: "point", now: formatMoment(now), tz });
+  const theirs = resolveDateStructure(when, "point", now, tz);
+  const same = !("error" in theirs) && valueKeys(ours).join() === valueKeys(theirs).join();
+  if (same) return { pick: own, agreement: "agree", llm: "when" };
+  return { pick: { ...own, altWhen: when, ...first }, agreement: "differ", llm: "when" };
+}
 
 export function startCheck(
   text: string,
@@ -149,7 +192,8 @@ const MAX_OPTIONS = 4;
 
 export type Resolution =
   | { kind: "options"; options: CreateOption[] }
-  | { kind: "ask"; question: "askWhen" | "askTime" | "inPast" | "askZoneTime"; keepStart: boolean }
+  /** startText — что сохранить в черновике для ответа (дата из структуры LLM словами «02.11.2026»), если не исходный кусок. */
+  | { kind: "ask"; question: "askWhen" | "askTime" | "inPast" | "askZoneTime"; keepStart: boolean; startText?: string }
   | { kind: "reply"; text: string };
 
 export type CalendarResolution = CalendarInfo | { error: "notFound" | "readOnly"; name: string } | { error: "noWritable" };
@@ -169,7 +213,7 @@ export function resolveCalendar(calendars: CalendarInfo[], name: string | undefi
 
 export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {
   if (draft.recurrenceText) return resolveSeries(draft, draft.recurrenceText, now, tz, cal, locale, defaultDuration);
-  if (!draft.startText) return { kind: "ask", question: draft.unknownZone ? "askZoneTime" : "askWhen", keepStart: false };
+  if (!draft.startText && !draft.altWhen) return { kind: "ask", question: draft.unknownZone ? "askZoneTime" : "askWhen", keepStart: false };
 
   const length = resolveLength(draft, now, tz, locale, defaultDuration);
   if ("kind" in length) return length;
@@ -199,9 +243,7 @@ export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: C
     return null;
   };
 
-  const fromText = (text: string, fromLlm: boolean): Resolution => {
-    const parsed = parseDateFragment({ text, kind: "point", now: formatMoment(now), tz });
-    const zone = namedZone(text);
+  const fromParsed = (parsed: ParseResult, zone: NamedZone | undefined, fromLlm: boolean): Resolution => {
     const extra = { ...(zone && zone.tz !== tz ? { zone } : {}), ...(fromLlm ? { fromLlm: true as const } : {}) };
     if ("error" in parsed) {
       if (parsed.error === "in_past") return { kind: "ask", question: "inPast", keepStart: false };
@@ -209,21 +251,36 @@ export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: C
     }
     const values = "ambiguous" in parsed ? parsed.ambiguous : [parsed];
     const options = values.map((v) => toOption(v, extra));
-    if (options.includes("needTime")) return { kind: "ask", question: "askTime", keepStart: true };
+    if (options.includes("needTime")) {
+      // Дата только из структуры LLM: ответ «в 10» дополнит её словами (dialog.ts склеивает текст), иначе день потеряется
+      const days = values.flatMap((v) => ("date" in v ? [typeof v.date === "string" ? v.date : v.date.date] : []));
+      if (!fromLlm) return { kind: "ask", question: "askTime", keepStart: true };
+      if (days.length !== 1) return { kind: "ask", question: "askWhen", keepStart: false };
+      const [y, m, d] = days[0]!.split("-");
+      return { kind: "ask", question: "askTime", keepStart: true, startText: `${d}.${m}.${y}` };
+    }
     const ok = options.filter((o): o is CreateOption => o !== null && o !== "needTime");
     if (ok.length === 0) return { kind: "ask", question: "askWhen", keepStart: false };
     return { kind: "options", options: ok };
   };
+  const fromText = (text: string, fromLlm: boolean) =>
+    fromParsed(parseDateFragment({ text, kind: "point", now: formatMoment(now), tz }), namedZone(text), fromLlm);
 
-  const ours = fromText(draft.startText, false);
-  const alt = draft.altStartText ? fromText(draft.altStartText, true) : undefined;
-  // Второе мнение LLM: у нас нет полного момента, а у LLM есть — берём его; оба есть и разные — оба кнопками
-  if (alt?.kind !== "options") return ours;
+  const ours: Resolution = draft.startText ? fromText(draft.startText, false) : { kind: "ask", question: "askWhen", keepStart: false };
+  // Второе мнение LLM: структура `when` (резолвит наш код), иначе строка `start`
+  const alt = draft.altWhen
+    ? fromParsed(resolveDateStructure(draft.altWhen, "point", now, tz), draft.altWhen.timezone ? zoneByTz(draft.altWhen.timezone) : undefined, true)
+    : draft.altStartText
+      ? fromText(draft.altStartText, true)
+      : undefined;
+  // У нас нет полного момента, а у LLM есть — берём его; оба есть и разные — оба кнопками (пересланное и фото — LLM первой)
+  if (!alt) return ours;
+  if (alt.kind !== "options") return draft.startText ? ours : alt;
   if (ours.kind !== "options") return alt;
+  const [first, second] = draft.llmFirst ? [alt.options, ours.options] : [ours.options, alt.options];
   const key = (o: CreateOption) => JSON.stringify([o.allDay, o.startDay, o.start, o.endDay]);
-  const seen = new Set(ours.options.map(key));
-  const extra = alt.options.filter((o) => !seen.has(key(o)));
-  return { kind: "options", options: [...ours.options, ...extra].slice(0, MAX_OPTIONS) };
+  const seen = new Set(first.map(key));
+  return { kind: "options", options: [...first, ...second.filter((o) => !seen.has(key(o)))].slice(0, MAX_OPTIONS) };
 }
 
 /** Длительность и «весь день» из черновика. */

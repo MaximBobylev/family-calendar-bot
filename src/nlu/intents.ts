@@ -1,6 +1,8 @@
 // Реестр интентов (docs/intents.md): схемы tools для LLM и разбор ответа.
 // LLM не вычисляет даты — только копирует фрагменты, как сказано (ADR-0005 п.3).
 
+import { type DateStructure, parseDateStructure } from "../dates/structured";
+import { DATE_STRUCTURE_RULES, DATE_STRUCTURE_SCHEMA } from "./date-structure";
 import { callTools, type CallOptions, type LlmConfig, type ToolCall, type ToolDefinition } from "./llm";
 
 export interface CreateEventIntent {
@@ -12,6 +14,8 @@ export interface CreateEventIntent {
   allDay?: boolean;
   calendar?: string;
   location?: string;
+  /** Структура даты (ревью дат, шаг 4): даты считает наш код; нет или испорчена — undefined (второе мнение — `start`). */
+  when?: DateStructure;
 }
 
 export interface ModifyEventIntent {
@@ -107,6 +111,8 @@ export const TOOLS: ToolDefinition[] = [
           all_day: { type: "boolean", description: "true for birthdays, anniversaries, holidays, vacations, whole-day events." },
           calendar: str("Only if the user explicitly named a calendar in this message: its name exactly as in the user's calendar list."),
           title: str("Event name only, without date/time/duration words: «Созвон с Петей». Omit if the user did not name it («встречу» is not a name)."),
+          // Последним: модель, оборвавшая JSON, теряет только второе мнение о дате, а не название
+          when: { ...DATE_STRUCTURE_SCHEMA, description: "The same date/time as a STRUCTURE (see DATE STRUCTURE rules). Omit if no date/time was said." },
         },
         required: ["start"],
       },
@@ -181,12 +187,19 @@ export const TOOLS: ToolDefinition[] = [
 ];
 
 // Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
-// календарь до названия, два запроса в одном сообщении. Прогон: scripts/eval-intents.ts на testdata/nlu/intents.yaml.
+// календарь до названия, два запроса в одном сообщении. Правила структуры даты `when` — до примеров: в конце промпта
+// они вытесняли правило календаря (замер 2026-10-08, раунд 2 llm-date-resolution-eval.md). Прогон: scripts/eval-intents.ts на testdata/nlu/intents.yaml.
 export const SYSTEM_PROMPT = `You route a user's message (Russian or English, often a voice transcript) to a calendar tool.
 Copy date/time words VERBATIM from the message — never drop the day, never compute or translate dates.
 Omit optional fields the user did not say. title is whatever names the event, even one word («стоматолог»); a bare «встреча» is not a title.
-calendar: only if the message refers to one of the user's calendars — return that name from the list; never guess.
+calendar: only if the message refers to one of the user's calendars — return that name from the list; never guess. A person's calendar may be named in another case or by a short form of the name («в календарь Маше» → «Мария»).
 Two separate requests in one message → one tool call per request. Not about the user's calendar → "unsupported".
+In create_event also fill "when" — the date/time words of "start" as a structure, e.g. "Созвон с Петей завтра в 15:30 на полчаса" → "when":{"day":{"type":"relative_days","days":1},"time":{"hour":15,"minute":30}}.
+
+DATE STRUCTURE (create_event.when) — kind=point:
+${DATE_STRUCTURE_RULES}
+
+The examples below omit "when" for brevity — fill it anyway.
 Examples:
 "Созвон с Петей завтра в 15:30 на полчаса" → create_event {"start":"завтра в 15:30","duration":"на полчаса","title":"Созвон с Петей"}
 "Каждый понедельник в 10 планёрка" → create_event {"start":"Каждый понедельник в 10","title":"Планёрка"}
@@ -277,6 +290,12 @@ export class LlmChainError extends Error {
   }
 }
 
+/** Структура даты из аргументов: строгая проверка, испорченная — как не данная. */
+function whenOf(raw: unknown): { when?: DateStructure } {
+  const when = parseDateStructure(raw);
+  return when ? { when } : {};
+}
+
 /** Вызовы tools → интент (отдельно — чтобы замеры могли переоценить сохранённые ответы без новых вызовов). */
 export function intentFromCalls(toolCalls: ToolCall[]): Intent {
   // В MVP — одна команда на сообщение (US-12)
@@ -302,6 +321,7 @@ export function intentFromCalls(toolCalls: ToolCall[]): Intent {
       ...opt("calendar"),
       ...opt("location"),
       ...(a.all_day === true ? { allDay: true } : {}),
+      ...whenOf(a.when),
     } as CreateEventIntent;
   }
   if (call?.name === "delete_event") {

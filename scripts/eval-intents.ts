@@ -17,7 +17,9 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { pickStart } from "../src/bot/create-logic";
+import { llmDateCheck } from "../src/bot/create-logic";
+import { parseLocal } from "../src/dates/calendar";
+import { resolveDateStructure } from "../src/dates/structured";
 import { findCalendarByName } from "../src/calendar/match";
 import { cleanTitle, extractDateSpans, extractRecurrenceSpan, looksAllDay } from "../src/dates/extract";
 import { parseDateFragment } from "../src/dates";
@@ -162,7 +164,10 @@ interface Outcome {
 /** Фрагмент даты → «2026-10-09T16:00» / «2026-10-09» (как resolveDue в bot/assign/start.ts); нет/ошибка — null. */
 function resolvePoint(text: string | undefined): string | null {
   if (!text) return null;
-  const parsed = parseDateFragment({ text, kind: "point", now, tz });
+  return firstValue(parseDateFragment({ text, kind: "point", now, tz }));
+}
+
+function firstValue(parsed: ReturnType<typeof parseDateFragment>): string | null {
   if ("error" in parsed) return parsed.error === "in_past" ? "past" : null;
   const v = "ambiguous" in parsed ? parsed.ambiguous[0]! : parsed;
   if ("datetime" in v) return v.datetime;
@@ -225,13 +230,14 @@ function downstream(c: Case, intent: Intent): Outcome {
     }
     const rec = extractRecurrenceSpan(famText, now, tz);
     const spans = extractDateSpans(rec ? rec.rest : famText, now, tz, "point");
-    // Как route-intent.ts: наш кусок, `start` от LLM — второе мнение (pickStart)
-    const pick = rec ? {} : pickStart(famText, spans.point, eff.start);
+    // Как route-intent.ts: наш кусок, структура `when` (или `start`) от LLM — второе мнение (llmDateCheck)
+    const llm = { start: eff.start, ...(eff.when ? { when: eff.when } : {}) };
+    const pick = rec ? {} : llmDateCheck(famText, spans.point, llm, parseLocal(now), tz).pick;
     const startText = pick.startText;
     const durationText = spans.duration ?? eff.duration;
     out.recurrence = !!rec;
     const ours = resolvePoint(startText);
-    const alt = resolvePoint(pick.altStartText);
+    const alt = pick.altWhen ? firstValue(resolveDateStructure(pick.altWhen, "point", parseLocal(now), tz)) : resolvePoint(pick.altStartText);
     out.start = rec ? null : !ours?.includes("T") && alt?.includes("T") ? alt : ours;
     out.title = cleanTitle(
       eff.title,

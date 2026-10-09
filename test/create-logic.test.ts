@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarInfo } from "../src/calendar/model";
 import { formatMoment, parseLocal } from "../src/dates/calendar";
-import { type CreateOption, pickStart, resolveCalendar, resolveDraft, startCheck } from "../src/bot/create-logic";
+import { type CreateOption, llmDateCheck, pickStart, resolveCalendar, resolveDraft, startCheck } from "../src/bot/create-logic";
+import type { DateStructure } from "../src/dates/structured";
 
 // «Сейчас» — ср 7 октября 2026, 10:00 (как в приёмочных сценариях).
 const now = parseLocal("2026-10-07T10:00");
@@ -148,6 +149,65 @@ describe("сверка даты с LLM (ревью 2026-10-08, шаг 1)", () =>
 
   it("у нас только день, start не помогает — спросить время", () =>
     expect(resolve({ startText: "в пятницу", altStartText: "по Киеву" })).toEqual({ kind: "ask", question: "askTime", keepStart: true }));
+});
+
+describe("структура даты `when` от LLM — второе мнение (ревью дат, шаги 4–5)", () => {
+  const W = {
+    tomorrow15: { day: { type: "relative_days", days: 1 }, time: { hour: 15, minute: 0 } },
+    friday15: { day: { type: "weekday", weekday: "FR" }, time: { hour: 15, minute: 0 } },
+    firstMonNov10: { day: { type: "nth_weekday", n: 1, weekday: "MO", month: 11 }, time: { hour: 10, minute: 0 } },
+    firstMonNov: { day: { type: "nth_weekday", n: 1, weekday: "MO", month: 11 } },
+    unsupported: { error: "unsupported" },
+  } as const satisfies Record<string, DateStructure>;
+  const check = (text: string, point: string | undefined, when: DateStructure | undefined, start?: string, llmFirst = false) =>
+    llmDateCheck(text, point, { ...(start ? { start } : {}), ...(when ? { when } : {}) }, now, tz, llmFirst);
+
+  it.each([
+    ["нет структуры — как раньше, по start", "Созвон завтра в 15", "завтра в 15", undefined, "завтра в 15", "agree", "start"],
+    ["нет ни структуры, ни start", "Созвон", undefined, undefined, undefined, "none", "none"],
+    ["те же даты — agree", "Созвон завтра в 15", "завтра в 15", W.tomorrow15, "завтра в 15", "agree", "when"],
+    ["разные даты — differ", "Созвон завтра в 15", "завтра в 15", W.friday15, undefined, "differ", "when"],
+    ["своего куска нет — llm_only", "Созвон в первый понедельник ноября в 10", undefined, W.firstMonNov10, undefined, "llm_only", "when"],
+    ["модель сама не разобрала — llm_unsure", "Созвон завтра в 15", "завтра в 15", W.unsupported, undefined, "llm_unsure", "when"],
+    ["модель не разобрала и куска нет — none", "Созвон после отпуска", undefined, W.unsupported, "после отпуска", "none", "when"],
+  ] as const)("%s", (_n, text, point, when, start, agreement, llm) => {
+    const c = check(text, point, when, start);
+    expect(c.agreement).toBe(agreement);
+    expect(c.llm).toBe(llm);
+  });
+
+  it("структура важнее start: start с выдумкой не мешает", () =>
+    expect(check("Созвон завтра в 15", "завтра в 15", W.friday15, "в пятницу в 19").pick).toEqual({ startText: "завтра в 15", altWhen: W.friday15 }));
+
+  it("грамматика не уверена — дата из структуры", () => {
+    const [o, ...rest] = options(resolve({ altWhen: W.firstMonNov10 }));
+    expect(rest).toEqual([]);
+    expect(span(o!)).toBe("2026-11-02T10:00 – 2026-11-02T11:00");
+    expect(o!.fromLlm).toBe(true);
+  });
+
+  it("расходятся — оба вариантами, наш первый; пересланное — модель первой", () => {
+    expect(options(resolve({ startText: "завтра в 15", altWhen: W.friday15 })).map((o) => [span(o), o.fromLlm ?? false])).toEqual([
+      ["2026-10-08T15:00 – 2026-10-08T16:00", false],
+      ["2026-10-09T15:00 – 2026-10-09T16:00", true],
+    ]);
+    expect(options(resolve({ startText: "завтра в 15", altWhen: W.friday15, llmFirst: true })).map(span)).toEqual([
+      "2026-10-09T15:00 – 2026-10-09T16:00",
+      "2026-10-08T15:00 – 2026-10-08T16:00",
+    ]);
+  });
+
+  it("у нас только день, в структуре — момент: берём структуру", () =>
+    expect(options(resolve({ startText: "в пятницу", altWhen: W.friday15 })).map(span)).toEqual(["2026-10-09T15:00 – 2026-10-09T16:00"]));
+
+  it("только структура и в ней только день — спросить время, дату сохранить словами для ответа", () =>
+    expect(resolve({ altWhen: W.firstMonNov })).toEqual({ kind: "ask", question: "askTime", keepStart: true, startText: "02.11.2026" }));
+
+  it("пояс из структуры — пересчёт и подпись для карточки", () => {
+    const [o] = options(resolve({ altWhen: { day: { type: "date", day: 3, month: 11 }, time: { hour: 15, minute: 0 }, timezone: "Europe/Kyiv" } }));
+    expect(span(o!)).toBe("2026-11-03T16:00 – 2026-11-03T17:00");
+    expect(o!.zone).toEqual({ tz: "Europe/Kyiv", ru: "по Киеву", en: "Kyiv time" });
+  });
 });
 
 describe("время в другом поясе и метки вариантов (tech-debt #26)", () => {

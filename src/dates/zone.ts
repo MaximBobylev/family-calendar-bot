@@ -73,3 +73,16 @@ export function namedZone(fragment: string): NamedZone | undefined {
   }
   return undefined;
 }
+
+/** Одинаковые пояса под разными IANA-именами: модель пишет новое имя, словарь — старое. */
+const TZ_ALIASES: Record<string, string> = { "Europe/Kyiv": "Europe/Kiev" };
+
+/** Подписи для пояса из структуры LLM (IANA-имя): город словаря — «по Киеву», Etc/GMT-4 — «по UTC+4», иначе само имя (ревью дат, шаг 4). */
+export function zoneByTz(tz: string): NamedZone {
+  const city = ZONE_CITIES.find((c) => c.tz === (TZ_ALIASES[tz] ?? tz));
+  if (city) return { tz, ru: `по ${city.ru}`, en: `${city.en} time` };
+  // В Etc/GMT знак обратный: Etc/GMT-4 = UTC+4
+  const etc = /^Etc\/GMT([+-])(\d{1,2})$/.exec(tz);
+  const label = etc ? `UTC${etc[1] === "-" ? "+" : "-"}${etc[2]}` : tz;
+  return { tz, ru: `по ${label}`, en: label };
+}

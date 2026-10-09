@@ -383,3 +383,82 @@
     - telegram: { from: 1001, text: "в 12" }
     - expect_telegram:
         - { text_contains: ["Когда именно?", "<b>Встреча с Машей</b>"], buttons: ["сб, 10 октября, 12:00–13:00", "вс, 11 октября, 12:00–13:00", "Отмена"] }
+
+# Ревью парсера дат, шаг 4: LLM отдаёт структуру даты `when`, даты считает наш код (src/dates/structured.ts).
+# Структура — второе мнение вместо строки `start`: грамматика не уверена — дата из структуры; расходятся — обе кнопками.
+
+- id: create-date-structure-when-grammar-unsure
+  story: US-30
+  steps:
+    - *setup
+    # Порядковый день недели грамматика не разбирает (unsure) — дата из структуры модели
+    - llm:
+        "Поставь стоматолога в первый понедельник ноября в 10":
+          tool: create_event
+          args: { start: "в первый понедельник ноября в 10", title: "Стоматолог", when: { day: { type: nth_weekday, n: 1, weekday: MO, month: 11 }, time: { hour: 10, minute: 0 } } }
+    - telegram: { from: 1001, text: "Поставь стоматолога в первый понедельник ноября в 10" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Стоматолог</b>", "пн, 2 ноября, 10:00–11:00"]
+          buttons: ["Создать", "Отмена"]
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "Стоматолог", start: "2026-11-02T10:00:00+03:00", end: "2026-11-02T11:00:00+03:00" }]
+
+- id: create-date-structure-without-time-asks-time-keeps-date
+  story: US-30
+  steps:
+    - *setup
+    # Только день из структуры — «Во сколько?», ответ дополняет ту же дату (а не «сегодня в 10»)
+    - llm:
+        "Поставь стоматолога во второй вторник ноября":
+          tool: create_event
+          args: { start: "во второй вторник ноября", title: "Стоматолог", when: { day: { type: nth_weekday, n: 2, weekday: TU, month: 11 } } }
+    - telegram: { from: 1001, text: "Поставь стоматолога во второй вторник ноября" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    - telegram: { from: 1001, text: "в 11" }
+    - expect_telegram:
+        - text_contains: ["Создать событие?", "<b>Стоматолог</b>", "вт, 10 ноября, 11:00–12:00"]
+
+- id: create-date-structure-disagrees-two-buttons
+  story: US-30
+  steps:
+    - *setup
+    # Наш кусок — завтра в 15, структура модели — пятница в 15: обе кнопками, наш первым
+    - llm:
+        "Созвон с Олегом завтра в 15":
+          tool: create_event
+          args: { start: "завтра в 15", title: "Созвон с Олегом", when: { day: { type: weekday, weekday: FR }, time: { hour: 15, minute: 0 } } }
+    - telegram: { from: 1001, text: "Созвон с Олегом завтра в 15" }
+    - expect_telegram:
+        - { text_contains: ["Когда именно?", "<b>Созвон с Олегом</b>"], buttons: ["чт, 8 октября, 15:00–16:00", "пт, 9 октября, 15:00–16:00", "Отмена"] }
+
+- id: create-date-structure-unsupported-asks
+  story: US-30
+  steps:
+    - *setup
+    # Модель скопировала в start только «через неделю» (раньше — 14 октября молча), но в структуре сказала «не выражается» — вопрос
+    - llm:
+        "Ужин с Олегом через неделю после отпуска":
+          tool: create_event
+          args: { start: "через неделю", title: "Ужин с Олегом", when: { error: unsupported } }
+    - telegram: { from: 1001, text: "Ужин с Олегом через неделю после отпуска" }
+    - expect_telegram:
+        - text_contains: ["Когда поставить?"]
+          text_not_contains: ["14 октября"]
+
+- id: create-garbled-date-structure-ignored
+  story: US-30
+  steps:
+    - *setup
+    # Бесплатная модель испортила структуру (нет такого вида дня) — она отбрасывается целиком, работает `start`, как раньше
+    - llm:
+        "Поставь стоматолога через две недели во вторник в 9":
+          tool: create_event
+          args: { start: "через две недели во вторник в 9", title: "Стоматолог", when: { day: { type: in_two_weeks, weekday: TU }, time: { hour: 9, minute: 0 } } }
+    - telegram: { from: 1001, text: "Поставь стоматолога через две недели во вторник в 9" }
+    - expect_telegram:
+        - text_contains: ["Когда поставить?"]
+          text_not_contains: ["21 октября", "20 октября"]

@@ -111,3 +111,17 @@
         seen: { text: "Поезд Москва — Казань\n12.10 в 21:15", args: { title: "Поезд в Казань" } }
     - expect_telegram:
         - { text_contains: ["<b>Поезд в Казань</b>", "пн, 12 октября, 21:15–22:15"] }
+
+- id: photo-date-from-model-structure
+  story: US-66
+  steps:
+    - *setup
+    # Ревью дат, шаг 5: дату на картинке наш парсер не берёт (порядковый день недели) — из структуры `when` модели
+    - photo:
+        from: 1001
+        content: "img-club"
+        seen:
+          text: "Шахматный клуб — каждый первый понедельник ноября в 17:00"
+          args: { title: "Шахматный клуб", start: "первый понедельник ноября в 17:00", when: { day: { type: nth_weekday, n: 1, weekday: MO, month: 11 }, time: { hour: 17, minute: 0 } } }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Шахматный клуб</b>", "пн, 2 ноября, 17:00–18:00"] }

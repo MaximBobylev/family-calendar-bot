@@ -12,7 +12,7 @@ LLM получает текст + контекст (текущие дата/вр
 |---|---|---|---|---|
 | `list_events` | `range`, `query?`, `calendar?`, `limit?` | `range` | нет | MVP |
 | `find_event` | `event_ref` (в реализации: `event?`, `next?`) | — («следующая встреча» — без слотов) | нет | MVP |
-| `create_event` | `calendar?`, `title?`, `start`, `end?` / `duration?`, `all_day?`, `location?`, `description?`, `reminders?`, `recurrence?`, `conference?` | `start` | по режиму; серия — всегда | MVP |
+| `create_event` | `calendar?`, `title?`, `start`, `when?`, `end?` / `duration?`, `all_day?`, `location?`, `description?`, `reminders?`, `recurrence?`, `conference?` | `start` | по режиму; серия — всегда | MVP; `when` — 2026-10-08 |
 | `modify_event` | `event_ref`, `scope?`, `reschedule?`, `duration?`, `title?`, `description?`, `location?`, `recurrence?`, `target_calendar?` | `event_ref` + хотя бы одно изменение | по режиму; `following`/`all` — всегда | MVP |
 | `set_reminders` | `event_ref`, `reminders[]` (`minutes`, `method`), `scope?` | оба | по режиму | MVP — реализован как `modify_event`: напоминания, место и описание разбираются из текста детерминированно (`src/nlu/detail-hints.ts`), отдельного tool у LLM нет |
 | `delete_event` | `event_ref` **или** `range`, `scope?` | одно из двух | всегда | MVP |
@@ -31,6 +31,8 @@ LLM получает текст + контекст (текущие дата/вр
 | `extract_events` | `source` (`forward` / `image` / `file`), `instruction?` (комментарий пользователя), `events[]` (поля как у `create_event` + `quotes`), `looks_like_change?` | `events[]` (может быть пустым) | всегда | R1 |
 | `clarify` | `missing[]` (имена слотов) | — | — | служебный |
 | `unsupported` | `reason` (enum) | — | — | служебный |
+
+`when` (ревью парсера дат, шаги 4–5) — те же слова даты, что в `start`, но **структурой**: `day` (`relative_days` / `relative_months` / `weekday`+`which` / `date` / `nth_weekday` / `last_day`, у любого — `offset_days`), `time` (час как сказан), `part_of_day`, `in_minutes`, `interval`, `alt_time`, `date_range`, `period`, `by`, `timezone`, `error` (`unparseable` / `unsupported` / `empty` / `invalid_time`), `alternatives[]`. Схема и правила — `src/nlu/date-structure.ts` (то же поле — в `create_event` у фото, `src/vision/understand.ts`). Даты считает наш код (`src/dates/structured.ts`); поле необязательное, испорченное отбрасывается целиком (тогда второе мнение — `start`, как раньше). В схеме последнее: оборванный JSON теряет его, а не `title`. Как используется — `docs/date-rules.md`, «Дата из всей фразы и сверка с LLM».
 
 `set_setting.setting` ∈ {`default_duration`, `default_reminders`, `default_reminders_all_day`, `confirmation_mode`, `language`, `default_calendar`}. Уведомления — только через `set_notifications`.
 

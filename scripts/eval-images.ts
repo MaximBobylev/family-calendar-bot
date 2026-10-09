@@ -12,10 +12,12 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { pickStart } from "../src/bot/create-logic";
+import { llmDateCheck } from "../src/bot/create-logic";
 import { foreignDateSpans, guessPlace, heuristicTitle } from "../src/bot/ingest-logic";
 import { normalizeWords, sameWord } from "../src/calendar/match";
 import { parseDateFragment } from "../src/dates";
+import { parseLocal } from "../src/dates/calendar";
+import { type DateStructure, resolveDateStructure } from "../src/dates/structured";
 import { understandImageChain } from "../src/vision/understand";
 
 const argv = process.argv.slice(2);
@@ -93,6 +95,8 @@ interface Answer {
   text: string;
   title?: string;
   start?: string;
+  /** Структура даты (только прод-путь gg:, понимает src/vision/understand.ts; копия промпта для or: — без неё). */
+  when?: DateStructure;
   location?: string;
   tokens?: string;
 }
@@ -152,14 +156,25 @@ async function viaGemini(model: string, mime: string, bytes: ArrayBuffer): Promi
   );
   const tokens = `${result.tokensIn}/${result.tokensOut}`;
   if (result.noEvent) return { noEvent: true, text: result.text, tokens };
-  return { noEvent: false, text: result.text, title: result.intent.title, start: result.intent.start, location: result.intent.location, tokens };
+  return {
+    noEvent: false,
+    text: result.text,
+    title: result.intent.title,
+    start: result.intent.start,
+    when: result.intent.when,
+    location: result.intent.location,
+    tokens,
+  };
 }
 
 // --- Оценка: как bot/ingest.ts proposeFromForeign ------------------------------------------------------------------------
 
 function resolvePoint(text: string | undefined): string | null {
   if (!text) return null;
-  const parsed = parseDateFragment({ text, kind: "point", now, tz });
+  return firstOf(parseDateFragment({ text, kind: "point", now, tz }));
+}
+
+function firstOf(parsed: ReturnType<typeof parseDateFragment>): string | null {
   if ("error" in parsed) return parsed.error === "in_past" ? "past" : null;
   const v = "ambiguous" in parsed ? parsed.ambiguous[0]! : parsed;
   if ("datetime" in v) return v.datetime;
@@ -196,10 +211,10 @@ function grade(img: Img, r: Result): Result {
   const dates = foreignDateSpans(a.text, now, tz);
   const place = a.location ?? guessPlace(a.text);
   const title = a.title ?? heuristicTitle(dates.sentence, dates.fragments, place);
-  // Как ingest.ts: наш кусок, `start` модели — второе мнение (pickStart); у нас только день, у модели момент — модель
-  const pick = pickStart(a.text, dates.point, a.start);
+  // Как ingest.ts: наш кусок, структура `when` (или `start`) модели — второе мнение; у нас только день, у модели момент — модель
+  const pick = llmDateCheck(a.text, dates.point, { start: a.start, ...(a.when ? { when: a.when } : {}) }, parseLocal(now), tz).pick;
   const ours = resolvePoint(pick.startText);
-  const alt = resolvePoint(pick.altStartText);
+  const alt = pick.altWhen ? firstOf(resolveDateStructure(pick.altWhen, "point", parseLocal(now), tz)) : resolvePoint(pick.altStartText);
   const start = !ours?.includes("T") && alt?.includes("T") ? alt : ours;
   const out: Result = { ...r, card, start, modelStart: resolvePoint(a.start), title, place };
   // Не-событие: верно, если карточки нет или в ней нет даты (бот спросит «когда?» — мягкая ошибка, считаем неверным)
