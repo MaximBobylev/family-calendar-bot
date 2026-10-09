@@ -64,6 +64,8 @@
         // провайдеров: по имени панель «Квоты» находит эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance)
         "LLM_CHAIN": "[{\"name\":\"openrouter\",\"baseUrl\":\"http://fakes:9100/llm/v1\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-model\"},{\"name\":\"deepseek\",\"baseUrl\":\"http://fakes:9100/llm-backup/v1\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-backup\"}]",
         "VOICE_CHAIN": "[{\"name\":\"gemini\",\"kind\":\"gemini\",\"baseUrl\":\"http://fakes:9100/gemini/v1beta\",\"apiKey\":\"test-gemini-key\",\"model\":\"fake-voice\"}]",
+        // Фото → событие — как на запуске (роадмап R3): DeepSeek (OpenAI-совместимый, image_url) → Gemini запасной
+        "VISION_CHAIN": "[{\"name\":\"deepseek\",\"kind\":\"openai\",\"baseUrl\":\"http://fakes:9100/vision/v1\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-vision\"},{\"name\":\"gemini\",\"kind\":\"gemini\",\"baseUrl\":\"http://fakes:9100/gemini/v1beta\",\"apiKey\":\"test-gemini-key\",\"model\":\"fake-voice\"}]",
         "STT_CHAIN": "[{\"name\":\"groq\",\"kind\":\"openai\",\"baseUrl\":\"http://fakes:9100/stt-openai\",\"apiKey\":\"test-stt-key\",\"model\":\"whisper-large-v3-turbo\"},{\"name\":\"workers-ai\",\"kind\":\"workers-ai\",\"baseUrl\":\"http://fakes:9100/stt\",\"apiKey\":\"test-llm-key\",\"model\":\"fake-whisper\"}]",
         "TEST_MODE": "true",
         // Каналы events.watch открываются у фейка; push в сценариях шлёт шаг google_push

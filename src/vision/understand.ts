@@ -1,14 +1,29 @@
-// US-66: фото/скриншот → событие. Gemini (generateContent, inlineData image/*) за один запрос возвращает дословный
-// видимый текст («text») и вызов create_event (название, фрагмент даты, место) или no_event. Цепочка — Gemini-провайдеры
-// из VOICE_CHAIN (config.vision). Даты считает НАШ парсер по тексту (ADR-0005; синтетика голоса 2026-10-05 показала:
-// мультимодальная модель «исправляет» время), от модели — название, место и структура даты `when` (её разрешает наш код,
-// парсер текста проверяет — ревью дат, шаг 5).
+// US-66: фото/скриншот → событие. Модель за один запрос возвращает дословный видимый текст («text») и вызов create_event
+// (название, фрагмент даты, место) или no_event. Цепочка — config.vision (VISION_CHAIN; без него — Gemini из VOICE_CHAIN):
+//   kind "gemini" — generateContent, inlineData image/*;
+//   kind "openai" — OpenAI-совместимый chat/completions, image_url data:URL (DeepSeek на запуске, роадмап R3).
+// Даты считает НАШ парсер по тексту (ADR-0005; синтетика голоса 2026-10-05 показала: мультимодальная модель «исправляет»
+// время), от модели — название, место и структура даты `when` (её разрешает наш код, парсер текста проверяет — ревью дат, шаг 5).
 
 import { fetchWithTimeout } from "../net/fetch";
 import { parseDateStructure } from "../dates/structured";
 import { DATE_STRUCTURE_RULES, DATE_STRUCTURE_SCHEMA } from "../nlu/date-structure";
 import type { CreateEventIntent } from "../nlu/intents";
-import { base64, type VoiceConfig } from "../voice/understand";
+import { safeParse } from "../nlu/llm";
+import { base64 } from "../voice/understand";
+
+export interface VisionConfig {
+  name?: string;
+  kind: "gemini" | "openai";
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  /** Поля запроса провайдера (DeepSeek: thinking off) — только kind "openai". */
+  extraBody?: Record<string, unknown>;
+  /** Оценка цены, $ за 1M токенов; нет — 0 (бесплатный тариф). */
+  inPerM?: number;
+  outPerM?: number;
+}
 
 export type VisionResult =
   | { noEvent: true; text: string; tokensIn: number; tokensOut: number }
@@ -54,12 +69,34 @@ const TOOLS = [
   },
 ];
 
+/** Те же инструменты в формате OpenAI. */
+const OPENAI_TOOLS = TOOLS.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parametersJsonSchema } }));
+
 const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
-async function viaGemini(cfg: VoiceConfig, data: string, mimeType: string, caption: string | undefined): Promise<VisionResult> {
+/** Подпись — слова самого пользователя (инструкция, US-66); отдельной частью, как данные. */
+const captionPart = (caption: string) => `User's caption: ${JSON.stringify(caption.slice(0, 300))}`;
+
+/** Аргументы вызова → результат; не create_event — «события нет». */
+function toResult(name: string | undefined, a: Record<string, unknown>, tokensIn: number, tokensOut: number): VisionResult {
+  const text = s(a.text) ?? "";
+  if (name !== "create_event") return { noEvent: true, text, tokensIn, tokensOut };
+  const title = s(a.title);
+  const location = s(a.location);
+  const when = parseDateStructure(a.when);
+  const intent: CreateEventIntent = {
+    name: "create_event",
+    start: s(a.start) ?? "",
+    ...(title ? { title } : {}),
+    ...(location ? { location } : {}),
+    ...(when ? { when } : {}),
+  };
+  return { noEvent: false, text, intent, tokensIn, tokensOut };
+}
+
+async function viaGemini(cfg: VisionConfig, data: string, mimeType: string, caption: string | undefined): Promise<VisionResult> {
   const parts: unknown[] = [{ inlineData: { mimeType, data } }];
-  // Подпись — слова самого пользователя (инструкция, US-66); отдельной частью, как данные
-  if (caption) parts.push({ text: `User's caption: ${JSON.stringify(caption.slice(0, 300))}` });
+  if (caption) parts.push({ text: captionPart(caption) });
   const res = await fetchWithTimeout(
     `${cfg.baseUrl}/models/${cfg.model}:generateContent`,
     {
@@ -81,36 +118,57 @@ async function viaGemini(cfg: VoiceConfig, data: string, mimeType: string, capti
     usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
   const call = (j.candidates?.[0]?.content?.parts ?? []).find((p) => p.functionCall)?.functionCall;
-  const tokensIn = j.usageMetadata?.promptTokenCount ?? 0;
-  const tokensOut = j.usageMetadata?.candidatesTokenCount ?? 0;
-  const a = call?.args ?? {};
-  const text = s(a.text) ?? "";
-  if (call?.name !== "create_event") return { noEvent: true, text, tokensIn, tokensOut };
-  const title = s(a.title);
-  const location = s(a.location);
-  const when = parseDateStructure(a.when);
-  const intent: CreateEventIntent = {
-    name: "create_event",
-    start: s(a.start) ?? "",
-    ...(title ? { title } : {}),
-    ...(location ? { location } : {}),
-    ...(when ? { when } : {}),
+  return toResult(call?.name, call?.args ?? {}, j.usageMetadata?.promptTokenCount ?? 0, j.usageMetadata?.candidatesTokenCount ?? 0);
+}
+
+async function viaOpenAi(cfg: VisionConfig, data: string, mimeType: string, caption: string | undefined): Promise<VisionResult> {
+  const content: unknown[] = [{ type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } }];
+  if (caption) content.push({ type: "text", text: captionPart(caption) });
+  const res = await fetchWithTimeout(
+    `${cfg.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: 0,
+        max_tokens: 1024,
+        messages: [
+          { role: "system", content: SYSTEM },
+          { role: "user", content },
+        ],
+        tools: OPENAI_TOOLS,
+        tool_choice: "required",
+        ...cfg.extraBody,
+      }),
+    },
+    VISION_TIMEOUT_MS,
+  );
+  if (!res.ok) throw new Error(`vision ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const j = (await res.json()) as {
+    choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[] } }[];
+    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    error?: unknown;
   };
-  return { noEvent: false, text, intent, tokensIn, tokensOut };
+  // 200 с ошибкой в теле и без choices — сбой провайдера, не ответ модели (tech-debt #24): пусть цепочка идёт дальше
+  if (j.error && !j.choices?.length) throw new Error(`vision 200 with error: ${JSON.stringify(j.error).slice(0, 300)}`);
+  const call = j.choices?.[0]?.message?.tool_calls?.[0]?.function;
+  return toResult(call?.name, call ? safeParse(call.arguments) : {}, j.usage?.prompt_tokens ?? 0, j.usage?.completion_tokens ?? 0);
 }
 
 /** Цепочка провайдеров: ошибка — следующий. Все упали — ошибка со списком причин. */
 export async function understandImageChain(
-  chain: VoiceConfig[],
+  chain: VisionConfig[],
   image: ArrayBuffer,
   mimeType: string,
   caption?: string,
-): Promise<{ result: VisionResult; via: VoiceConfig; failed: string[] }> {
+): Promise<{ result: VisionResult; via: VisionConfig; failed: string[] }> {
   const data = base64(image);
   const failed: string[] = [];
   for (const cfg of chain) {
     try {
-      return { result: await viaGemini(cfg, data, mimeType, caption), via: cfg, failed };
+      const result = cfg.kind === "openai" ? await viaOpenAi(cfg, data, mimeType, caption) : await viaGemini(cfg, data, mimeType, caption);
+      return { result, via: cfg, failed };
     } catch (e) {
       failed.push(`${cfg.name ?? cfg.baseUrl}: ${String(e instanceof Error ? e.message : e).slice(0, 300)}`);
     }

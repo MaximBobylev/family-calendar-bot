@@ -128,9 +128,17 @@ if (openrouterKey && voiceOpenRouterModel) {
   voiceChain.push({ name: "openrouter", kind: "openai-audio", baseUrl: "https://openrouter.ai/api/v1", apiKey: openrouterKey, model: voiceOpenRouterModel });
 }
 
+// Фото → событие (US-66). Решение владельца 2026-10-08 (роадмап R3): на запуске — DeepSeek Flash (замер: 12/12 событий,
+// p95 2,4 с против 22,7 с у Gemini), Gemini — запасной; пока разработка — только Gemini. Пишем всегда, даже `[]`.
+const visionChain: Record<string, unknown>[] = [];
+const llmDeepseek = llmChain.find((c) => c.name === "deepseek");
+if (llmDeepseek) visionChain.push({ ...llmDeepseek, kind: "openai" });
+visionChain.push(...voiceChain.filter((c) => c.kind === "gemini"));
+
 console.log(`\nLLM: ${llmChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
 console.log(`STT: ${sttChain.map((c) => `${c.name} (${c.model})`).join(" → ")}`);
 console.log(`Переслушивание голоса: ${voiceChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY)"}`);
+console.log(`Фото → событие: ${visionChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY и DeepSeek)"}`);
 
 // Имя бота — для ссылок-приглашений в дом и обращений в группе (US-90, US-94): из getMe, не из .env
 const me = (await (await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/getMe`)).json()) as { ok: boolean; result?: { username?: string } };
@@ -151,6 +159,7 @@ const secrets: Record<string, string> = {
   LLM_CHAIN: JSON.stringify(llmChain),
   STT_CHAIN: JSON.stringify(sttChain),
   VOICE_CHAIN: JSON.stringify(voiceChain),
+  VISION_CHAIN: JSON.stringify(visionChain),
 };
 // Ротация ключа (tech-debt #8): прежние ключи — только если заданы; пусто — секрет не трогаем
 const oldKeys = env.TOKEN_ENCRYPTION_KEYS_OLD?.trim();

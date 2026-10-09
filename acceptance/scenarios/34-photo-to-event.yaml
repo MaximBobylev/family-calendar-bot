@@ -1,5 +1,6 @@
-# US-66: фото / скриншот → событие. Gemini читает картинку (видимый текст + название и место), дату считает наш
-# парсер по видимому тексту; всегда карточка-подтверждение. «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+# US-66: фото / скриншот → событие. Модель читает картинку (видимый текст + название и место), дату считает наш
+# парсер по видимому тексту; всегда карточка-подтверждение. Цепочка в dev — как на запуске: DeepSeek (OpenAI-совместимый,
+# image_url) → Gemini запасной (роадмап R3). «Сейчас» — ср 7 октября 2026, 10:00 МСК.
 
 - id: photo-poster-to-event
   story: US-66
@@ -24,8 +25,8 @@
     - expect_telegram:
         - text_contains: ["Создать событие?", "<b>Концерт хора «Весна»</b>", "вт, 20 октября, 19:00–20:00", "📍 ДК Ленсовета, Каменноостровский пр., 42", "📝 Из изображения:"]
           buttons: ["Создать", "Отмена"]
-    - expect_vision_requests: 1
-    # Текстовая LLM не нужна: всё дал один вызов Gemini
+    - expect_vision_requests: { count: 1, via: openai }
+    # Текстовая LLM не нужна: всё дал один вызов модели
     - expect_llm_requests: 0
     - press: "Создать"
     - expect_google_events:
@@ -88,9 +89,11 @@
     - photo: { from: 1001, content: "img-cat", seen: { no_event: true, text: "" } }
     - expect_telegram:
         - { text_contains: ["Не нашёл на изображении ничего похожего на событие"] }
+    # Сбой у обоих звеньев цепочки — честное сообщение
     - photo: { from: 1001, content: "img-broken", seen: { error: 500 } }
     - expect_telegram:
         - { text_contains: ["Не получилось прочитать изображение"] }
+    - expect_vision_requests: 3
     # Картинка файлом: слишком большая — без вызова модели; не тот формат — тоже
     - photo: { from: 1001, content: "img-huge", as_document: "image/png", size: 6000000 }
     - expect_telegram:
@@ -98,7 +101,29 @@
     - photo: { from: 1001, content: "img-tiff", as_document: "image/tiff" }
     - expect_telegram:
         - { text_contains: ["JPEG, PNG и WebP"] }
-    - expect_vision_requests: 2
+    - expect_vision_requests: 3
+
+- id: photo-falls-back-to-gemini
+  story: US-66
+  steps:
+    - *setup
+    # Основной (DeepSeek) отвечает 200 с ошибкой в теле, как при перегрузке (tech-debt #24), — читает запасной Gemini
+    - provider_outage: { provider: vision, status: 200 }
+    - photo:
+        from: 1001
+        content: "img-concert"
+        seen:
+          text: "Концерт хора «Весна»\n20 октября в 19:00"
+          args: { title: "Концерт хора «Весна»", start: "20 октября в 19:00" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Концерт хора «Весна»</b>", "вт, 20 октября, 19:00–20:00"] }
+    - expect_vision_requests: { count: 1, via: gemini }
+    - provider_outage: { provider: vision, status: 503 }
+    - photo: { from: 1001, content: "img-cat", seen: { no_event: true, text: "" } }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено."] }
+        - { text_contains: ["Не нашёл на изображении ничего похожего на событие"] }
+    - expect_vision_requests: { count: 2, via: gemini }
 
 - id: photo-as-png-document
   story: US-66

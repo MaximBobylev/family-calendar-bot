@@ -10,6 +10,7 @@
 //   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
 //   /stt-openai/audio/transcriptions — фейк OpenAI-совместимого STT (Groq), multipart: те же фикстуры
 //   /gemini/v1beta/models/<m>:generateContent — фейк мультимодального разбора голоса: ответ по содержимому аудио
+//   /vision/v1/chat/completions     — OpenAI-совместимое чтение картинок (DeepSeek, VISION_CHAIN): те же фикстуры, что у Gemini
 //   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые, фото, .ics — содержимое строкой)
 //
 // Управление для раннера:
@@ -34,15 +35,15 @@
 //                                     и не записываются в calls — сообщение не доставлено
 //   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
 //   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
-//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai | google-write, status}: провайдер отвечает
+//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai | gemini | vision | google-write, status}: провайдер отвечает
 //                                     этой ошибкой (0 — снова работает); проверка переключения на запасной;
 //                                     google-write — запись событий (insert/patch/delete) в Google
 //   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
 //   POST /__fake/voice/fixtures     — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
 //   GET  /__fake/voice/requests     — запросы мультимодального разбора: [{content}]
 //   POST /__fake/vision/fixtures    — {"<содержимое картинки>": {text, tool?, args?} | {no_event: true, text?} | {error: status}}:
-//                                     ответ Gemini на картинку (inlineData image/*), US-66
-//   GET  /__fake/vision/requests    — запросы чтения картинок: [{content, mimeType, caption?}]
+//                                     ответ на картинку (Gemini inlineData image/* или OpenAI image_url), US-66
+//   GET  /__fake/vision/requests    — запросы чтения картинок: [{via: openai | gemini, content, mimeType, caption?}]
 //   GET  /llm/v1/key                — OpenRouter: лимиты ключа (звено «openrouter» цепочки LLM в dev), панель «Квоты»
 //   GET  /llm-backup/user/balance   — DeepSeek: баланс (звено «deepseek»)
 //   POST /cf/client/v4/graphql      — GraphQL Analytics Cloudflare (CF_GRAPHQL_URL в dev): набор — по имени в запросе
@@ -129,7 +130,7 @@ let voiceRequests: { content: string }[] = [];
 // --- Картинки (US-66): ответ Gemini по содержимому файла ---
 type VisionFixture = { text?: string; tool?: string; args?: Record<string, unknown>; no_event?: boolean; error?: number };
 let visionFixtures = new Map<string, VisionFixture>();
-let visionRequests: { content: string; mimeType: string; caption?: string }[] = [];
+let visionRequests: { via: "openai" | "gemini"; content: string; mimeType: string; caption?: string }[] = [];
 // --- Эндпоинты остатков квот (панель «Квоты») ---
 const QUOTAS_DEFAULT = {
   openrouter: {
@@ -295,22 +296,53 @@ function telegramResult(method: string, body: Record<string, unknown>): unknown 
   }
 }
 
-/** Gemini на картинку (US-66): functionCall create_event | no_event с видимым текстом из фикстуры по содержимому файла. */
+/** Ответ на картинку (US-66) по фикстуре содержимого файла: вызов create_event | no_event с видимым текстом; null — ответить ошибкой. */
+function visionCall(
+  via: "openai" | "gemini",
+  content: string,
+  mimeType: string,
+  caption: string | undefined,
+): { status: number; message: string } | { name: string; args: Record<string, unknown> } {
+  visionRequests.push({ via, content, mimeType, ...(caption ? { caption } : {}) });
+  const fx = visionFixtures.get(content);
+  if (!fx) return { status: 400, message: `fake vision: no fixture for «${content}»` };
+  if (fx.error) return { status: fx.error, message: "fake vision error" };
+  return fx.no_event
+    ? { name: "no_event", args: { text: fx.text ?? "" } }
+    : { name: fx.tool ?? "create_event", args: { text: fx.text ?? "", ...(fx.args ?? {}) } };
+}
+
+/** Gemini на картинку: functionCall. */
 function visionAnswer(res: ServerResponse, body: { contents?: { parts?: { inlineData?: { mimeType?: string; data?: string }; text?: string }[] }[] }) {
   const parts = body.contents?.[0]?.parts ?? [];
   const img = parts.find((p) => p.inlineData)!.inlineData!;
-  const content = Buffer.from(img.data ?? "", "base64").toString("utf8");
-  const caption = parts.find((p) => p.text)?.text;
-  visionRequests.push({ content, mimeType: img.mimeType ?? "", ...(caption ? { caption } : {}) });
-  const fx = visionFixtures.get(content);
-  if (!fx) return send(res, 400, { error: { message: `fake vision: no fixture for «${content}»` } });
-  if (fx.error) return send(res, fx.error, { error: { code: fx.error, message: "fake vision error" } });
-  const call = fx.no_event
-    ? { name: "no_event", args: { text: fx.text ?? "" } }
-    : { name: fx.tool ?? "create_event", args: { text: fx.text ?? "", ...(fx.args ?? {}) } };
+  const call = visionCall("gemini", Buffer.from(img.data ?? "", "base64").toString("utf8"), img.mimeType ?? "", parts.find((p) => p.text)?.text);
+  if ("status" in call) return send(res, call.status, { error: { code: call.status, message: call.message } });
   return send(res, 200, {
     candidates: [{ content: { role: "model", parts: [{ functionCall: call }] } }],
     usageMetadata: { promptTokenCount: 1500, candidatesTokenCount: 80 },
+  });
+}
+
+/** OpenAI-совместимый (DeepSeek) на картинку: image_url data:URL → tool_calls. */
+function visionOpenAiAnswer(res: ServerResponse, body: { messages?: { role: string; content: unknown }[] }) {
+  const content = body.messages?.find((m) => m.role === "user")?.content;
+  const parts = Array.isArray(content) ? (content as { type: string; text?: string; image_url?: { url?: string } }[]) : [];
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(parts.find((p) => p.type === "image_url")?.image_url?.url ?? "");
+  if (!m) return send(res, 400, { error: { message: "fake vision: expected image_url data:URL" } });
+  const call = visionCall("openai", Buffer.from(m[2]!, "base64").toString("utf8"), m[1]!, parts.find((p) => p.type === "text")?.text);
+  if ("status" in call) return send(res, call.status, { error: { message: call.message } });
+  return send(res, 200, {
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{ id: "call_0", type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } }],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 1200, completion_tokens: 80 },
   });
 }
 
@@ -432,6 +464,14 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (url.pathname === "/__fake/vision/requests") return send(res, 200, visionRequests);
+
+    if (url.pathname === "/vision/v1/chat/completions" && req.method === "POST") {
+      const outage = outages.get("vision");
+      // 200 — как OpenRouter/DeepSeek при перегрузке: ошибка в теле, без choices
+      if (outage === 200) return send(res, 200, { error: { message: "fake upstream overload", code: 502 } });
+      if (outage) return send(res, outage, { error: { message: "fake outage" } });
+      return visionOpenAiAnswer(res, (await readJson(req)) as never);
+    }
 
     // --- Мультимодальный разбор голоса (Gemini generateContent): аудио → transcript + functionCall ---
     if (/^\/gemini\/v1beta\/models\/[^/]+:generateContent$/.test(url.pathname) && req.method === "POST") {

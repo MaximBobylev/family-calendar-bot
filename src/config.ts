@@ -5,6 +5,7 @@ import type { CostEstimates, UsageLimits } from "./limits";
 import type { LlmConfig } from "./nlu/llm";
 import { type CfPlan, cloudflareGraphql } from "./ops/quota-rules";
 import type { SttConfig } from "./stt/whisper";
+import type { VisionConfig } from "./vision/understand";
 import type { VoiceConfig } from "./voice/understand";
 
 export interface Config {
@@ -39,8 +40,8 @@ export interface Config {
   stt: SttConfig[];
   /** Мультимодальный разбор голоса для эскалации (VOICE_CHAIN); пусто — эскалации нет. */
   voice: VoiceConfig[];
-  /** Чтение фото/скриншотов (US-66): Gemini-провайдеры из VOICE_CHAIN — тот же ключ и модель; пусто — фото не читаем. */
-  vision: VoiceConfig[];
+  /** Чтение фото/скриншотов (US-66): VISION_CHAIN, без него — Gemini-провайдеры из VOICE_CHAIN; пусто — фото не читаем. */
+  vision: VisionConfig[];
   limits: UsageLimits;
   costs: CostEstimates;
   /** GraphQL Analytics Cloudflare для /admin/quotas (Workers AI, Workers, D1, Queues); null — аккаунт неизвестен. */
@@ -116,8 +117,10 @@ export function loadConfig(env: Env): Config {
     admin: { user: env.ADMIN_USER ?? "", password: env.ADMIN_PASSWORD ?? "" },
     llm,
     stt,
-    voice: parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? [],
-    vision: (parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN") ?? []).filter((c) => c.kind === "gemini"),
+    voice: parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN", true) ?? [],
+    vision:
+      parseChain<VisionConfig>(env.VISION_CHAIN, "VISION_CHAIN", true) ??
+      (parseChain<VoiceConfig>(env.VOICE_CHAIN, "VOICE_CHAIN", true) ?? []).flatMap((c) => (c.kind === "gemini" ? [{ ...c, kind: "gemini" as const }] : [])),
     limits: USAGE_LIMITS,
     costs: COST_ESTIMATES,
     cloudflare: cloudflareAnalytics(env, [...llm, ...stt]),
@@ -138,11 +141,15 @@ function cloudflareAnalytics(env: Env, links: { name?: string; baseUrl: string; 
   return { graphqlUrl, accountTag, apiKey, plan: (env.CF_WORKERS_PLAN as string | undefined) === "paid" ? "paid" : "free", scriptName: WORKER_SCRIPT_NAME };
 }
 
-/** JSON-массив провайдеров из секрета (собирает scripts/deploy.ts). Битый или пустой — ошибка конфигурации, не тихий откат. */
-function parseChain<T extends { baseUrl: string; apiKey: string; model: string }>(json: string | undefined, name: string): T[] | undefined {
+/**
+ * JSON-массив провайдеров из секрета (собирает scripts/deploy.ts). Битый — ошибка конфигурации, не тихий откат.
+ * Необязательным цепочкам (голос, фото) можно `[]` — провайдеров нет: deploy пишет его, когда ключей нет, чтобы не остался
+ * секрет прежнего деплоя.
+ */
+function parseChain<T extends { baseUrl: string; apiKey: string; model: string }>(json: string | undefined, name: string, allowEmpty = false): T[] | undefined {
   if (!json?.trim()) return undefined;
   const chain = JSON.parse(json) as T[];
-  if (!Array.isArray(chain) || chain.length === 0 || chain.some((c) => !c.baseUrl || !c.model))
+  if (!Array.isArray(chain) || (!allowEmpty && chain.length === 0) || chain.some((c) => !c.baseUrl || !c.model))
     throw new Error(`${name}: expected a non-empty array of {baseUrl, apiKey, model}`);
   return chain;
 }

@@ -2,7 +2,7 @@
 // Один вызов на картинку: видимый текст + create_event / no_event, как src/vision/understand.ts. Дату считает НАШ парсер
 // по видимому тексту (foreignDateSpans — как bot/ingest.ts), от модели — название и место.
 // Модели: «or:<модель>» — OpenRouter chat/completions, image_url data:URL (промпт и tools — копия src/vision/understand.ts);
-// «ds:<модель>» — DeepSeek (OpenAI-совместимый, тот же запрос; thinking off, DS_EXTRA — свои поля);
+// «ds:<модель>» — DeepSeek, прод-путь understandImageChain (kind "openai", с `when`; thinking off, DS_EXTRA — свои поля);
 // «gg:<модель>» — Gemini напрямую, прод-путь understandImageChain; «oracle» — без вызовов: эталонный текст из index.yaml
 // (проверка набора и парсера). Итоги — docs/research/free-models-eval.md.
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-images.ts --models or:<модель>,gg:gemini-3.5-flash-lite \
@@ -18,7 +18,7 @@ import { normalizeWords, sameWord } from "../src/calendar/match";
 import { parseDateFragment } from "../src/dates";
 import { parseLocal } from "../src/dates/calendar";
 import { type DateStructure, resolveDateStructure } from "../src/dates/structured";
-import { understandImageChain } from "../src/vision/understand";
+import { understandImageChain, type VisionConfig } from "../src/vision/understand";
 
 const argv = process.argv.slice(2);
 const opt = (name: string) => {
@@ -95,7 +95,7 @@ interface Answer {
   text: string;
   title?: string;
   start?: string;
-  /** Структура даты (только прод-путь gg:, понимает src/vision/understand.ts; копия промпта для or: — без неё). */
+  /** Структура даты (только прод-путь gg:/ds:, понимает src/vision/understand.ts; копия промпта для or: — без неё). */
   when?: DateStructure;
   location?: string;
   tokens?: string;
@@ -103,17 +103,10 @@ interface Answer {
 const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
 async function viaOpenAi(model: string, mime: string, b64: string): Promise<Answer> {
-  const ds = model.startsWith("ds:");
-  const extra = ds
-    ? process.env.DS_EXTRA
-      ? JSON.parse(process.env.DS_EXTRA)
-      : { thinking: { type: "disabled" } }
-    : process.env.OR_EXTRA
-      ? JSON.parse(process.env.OR_EXTRA)
-      : { reasoning: { enabled: false } };
-  const res = await fetch(ds ? "https://api.deepseek.com/chat/completions" : "https://openrouter.ai/api/v1/chat/completions", {
+  const extra = process.env.OR_EXTRA ? JSON.parse(process.env.OR_EXTRA) : { reasoning: { enabled: false } };
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${(ds ? process.env.DEEPSEEK_API_KEY : process.env.OPENROUTER_API_KEY) ?? ""}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ""}` },
     signal: AbortSignal.timeout(Number(process.env.IMG_TIMEOUT_MS ?? 25_000)),
     body: JSON.stringify({
       model: model.slice(3),
@@ -128,7 +121,7 @@ async function viaOpenAi(model: string, mime: string, b64: string): Promise<Answ
       ...extra,
     }),
   });
-  if (!res.ok) throw new Error(`${ds ? "deepseek" : "openrouter"} ${res.status}: ${(await res.text()).replace(/\s+/g, " ").slice(0, 300)}`);
+  if (!res.ok) throw new Error(`openrouter ${res.status}: ${(await res.text()).replace(/\s+/g, " ").slice(0, 300)}`);
   const j = (await res.json()) as {
     error?: { code?: number; message?: string };
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[]; content?: string } }[];
@@ -148,12 +141,28 @@ async function viaOpenAi(model: string, mime: string, b64: string): Promise<Answ
   return { noEvent: call?.name !== "create_event", text: s(a.text) ?? "", title: s(a.title), start: s(a.start), location: s(a.location), tokens };
 }
 
-async function viaGemini(model: string, mime: string, bytes: ArrayBuffer): Promise<Answer> {
-  const { result } = await understandImageChain(
-    [{ name: "gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", apiKey: process.env.GEMINI_API_KEY ?? "", model }],
-    bytes,
-    mime,
-  );
+/** Прод-путь src/vision/understand.ts: «gg:» — Gemini, «ds:» — DeepSeek. */
+function prodConfig(model: string): VisionConfig {
+  if (model.startsWith("ds:"))
+    return {
+      name: "deepseek",
+      kind: "openai",
+      baseUrl: "https://api.deepseek.com",
+      apiKey: process.env.DEEPSEEK_API_KEY ?? "",
+      model: model.slice(3),
+      extraBody: process.env.DS_EXTRA ? JSON.parse(process.env.DS_EXTRA) : { thinking: { type: "disabled" } },
+    };
+  return {
+    name: "gemini",
+    kind: "gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKey: process.env.GEMINI_API_KEY ?? "",
+    model: model.slice(3),
+  };
+}
+
+async function viaProd(model: string, mime: string, bytes: ArrayBuffer): Promise<Answer> {
+  const { result } = await understandImageChain([prodConfig(model)], bytes, mime);
   const tokens = `${result.tokensIn}/${result.tokensOut}`;
   if (result.noEvent) return { noEvent: true, text: result.text, tokens };
   return {
@@ -314,8 +323,8 @@ for (const model of models) {
         await sleep(DELAY_MS);
         const t0 = Date.now();
         try {
-          const answer = model.startsWith("gg:")
-            ? await viaGemini(model.slice(3), mime, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer)
+          const answer = /^(gg|ds):/.test(model)
+            ? await viaProd(model, mime, buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer)
             : await viaOpenAi(model, mime, buf.toString("base64"));
           r = { model, id: img.id, ok: true, ms: Date.now() - t0, answer };
           break;

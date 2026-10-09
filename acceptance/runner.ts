@@ -117,7 +117,7 @@ type Step =
   /** Файл (US-67, .ics): содержимое — content; file_name, mime_type как пришлёт Telegram. */
   | { document: { from: number; file_name: string; content: string; mime_type?: string; size?: number } }
   /** Сколько раз бот отправлял картинку в Gemini (US-66); caption_contains — в последнем запросе была подпись. */
-  | { expect_vision_requests: number | { count: number; caption_contains?: string } }
+  | { expect_vision_requests: number | { count: number; caption_contains?: string; via?: "openai" | "gemini" } }
   /**
    * HTTP-запрос к SUT. В path, значениях form и text_(not_)contains подставляются {{имя}} из capture предыдущих шагов;
    * capture: { имя: регэксп с одной группой } — запомнить кусок ответа (например, id из ссылки).
@@ -690,8 +690,10 @@ async function runScenario(s: Scenario): Promise<void> {
       );
     } else if ("expect_vision_requests" in step) {
       const want = typeof step.expect_vision_requests === "number" ? { count: step.expect_vision_requests } : step.expect_vision_requests;
-      const list = (await (await fetch(`${FAKES}/__fake/vision/requests`)).json()) as { caption?: string }[];
+      const list = (await (await fetch(`${FAKES}/__fake/vision/requests`)).json()) as { caption?: string; via: string }[];
       if (list.length !== want.count) throw new AssertionError(`${where}: ${list.length} vision requests, expected ${want.count}`);
+      if (want.via && list.at(-1)?.via !== want.via)
+        throw new AssertionError(`${where}: last vision request via ${JSON.stringify(list.at(-1)?.via)}, expected ${want.via}`);
       if (want.caption_contains && !list.at(-1)?.caption?.includes(want.caption_contains))
         throw new AssertionError(`${where}: last vision request caption ${JSON.stringify(list.at(-1)?.caption)}, expected «${want.caption_contains}»`);
     } else if ("http_get" in step || "http_post" in step) {

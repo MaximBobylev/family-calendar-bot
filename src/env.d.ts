@@ -29,6 +29,8 @@ interface Env {
   STT_CHAIN?: string;
   /** Необязательно: JSON-цепочка мультимодального разбора голоса [{name, kind: gemini|openai-audio, baseUrl, apiKey, model}]. */
   VOICE_CHAIN?: string;
+  /** Необязательно: JSON-цепочка чтения фото (US-66) [{name, kind: openai|gemini, baseUrl, apiKey, model, extraBody?}]; нет — Gemini из VOICE_CHAIN. */
+  VISION_CHAIN?: string;
   /**
    * Необязательно: API-токен Cloudflare только с правом Account Analytics: Read — панель «Квоты» (Workers, D1, Queues,
    * neurons Workers AI). Пусто — токен звена Workers AI (LLM_API_KEY), если у него есть это право.
