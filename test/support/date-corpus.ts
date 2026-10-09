@@ -21,26 +21,32 @@ interface RawFile {
   cases: { id: string; text: string; kind?: ValueKind; now?: string; tz?: string; status?: "proposed"; note?: string; expect: ParseResult }[];
 }
 
+/** Золотой корпус: все YAML, кроме отложенных наборов `holdout-*` (их парсер проходить не обязан — замеры LLM). */
 export function loadCorpus(): CorpusCase[] {
-  return readdirSync(CORPUS_DIR)
-    .filter((f) => f.endsWith(".yaml"))
-    .sort()
-    .flatMap((file) => {
-      const doc = parseYaml(readFileSync(join(CORPUS_DIR, file), "utf8")) as RawFile;
-      return doc.cases.map((c) => ({
-        file,
-        id: c.id,
-        ...(c.status ? { status: c.status } : {}),
-        ...(c.note ? { note: c.note } : {}),
-        expect: c.expect,
-        input: {
-          text: c.text,
-          kind: c.kind ?? doc.defaults?.kind ?? "point",
-          now: c.now ?? doc.defaults?.now ?? "",
-          tz: c.tz ?? doc.defaults?.tz ?? "UTC",
-        },
-      }));
-    });
+  return loadFiles(
+    readdirSync(CORPUS_DIR)
+      .filter((f) => f.endsWith(".yaml") && !f.startsWith("holdout-"))
+      .sort(),
+  );
+}
+
+export function loadFiles(files: string[]): CorpusCase[] {
+  return files.flatMap((file) => {
+    const doc = parseYaml(readFileSync(join(CORPUS_DIR, file), "utf8")) as RawFile;
+    return doc.cases.map((c) => ({
+      file,
+      id: c.id,
+      ...(c.status ? { status: c.status } : {}),
+      ...(c.note ? { note: c.note } : {}),
+      expect: c.expect,
+      input: {
+        text: c.text,
+        kind: c.kind ?? doc.defaults?.kind ?? "point",
+        now: c.now ?? doc.defaults?.now ?? "",
+        tz: c.tz ?? doc.defaults?.tz ?? "UTC",
+      },
+    }));
+  });
 }
 
 /** Канонический JSON: ключи по алфавиту, чтобы порядок полей в YAML не влиял на сравнение. */

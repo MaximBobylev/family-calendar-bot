@@ -29,15 +29,15 @@ export interface AbsAst {
   y?: number;
 }
 
-type WeekdayMod = "none" | "this" | "next" | "nextWeek" | "plusWeek";
+export type WeekdayMod = "none" | "this" | "next" | "nextWeek" | "plusWeek";
 
-type DateAst =
+export type DateAst =
   | { k: "rel"; days: number }
   | { k: "relMonths"; months: number }
   | { k: "wd"; wd: Weekday; mod: WeekdayMod }
   | { k: "abs"; abs: AbsAst; wd?: Weekday };
 
-type Period =
+export type Period =
   | { k: "week"; which: "this" | "next" }
   | { k: "weekend"; which: "this" | "next" }
   | { k: "month"; which: "this" | "next" | number }
@@ -45,9 +45,9 @@ type Period =
   /** «в начале месяца», «в конце следующей недели», «в середине ноября» (решение 2026-10-05). */
   | { k: "segment"; unit: "week" | "month"; seg: Segment; which: "auto" | "this" | "next" | number };
 
-type Segment = "begin" | "middle" | "end";
+export type Segment = "begin" | "middle" | "end";
 
-interface Ast {
+export interface Ast {
   date?: DateAst;
   time?: TimeAst;
   part?: DayPart;
@@ -960,8 +960,19 @@ function resolveSegment(p: Extract<Period, { k: "segment" }>, today: Day): Parse
 // --- Вход ------------------------------------------------------------------
 
 export function parsePointOrRange(tokens: Token[], kind: "point" | "range", now: Moment, tz: string): ParseResult {
+  let ast: Ast;
   try {
-    const ast = parseAst(tokens);
+    ast = parseAst(tokens);
+  } catch (e) {
+    if (e instanceof Unparseable) return { error: e.reason };
+    throw e;
+  }
+  return resolvePointOrRange(ast, kind, now, tz);
+}
+
+/** AST → результат по правилам date-rules.md. Отдельно от грамматики — для пилота «LLM даёт структуру, резолвит наш код» (шаг 4 ревью). */
+export function resolvePointOrRange(ast: Ast, kind: "point" | "range", now: Moment, tz: string): ParseResult {
+  try {
     // Одни служебные слова («в», «на») — не дата
     if (!ast.date && !ast.time && !ast.part && !ast.period && !ast.week && !ast.interval && !ast.dateRange && ast.relMinutes === undefined) {
       throw new Unparseable();

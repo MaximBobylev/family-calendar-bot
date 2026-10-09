@@ -1,0 +1,109 @@
+# Отложенный набор «вне корпуса» (ревью парсера дат 2026-10-08, шаг 4; docs/research/llm-date-resolution-eval.md):
+# 17 фраз того рода, на которых ревьюер нашёл молча неверные даты. Восстановлены по ревью и testdata/extract/cases.yaml
+# (исходный список ревьюера не сохранён). НЕ часть золотого корпуса: файлы holdout-* корпусный тест не читает
+# (test/support/date-corpus.ts) — наш парсер их не обязан проходить. Ожидания — по docs/date-rules.md; где правила молчат —
+# status: proposed. «Сейчас» — среда 2026-10-07 10:00 МСК.
+defaults:
+  now: "2026-10-07T10:00"
+  tz: Europe/Moscow
+  kind: point
+
+cases:
+  - id: ho-01
+    text: "не в пятницу, а в субботу в 12"
+    note: "date-rules «Дата из всей фразы»: кусок после «не» — не дата"
+    expect: { datetime: "2026-10-10T12:00" }
+
+  - id: ho-02
+    text: "в первый понедельник ноября в 10"
+    status: proposed
+    note: "порядковый день недели: правил нет (извлечение помечает unsure); по смыслу — 2 ноября"
+    expect: { datetime: "2026-11-02T10:00" }
+
+  - id: ho-03
+    text: "через две недели во вторник в 9"
+    status: proposed
+    note: "по аналогии с «через неделю в понедельник» = ближайший + 7 → ближайший вторник (13.10) + 14 = 27.10; вторым — вторник недели «через две недели» (20.10)"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-27T09:00" }
+        - { datetime: "2026-10-20T09:00" }
+
+  - id: ho-04
+    text: "3 ноября в 15:00 по Киеву"
+    note: "tech-debt #26: Киев в ноябре UTC+2, Москва UTC+3"
+    expect: { datetime: "2026-11-03T16:00" }
+
+  - id: ho-05
+    text: "в последнюю пятницу месяца"
+    status: proposed
+    note: "порядковый день недели: правил нет; по смыслу — 30 октября"
+    expect: { date: "2026-10-30" }
+
+  - id: ho-06
+    text: "first Monday of November at 10"
+    status: proposed
+    expect: { datetime: "2026-11-02T10:00" }
+
+  - id: ho-07
+    text: "через неделю после дня рождения"
+    note: "сдвиг от неизвестного события — переспросить"
+    expect: { error: unparseable }
+
+  - id: ho-08
+    text: "в 15 по Варне"
+    note: "пояса нет в словаре — date-rules: бот спрашивает время по своему поясу"
+    expect: { error: unparseable }
+
+  - id: ho-09
+    text: "at 3pm Lagos time"
+    note: "пояса нет в словаре — переспросить"
+    expect: { error: unparseable }
+
+  - id: ho-10
+    text: "не в среду, а в четверг в 10"
+    note: "отрицание: дата — четверг"
+    expect: { datetime: "2026-10-08T10:00" }
+
+  - id: ho-11
+    text: "в предпоследний день месяца"
+    status: proposed
+    expect: { date: "2026-10-30" }
+
+  - id: ho-12
+    text: "в пятницу 13-го"
+    note: "date-rules «в четверг 14-го»: 13-е — вторник → варианты: 13-е / пятница той же недели"
+    expect:
+      ambiguous:
+        - { date: "2026-10-13" }
+        - { date: "2026-10-16" }
+
+  - id: ho-13
+    text: "за день до 15 ноября"
+    status: proposed
+    expect: { date: "2026-11-14" }
+
+  - id: ho-14
+    text: "во второй вторник ноября в 18:30"
+    status: proposed
+    expect: { datetime: "2026-11-10T18:30" }
+
+  - id: ho-15
+    text: "в пятницу в 10 утра по Нью-Йорку"
+    note: "Нью-Йорк 9 октября — EDT (UTC−4): 10:00 = 14:00 UTC = 17:00 МСК"
+    expect: { datetime: "2026-10-09T17:00" }
+
+  - id: ho-16
+    text: "завтра или послезавтра в 15"
+    status: proposed
+    note: "два дня — два варианта по порядку"
+    expect:
+      ambiguous:
+        - { datetime: "2026-10-08T15:00" }
+        - { datetime: "2026-10-09T15:00" }
+
+  - id: ho-17
+    text: "в ночь с пятницы на субботу"
+    status: proposed
+    note: "= «в пятницу ночью»: ночь после пятницы — 00–06 субботы"
+    expect: { date: { date: "2026-10-10", part: night } }

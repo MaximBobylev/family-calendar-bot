@@ -193,6 +193,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `scripts/deploy.ts` | Деплой: проверки → миграции → `wrangler deploy` → секреты → webhook |
 | `scripts/story-coverage.ts` | История → сценарии → файлы кода (`npm run -s stories`) |
 | `scripts/date-corpus.ts` | Отчёт по корпусу дат (`npm run -s corpus:dates -- --failures`) |
+| `scripts/eval-llm-dates.ts` | Живой замер: DeepSeek разрешает даты сам (A) или даёт структуру для `resolvePointOrRange` (B); корпус и `holdout-*` (платно, см. CLAUDE.md) |
 | `scripts/eval-intents.ts`, `nlu-variants.ts` | Живой замер интентов (тратит квоты, см. CLAUDE.md) |
 | `scripts/probe-{intents,stt,voice}.ts` | Ручные живые пробы провайдеров (сервис `deploy`) |
 | `reports/` | Выводы замеров (в .gitignore) |

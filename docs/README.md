@@ -37,6 +37,7 @@
 | [research/llm-intents-eval.md](research/llm-intents-eval.md) | Замер разбора интентов: варианты промпта × модели Workers AI, решение и оставшиеся ошибки (2026-10-05) |
 | [research/free-models-eval.md](research/free-models-eval.md) | Бесплатные модели OpenRouter (Dots3-Note, Inkling, Nemotron Nano Omni): текст, голос, фото → событие; синтетический набор картинок (2026-10-08) |
 | [research/date-parser-architecture-review.md](research/date-parser-architecture-review.md) | Архитектурное ревью парсера дат: молча неверные даты, сверка с LLM, шаги (ждёт решения) |
+| [research/llm-date-resolution-eval.md](research/llm-date-resolution-eval.md) | Может ли DeepSeek разрешать даты без грамматики (шаг 4 ревью): A «LLM разрешает» 85%, B «LLM структурирует, резолвит наш код» 96% на корпусе; отложенный набор вне корпуса; рекомендация (2026-10-08) |
 | [research/qa-r1-nlu.md](research/qa-r1-nlu.md) | QA разбора фраз R1 (2026-10-06): 110 фраз (поручения, ответственный, «мои дела», поиск) на Nemotron / Gemini / Gemma с правилами — точность, классы ошибок, исправления по приоритету |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
 | [research/monetization-market.md](research/monetization-market.md) | Обзор рынка: модели монетизации и цены |
