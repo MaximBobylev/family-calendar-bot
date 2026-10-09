@@ -1,0 +1,177 @@
+# tech-debt #16: Google ведёт себя не идеально — страницы списков, лимит запросов (403 rateLimitExceeded, 429),
+# событие удалили в Google между карточкой и подтверждением, слишком много подходящих встреч, истёкший вопрос
+# «Во сколько?». «Сейчас» — ср 7 октября 2026, 10:00 МСК.
+
+- id: google-pages-read-shows-every-page
+  story: US-20
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T09:00:00+03:00" }, end: { dateTime: "2026-10-08T09:30:00+03:00" } }
+                - { id: e2, summary: "Ревью", start: { dateTime: "2026-10-08T11:00:00+03:00" }, end: { dateTime: "2026-10-08T12:00:00+03:00" } }
+                - { id: e3, summary: "Обед", start: { dateTime: "2026-10-08T13:00:00+03:00" }, end: { dateTime: "2026-10-08T14:00:00+03:00" } }
+                - { id: e4, summary: "Созвон с Петей", start: { dateTime: "2026-10-08T15:00:00+03:00" }, end: { dateTime: "2026-10-08T15:30:00+03:00" } }
+                - { id: e5, summary: "Бассейн", start: { dateTime: "2026-10-08T19:00:00+03:00" }, end: { dateTime: "2026-10-08T20:00:00+03:00" } }
+            - { id: work@group.calendar.google.com, summary: "Работа", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+      - llm:
+          "Что у меня завтра?": { tool: list_events, args: { range: "завтра" } }
+          "Перенеси обед на 14": { tool: modify_event, args: { event: "обед" } }
+          "Удали обед": { tool: delete_event, args: { event: "обед" } }
+          "Поставь встречу завтра в 10:30": { tool: create_event, args: { start: "завтра в 10:30" } }
+          "Отмени созвон": { tool: delete_event, args: { event: "созвон" } }
+          "Поставь встречу с Машей в пятницу": { tool: create_event, args: { start: "в пятницу", title: "Встреча с Машей" } }
+          "в 16": { tool: unsupported, args: {} }
+    # По две записи на страницу: пять событий — три страницы
+    - google_page_size: 2
+    - telegram: { from: 1001, text: "Что у меня завтра?" }
+    - expect_telegram:
+        - { text_contains: ["Планёрка", "Ревью", "Обед", "Созвон с Петей", "Бассейн"], text_not_contains: ["не загрузился", "не отвечает"] }
+
+- id: google-pages-calendar-list-on-connect
+  story: US-02
+  steps:
+    # Список календарей тоже страницами: при подключении видны все три
+    - clock: "2026-10-07T07:00:00Z"
+    - google_page_size: 2
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+          - { id: work@group.calendar.google.com, summary: "Работа", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+          - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["Настройки"] }
+    - press: "🗓 Календари"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Календари"], buttons: ["✓ Иван", "Работа", "Семья", "← Назад"] }
+
+- id: google-pages-sync-token-from-last-page
+  story: US-72
+  steps:
+    - *setup
+    - google_page_size: 2
+    # Первая полная синхронизация — три страницы; nextSyncToken только на последней
+    - hourly: true
+    - tick: true
+    - expect_no_telegram: true
+    - expect_google_syncs: { calendar: ivan@gmail.com, full: 1 }
+    # Событие с последней страницы перенесли в Google — инкрементальный синк по токену с последней страницы
+    - google_external:
+        calendar: ivan@gmail.com
+        move: { id: e5, start: { dateTime: "2026-10-09T19:00:00+03:00" }, end: { dateTime: "2026-10-09T20:00:00+03:00" } }
+    - google_push: { calendar: ivan@gmail.com }
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["🔁 Перенесено: «Бассейн» — пт, 9 октября, 19:00–20:00"] }
+    - expect_google_syncs: { calendar: ivan@gmail.com, full: 1, incremental: 1 }
+
+- id: google-rate-limit-403-is-unavailable-not-forbidden
+  story: US-14
+  steps:
+    - *setup
+    # 403 rateLimitExceeded — это лимит, а не «нет прав»: «не отвечает, попробуйте позже»
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 10:30" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?"], buttons: ["Создать", "Отмена"] }
+    - provider_outage: { provider: google-write, status: 403 }
+    - press: "Создать"
+    - expect_telegram:
+        - { text_contains: ["Google Календарь не отвечает"], text_not_contains: ["не разрешил"] }
+        - { method: editMessageText, text_contains: ["Не получилось"] }
+    # 429 — то же
+    - provider_outage: { provider: google-write, status: 429 }
+    - telegram: { from: 1001, text: "Удали обед" }
+    - press: "Удалить"
+    - expect_telegram:
+        - { text_contains: ["Удалить?"] }
+        - { text_contains: ["Google Календарь не отвечает"], text_not_contains: ["не разрешил"] }
+        - { method: editMessageText, text_contains: ["Не получилось"] }
+    - provider_outage: { provider: google-write, status: 0 }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 5
+        events: [{ summary: "Обед", start: "2026-10-08T13:00:00+03:00", end: "2026-10-08T14:00:00+03:00" }]
+
+- id: google-event-deleted-before-confirm-modify
+  story: US-40
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Перенеси обед на 14" }
+    - expect_telegram:
+        - { text_contains: ["Перенести?", "<b>Обед</b>"], buttons: ["Подтвердить", "Отмена"] }
+    # Пока карточка висела, обед удалили прямо в Google
+    - google_external: { calendar: ivan@gmail.com, delete: e3 }
+    - press: "Подтвердить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Эта встреча уже удалена"] }
+    - expect_google_patches: { count: 0 }
+
+# Удаление уже удалённого — цель достигнута: Google отвечает 410, бот считает это успехом (и повтор после таймаута
+# не пугает ошибкой), а не «уже удалена»
+- id: google-event-deleted-before-confirm-delete-is-success
+  story: US-50
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Удали обед" }
+    - expect_telegram:
+        - { text_contains: ["Удалить?", "<b>Обед</b>"], buttons: ["Удалить", "Отмена"] }
+    - google_external: { calendar: ivan@gmail.com, delete: e3 }
+    - press: "Удалить"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["🗑 Удалено", "<b>Обед</b>"], text_not_contains: ["Не получилось"] }
+
+- id: find-too-many-candidates-asks-to-narrow
+  story: US-40
+  steps:
+    - clock: "2026-10-07T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: c1, summary: "Созвон", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T10:30:00+03:00" } }
+              - { id: c2, summary: "Созвон", start: { dateTime: "2026-10-08T12:00:00+03:00" }, end: { dateTime: "2026-10-08T12:30:00+03:00" } }
+              - { id: c3, summary: "Созвон", start: { dateTime: "2026-10-08T14:00:00+03:00" }, end: { dateTime: "2026-10-08T14:30:00+03:00" } }
+              - { id: c4, summary: "Созвон", start: { dateTime: "2026-10-09T10:00:00+03:00" }, end: { dateTime: "2026-10-09T10:30:00+03:00" } }
+              - { id: c5, summary: "Созвон", start: { dateTime: "2026-10-09T12:00:00+03:00" }, end: { dateTime: "2026-10-09T12:30:00+03:00" } }
+              - { id: c6, summary: "Созвон", start: { dateTime: "2026-10-09T14:00:00+03:00" }, end: { dateTime: "2026-10-09T14:30:00+03:00" } }
+    - llm:
+        "Отмени созвон": { tool: delete_event, args: { event: "созвон" } }
+    # Шесть подходящих — кнопок не будет, просим уточнить
+    - telegram: { from: 1001, text: "Отмени созвон" }
+    - expect_telegram:
+        - { text_contains: ["Подходящих встреч 6 — уточните день или время"] }
+    - expect_google_deletes: { count: 0 }
+
+- id: ask-time-expires-answer-is-a-new-command
+  story: US-12
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Поставь встречу с Машей в пятницу" }
+    - expect_telegram:
+        - { text_contains: ["Во сколько?"] }
+    # Вопрос живёт 15 минут; через 20 «в 16» — уже не ответ, а новая команда
+    - clock: "2026-10-07T07:20:00Z"
+    - telegram: { from: 1001, text: "в 16" }
+    - expect_telegram:
+        - { text_not_contains: ["Создать событие?", "Встреча с Машей"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 5, events: [] }

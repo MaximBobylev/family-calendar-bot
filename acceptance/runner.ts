@@ -160,6 +160,8 @@ type Step =
   | { google_external: { calendar: string; create?: unknown; move?: unknown; update?: unknown; delete?: string } }
   /** Все выданные syncToken календаря просрочены — следующий инкрементальный синк получит 410. */
   | { google_expire_sync_tokens: string }
+  /** calendarList и events.list у фейка Google — страницами по n записей (0 — без страниц): проверка пагинации. */
+  | { google_page_size: number }
   /** Каналы push календаря у Google: сколько открыто, сколько остановлено всего (channels.stop). */
   | { expect_google_channels: { calendar: string; active: number; stopped?: number } }
   /** Запросы синхронизации календаря с начала сценария по видам: {full: 1, incremental: 2, expired: 1}. */
@@ -949,6 +951,8 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("google_external" in step) {
       const res = await post(`${FAKES}/__fake/google/external`, step.google_external);
       if (!res.ok) throw new AssertionError(`${where}: google_external → ${res.status} ${await res.text()}`);
+    } else if ("google_page_size" in step) {
+      await post(`${FAKES}/__fake/google/page-size`, { size: step.google_page_size });
     } else if ("google_expire_sync_tokens" in step) {
       await post(`${FAKES}/__fake/google/expire-sync-tokens`, { calendar: step.google_expire_sync_tokens });
     } else if ("expect_google_channels" in step) {

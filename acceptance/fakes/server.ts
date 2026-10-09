@@ -64,6 +64,9 @@
 //   POST /__fake/google/external    — {calendar, create?: событие, move?: {id, start, end}, update?: {id, …поля}, delete?: id}:
 //                                     изменение «не через бота» (человек в Google Календаре)
 //   POST /__fake/google/expire-sync-tokens — {calendar}: все выданные syncToken календаря → 410
+//   POST /__fake/google/page-size   — {size}: calendarList и events.list отдают по size записей с nextPageToken (0 — без страниц);
+//                                     nextSyncToken — только на последней странице, как у Google
+//   Outage google-write со статусом 403 — лимит запросов (reason rateLimitExceeded), а не «нет прав»
 //   GET  /__fake/google/channels    — {active: [{id, calendar, address, expiration}], stopped: [{id, resourceId}]}
 //   GET  /__fake/google/sync-requests — запросы синхронизации: [{calendar, mode: full | incremental | expired}]
 
@@ -182,6 +185,23 @@ let quotas = structuredClone(QUOTAS_DEFAULT);
 let quotaRequests: { via: string; auth: string }[] = [];
 /** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
 let outages = new Map<string, number>();
+/** Размер страницы calendarList / events.list; 0 — всё одной страницей. */
+let googlePageSize = 0;
+
+/** Страница списка по pageToken «pg:<смещение>»; nextPageToken — если есть ещё. */
+function googlePage<T>(url: URL, items: T[]): { items: T[]; nextPageToken?: string } {
+  if (!googlePageSize) return { items };
+  const from = Number(/^pg:(\d+)$/.exec(url.searchParams.get("pageToken") ?? "")?.[1] ?? 0);
+  const next = from + googlePageSize;
+  return { items: items.slice(from, next), ...(next < items.length ? { nextPageToken: `pg:${next}` } : {}) };
+}
+
+/** Ответ Google на запись в outage: 403 — лимит запросов (как настоящий rateLimitExceeded), остальное — сбой. */
+function googleWriteOutage(res: ServerResponse, status: number) {
+  if (status === 403)
+    return send(res, 403, { error: { code: 403, message: "Rate Limit Exceeded", errors: [{ domain: "usageLimits", reason: "rateLimitExceeded" }] } });
+  return send(res, status, { error: { code: status, message: "fake outage" } });
+}
 let revocations: { token: string; status: number }[] = [];
 let revokeFailStatus = 0;
 
@@ -364,6 +384,7 @@ const server = createServer(async (req, res) => {
       visionFixtures = new Map();
       visionRequests = [];
       outages = new Map();
+      googlePageSize = 0;
       quotas = structuredClone(QUOTAS_DEFAULT);
       quotaRequests = [];
       telegramFiles = new Map();
@@ -447,6 +468,10 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    if (url.pathname === "/__fake/google/page-size" && req.method === "POST") {
+      googlePageSize = Number(((await readJson(req)) as { size?: number }).size ?? 0);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/__fake/outage" && req.method === "POST") {
       const { provider, status } = (await readJson(req)) as { provider: string; status: number };
       if (status) outages.set(provider, status);
@@ -763,7 +788,10 @@ const server = createServer(async (req, res) => {
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       return send(res, 200, {
         kind: "calendar#calendarList",
-        items: account.calendars.map(({ events: _e, list_error: _l, list_error_times: _t, shared: _s, ...c }) => c),
+        ...googlePage(
+          url,
+          account.calendars.map(({ events: _e, list_error: _l, list_error_times: _t, shared: _s, ...c }) => c),
+        ),
       });
     }
     const watch = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events\/watch$/.exec(url.pathname);
@@ -808,7 +836,7 @@ const server = createServer(async (req, res) => {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       const outage = outages.get("google-write");
-      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
+      if (outage) return googleWriteOutage(res, outage);
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evOne[1]!));
       const ev = cal?.events?.find((e) => e.id === decodeURIComponent(evOne[2]!));
       if (!cal || !ev || ev.status === "cancelled") return send(res, 410, { error: { code: 410, message: "Resource has been deleted" } });
@@ -834,7 +862,7 @@ const server = createServer(async (req, res) => {
       if (!cal || !ev || ev.status === "cancelled") return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (req.method === "GET") return send(res, 200, publicEvent(ev));
       const outage = outages.get("google-write");
-      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
+      if (outage) return googleWriteOutage(res, outage);
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
       const ifMatch = req.headers["if-match"];
       if (ifMatch && ifMatch !== ev.etag) return send(res, 412, { error: { code: 412, message: "Precondition Failed" } });
@@ -850,7 +878,7 @@ const server = createServer(async (req, res) => {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
       const outage = outages.get("google-write");
-      if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
+      if (outage) return googleWriteOutage(res, outage);
       const cal = account.calendars.find((c) => c.id === decodeURIComponent(evList[1]!));
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
@@ -890,12 +918,12 @@ const server = createServer(async (req, res) => {
           syncRequests.push({ calendar: cal.id, mode: "expired" });
           return send(res, 410, { error: { code: 410, message: "Sync token is no longer valid, a full sync is required." } });
         }
-        syncRequests.push({ calendar: cal.id, mode: "incremental" });
-        const changed = (cal.events ?? []).filter((e) => (e._seq as number) > since).map(publicEvent);
-        return send(res, 200, { kind: "calendar#events", items: changed, nextSyncToken: syncTokenOf(cal.id) });
+        if (!url.searchParams.has("pageToken")) syncRequests.push({ calendar: cal.id, mode: "incremental" });
+        const page = googlePage(url, (cal.events ?? []).filter((e) => (e._seq as number) > since).map(publicEvent));
+        return send(res, 200, { kind: "calendar#events", ...page, ...(page.nextPageToken ? {} : { nextSyncToken: syncTokenOf(cal.id) }) });
       }
       // Без orderBy — полный список синхронизации (чтение расписания ботом всегда с orderBy=startTime)
-      if (!url.searchParams.has("orderBy")) syncRequests.push({ calendar: cal.id, mode: "full" });
+      if (!url.searchParams.has("orderBy") && !url.searchParams.has("pageToken")) syncRequests.push({ calendar: cal.id, mode: "full" });
       const tz = url.searchParams.get("timeZone") ?? cal.timeZone ?? "UTC";
       const min = Date.parse(url.searchParams.get("timeMin") ?? "1970-01-01T00:00:00Z");
       const max = Date.parse(url.searchParams.get("timeMax") ?? "2100-01-01T00:00:00Z");
@@ -907,7 +935,8 @@ const server = createServer(async (req, res) => {
         })
         .sort((a, b) => eventBounds(a, tz)[0] - eventBounds(b, tz)[0]);
       // Как у Google: полный список — с токеном для следующих инкрементальных запросов
-      return send(res, 200, { kind: "calendar#events", timeZone: tz, items: items.map(publicEvent), nextSyncToken: syncTokenOf(cal.id) });
+      const page = googlePage(url, items.map(publicEvent));
+      return send(res, 200, { kind: "calendar#events", timeZone: tz, ...page, ...(page.nextPageToken ? {} : { nextSyncToken: syncTokenOf(cal.id) }) });
     }
 
     const tg = /^\/telegram\/bot([^/]+)\/(\w+)$/.exec(url.pathname);

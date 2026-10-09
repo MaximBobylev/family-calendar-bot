@@ -188,7 +188,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Путь | Что |
 |---|---|
 | `acceptance/runner.ts` | Раннер YAML-сценариев (чёрный ящик по HTTP); фильтр `SCENARIO=…`, `--list` |
-| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth, `syncToken`/410, `events.watch`/`channels.stop`, push, общие календари, внешние изменения), LLM, STT, Gemini; управление `/__fake/*`; Gemini (голос и картинки — по `mimeType`) |
+| `acceptance/fakes/server.ts` | Фейки Telegram, Google (+OAuth, `syncToken`/410, `events.watch`/`channels.stop`, push, общие календари, внешние изменения, страницы, лимит 403/429), LLM, STT, Gemini; чтение картинок OpenAI-совместимым (`/vision/v1`); управление `/__fake/*`; Gemini (голос и картинки — по `mimeType`) |
 | `acceptance/scenarios/NN-*.yaml` | Сценарии; поле `story:` связывает с `docs/user-stories.md` |
 | `test/*.test.ts` | Vitest: чистая логика и адаптеры переносимых наборов (`dates.corpus`, `extract`, `rrule`) |
 | `testdata/` | Переносимые наборы: `dates/` (золотой корпус), `extract/`, `recurrence/`, `nlu/` (только для живых замеров) |
