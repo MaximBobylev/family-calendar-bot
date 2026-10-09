@@ -1,36 +1,60 @@
 // Пользователи и их идентичности в каналах (ADR-0003: внутренний user_id ≠ telegram id).
 
+import { formatDate, utcToLocal } from "../dates/calendar";
 import { dissolveStatements } from "./households";
 import { parseSettings, type UserSettings } from "./settings";
 
 export interface User {
   id: string;
   locale: string;
+  /** Текущий пояс: поездки (US-07), иначе домашний — все даты, сводки и напоминания считаются в нём. */
+  tz: string;
+  /** Домашний пояс (из Google при привязке, /settings, «я переехал»). */
   home_tz: string;
+  /** Поездка: временный пояс поверх домашнего; until — день окончания по её поясу (только для вопроса «Вернулись?»). */
+  trip?: { tz: string; until?: string };
   settings: UserSettings;
   /** Имя и @username в Telegram из текущего апдейта (в D1 не хранится) — для страницы привязки (tech-debt #1). */
   tgName?: string;
 }
 
+interface UserRow {
+  id: string;
+  locale: string;
+  home_tz: string;
+  trip_tz: string | null;
+  /** Полночь дня окончания по поясу поездки, мс UTC (столбец из 0001). */
+  trip_until: number | null;
+  settings_json: string;
+}
+
+const USER_COLUMNS = "u.id, u.locale, u.home_tz, u.trip_tz, u.trip_until, u.settings_json";
+
+const toUser = (r: UserRow): User => ({
+  id: r.id,
+  locale: r.locale,
+  tz: r.trip_tz ?? r.home_tz,
+  home_tz: r.home_tz,
+  ...(r.trip_tz ? { trip: { tz: r.trip_tz, ...(r.trip_until !== null ? { until: formatDate(utcToLocal(r.trip_until, r.trip_tz).day) } : {}) } } : {}),
+  settings: parseSettings(r.settings_json),
+});
+
 export async function findUserByTelegramId(db: D1Database, telegramId: number): Promise<User | null> {
   const row = await db
     .prepare(
-      `SELECT u.id, u.locale, u.home_tz, u.settings_json
+      `SELECT ${USER_COLUMNS}
        FROM users u
        JOIN channel_identities ci ON ci.user_id = u.id
        WHERE ci.channel = 'telegram' AND ci.external_id = ?`,
     )
     .bind(String(telegramId))
-    .first<{ id: string; locale: string; home_tz: string; settings_json: string }>();
-  return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
+    .first<UserRow>();
+  return row ? toUser(row) : null;
 }
 
 export async function findUserById(db: D1Database, id: string): Promise<User | null> {
-  const row = await db
-    .prepare("SELECT id, locale, home_tz, settings_json FROM users WHERE id = ?")
-    .bind(id)
-    .first<{ id: string; locale: string; home_tz: string; settings_json: string }>();
-  return row ? { id: row.id, locale: row.locale, home_tz: row.home_tz, settings: parseSettings(row.settings_json) } : null;
+  const row = await db.prepare(`SELECT ${USER_COLUMNS} FROM users u WHERE u.id = ?`).bind(id).first<UserRow>();
+  return row ? toUser(row) : null;
 }
 
 /** Находит или создаёт пользователя для Telegram-аккаунта. Новому пользователю выдаётся entitlement `comp`. */
@@ -47,7 +71,7 @@ export async function ensureTelegramUser(db: D1Database, telegramId: number, now
     // Пока доступ только по allowlist — все зарегистрированные получают comp (ADR-0004)
     db.prepare("INSERT INTO entitlements (id, user_id, plan, source, starts_at) VALUES (?, ?, 'comp', 'comp', ?)").bind(crypto.randomUUID(), id, now),
   ]);
-  return { user: { id, locale: userLocale, home_tz: "UTC", settings: {} }, created: true };
+  return { user: { id, locale: userLocale, tz: "UTC", home_tz: "UTC", settings: {} }, created: true };
 }
 
 /**

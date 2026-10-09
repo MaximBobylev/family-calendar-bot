@@ -325,14 +325,14 @@ export async function chatsForCalendar(db: D1Database, pcid: string): Promise<Ca
     .prepare(
       `SELECT chat_id, user_id, locale, home_tz, settings_json, max(writable) AS writable
        FROM (
-         SELECT ci.external_id AS chat_id, u.id AS user_id, u.locale, u.home_tz, u.settings_json, c.writable
+         SELECT ci.external_id AS chat_id, u.id AS user_id, u.locale, COALESCE(u.trip_tz, u.home_tz) AS home_tz, u.settings_json, c.writable
          FROM calendars c
          JOIN provider_accounts a ON a.id = c.account_id
          JOIN users u ON u.id = a.user_id
          JOIN channel_identities ci ON ci.user_id = u.id AND ci.channel = 'telegram'
          WHERE c.provider_calendar_id = ?1
          UNION ALL
-         SELECT ci.external_id, u.id, u.locale, u.home_tz, u.settings_json, c.writable
+         SELECT ci.external_id, u.id, u.locale, COALESCE(u.trip_tz, u.home_tz), u.settings_json, c.writable
          FROM calendars c
          JOIN household_calendars hc ON hc.calendar_id = c.id
          JOIN household_members m ON m.household_id = hc.household_id

@@ -66,7 +66,7 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
     if (res === null) return; // лимит исчерпан — уже ответили
     intent = res;
   }
-  const tz = user.home_tz;
+  const tz = user.tz;
   const localNow = formatMoment(utcToLocal(src.refNow ?? ctx.clock.now(), tz));
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
@@ -328,7 +328,7 @@ async function importIcs(ctx: AppContext, user: User, chatId: number, conversati
       await ctx.telegram.sendMessage(chatId, t("noWritableCalendar", l));
       return;
     }
-    const items = parsed.events.map((e) => icsToItem(e, user.home_tz, user.settings.durationMin ?? DEFAULT_DURATION_MIN));
+    const items = parsed.events.map((e) => icsToItem(e, user.tz, user.settings.durationMin ?? DEFAULT_DURATION_MIN));
     const unknownTz = parsed.events.find((e) => e.unknownTz)?.unknownTz;
     const id = await createPendingAction(ctx.db, {
       conversationId,
@@ -337,7 +337,7 @@ async function importIcs(ctx: AppContext, user: User, chatId: number, conversati
       payload: { chatId, calendarId: cal.id, items } satisfies IcsCardPayload,
       now: ctx.clock.now(),
     });
-    const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+    const today = utcToLocal(ctx.clock.now(), user.tz).day;
     const many = items.length > 1;
     const showCalendar = calendars.filter((c) => c.writable).length > 1;
     const text = [
@@ -391,7 +391,7 @@ export async function confirmIcs(
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", l));
     return false;
   }
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
   const created = [];
   for (const [i, it] of items.entries()) {
     created.push(

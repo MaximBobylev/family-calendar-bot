@@ -1,0 +1,178 @@
+# US-07 (R2): поездки и домашний пояс фразами — «Я в Тбилиси [до …]», «Я переехал в …», «Я вернулся», «Какой у меня пояс?»;
+# вопрос «Вернулись?» в день окончания (18:00 по поясу поездки) или раз в неделю. Фразы о поясе — без LLM.
+# «Сейчас» — ср 7 октября 2026, 10:00 МСК (11:00 в Тбилиси, 09:00 в Берлине). Дом — Europe/Moscow.
+
+- id: trip-with-end-date-dates-follow-trip-zone
+  story: US-07
+  steps:
+    - &setup
+      - clock: "2026-10-07T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-08T10:00:00+03:00" }, end: { dateTime: "2026-10-08T11:00:00+03:00" } }
+      - llm:
+          "Поставь встречу завтра в 12": { tool: create_event, args: { start: "завтра в 12" } }
+          "Я в офисе до 6": { tool: unsupported, args: {} }
+    - telegram: { from: 1001, text: "Мы в Тбилиси до воскресенья" }
+    - expect_telegram:
+        - { text_contains: ["🧳 Включил пояс поездки Asia/Tbilisi (сейчас 11:00)", "Дом — Europe/Moscow", "вс, 11 октября спрошу, вернулись ли вы"] }
+    - expect_llm_requests: 0
+    # Относительные даты — в поясе поездки: «завтра в 12» = 12:00 по Тбилиси
+    - telegram: { from: 1001, text: "Поставь встречу завтра в 12" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "чт, 8 октября, 12:00–13:00"] }
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "чт, 8 октября, 12:00–13:00"] }
+        - { text_contains: ["Как назвать встречу?"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events: [{ summary: "Встреча", start: "2026-10-08T12:00:00+04:00", end: "2026-10-08T13:00:00+04:00" }]
+    - telegram: { from: 1001, text: "Какой у меня часовой пояс?" }
+    - expect_telegram:
+        - { text_contains: ["🧳 Сейчас поездка: Asia/Tbilisi (там 11:00) до вс, 11 октября. Дом — Europe/Moscow."] }
+    # Сводка — по поясу поездки (08:00 в Тбилиси = 04:00Z), с поездкой в шапке; планёрка 10:00 МСК = 11:00 там
+    - clock: "2026-10-08T04:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["🧳 Поездка: Asia/Tbilisi (дом — Europe/Moscow)", "Доброе утро", "11:00–12:00  Планёрка"] }
+
+- id: trip-buttons-then-end-date-question
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Я в Берлине" }
+    - expect_telegram:
+        - { text_contains: ["Пояс Europe/Berlin, там сейчас 09:00. Это поездка или переезд?"], buttons: ["🧳 На время поездки", "🏠 Навсегда", "Отмена"] }
+    - press: "🧳 На время поездки"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Это поездка или переезд?"] }
+        - { text_contains: ["🧳 Включил пояс поездки Europe/Berlin (сейчас 09:00)"], text_not_contains: ["спрошу, вернулись"] }
+        - { text_contains: ["До какого числа поездка?"], buttons: ["Не знаю"] }
+    - telegram: { from: 1001, text: "до пятницы" }
+    - expect_telegram:
+        - { text_contains: ["Запомнил: поездка до пт, 9 октября. В этот день спрошу, вернулись ли вы."] }
+    - expect_llm_requests: 0
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["🧳 Поездка: Europe/Berlin (сейчас 09:00) до пт, 9 октября; дом — Europe/Moscow"] }
+    # В пятницу в 18:00 по Берлину (16:00Z) — «Вернулись?»
+    - clock: "2026-10-09T15:59:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-09T16:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - text_contains: ["Вернулись из поездки? Сейчас пояс Europe/Berlin, дом — Europe/Moscow."]
+          buttons: ["Вернулись — вернуть Europe/Moscow", "Ещё нет", "Оставить Europe/Berlin навсегда"]
+    - press: "Вернулись — вернуть Europe/Moscow"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["🏠 С возвращением! Вернул Europe/Moscow (сейчас 19:00)."] }
+    - telegram: { from: 1001, text: "Какой у меня пояс?" }
+    - expect_telegram:
+        - { text_contains: ["🌍 Часовой пояс: Europe/Moscow (сейчас 19:00)."] }
+
+- id: trip-without-date-weekly-check-not-yet-then-keep
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Я в Ереване" }
+    - press: "🧳 На время поездки"
+    - press: "Не знаю"
+    - expect_telegram:
+        - { text_contains: ["Пояс Asia/Yerevan, там сейчас 11:00. Это поездка или переезд?"] }
+        - { method: editMessageText, text_contains: ["Это поездка или переезд?"] }
+        - { text_contains: ["🧳 Включил пояс поездки Asia/Yerevan"] }
+        - { text_contains: ["До какого числа поездка?"] }
+        - { method: editMessageText, text_contains: ["Хорошо, через неделю спрошу, вернулись ли вы."] }
+    # Без даты — через 7 дней
+    - clock: "2026-10-14T06:59:00Z"
+    - tick: true
+    - expect_no_telegram: true
+    - clock: "2026-10-14T07:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Вернулись из поездки?"], buttons: ["Вернулись — вернуть Europe/Moscow", "Ещё нет", "Оставить Asia/Yerevan навсегда"] }
+    - press: "Ещё нет"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Хорошо, спрошу ещё через неделю."] }
+    - clock: "2026-10-21T07:00:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Вернулись из поездки?"] }
+    - press: "Оставить Asia/Yerevan навсегда"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["🏠 Домашний пояс теперь Asia/Yerevan (сейчас 11:00)."] }
+    - telegram: { from: 1001, text: "Я вернулся" }
+    - expect_telegram:
+        - { text_contains: ["Вы и так дома: Asia/Yerevan (сейчас 11:00)."] }
+
+- id: trip-return-early-cancels-check
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Прилетел в Стамбул до пятницы" }
+    - expect_telegram:
+        - { text_contains: ["🧳 Включил пояс поездки Europe/Istanbul", "пт, 9 октября спрошу"] }
+    - telegram: { from: 1001, text: "Я вернулся" }
+    - expect_telegram:
+        - { text_contains: ["🏠 С возвращением! Вернул Europe/Moscow (сейчас 10:00)."] }
+    # Вопроса «Вернулись?» больше нет
+    - clock: "2026-10-09T15:00:00Z"
+    - tick: true
+    - expect_no_telegram: true
+
+- id: move-home-and-trip-to-home-zone
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Я переехал в Тбилиси" }
+    - expect_telegram:
+        - { text_contains: ["🏠 Домашний пояс теперь Asia/Tbilisi (сейчас 11:00)."] }
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["🌍 Часовой пояс: Asia/Tbilisi (сейчас 11:00)"], text_not_contains: ["Поездка"] }
+    # Кнопка «Навсегда» — то же
+    - telegram: { from: 1001, text: "Я в Москве" }
+    - press: "🏠 Навсегда"
+    - expect_telegram:
+        - { text_contains: ["Пояс Europe/Moscow, там сейчас 10:00. Это поездка или переезд?"] }
+        - { method: editMessageText, text_contains: ["🏠 Домашний пояс теперь Europe/Moscow (сейчас 10:00)."] }
+
+- id: trip-phrases-that-are-not-time-zones
+  story: US-07
+  steps:
+    - *setup
+    # Офис — не город: обычная команда через LLM
+    - telegram: { from: 1001, text: "Я в офисе до 6" }
+    - expect_llm_requests: 1
+    - expect_telegram:
+        - { text_not_contains: ["пояс"] }
+
+- id: settings-timezone-ends-trip
+  story: US-07
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Я в Берлине до пятницы" }
+    - telegram: { from: 1001, text: "/settings" }
+    - press: "🌍 Пояс"
+    - press: "Тбилиси"
+    - expect_telegram:
+        - { text_contains: ["🧳 Включил пояс поездки Europe/Berlin"] }
+        - { text_contains: ["🧳 Поездка: Europe/Berlin"] }
+        - { method: editMessageText, text_contains: ["Часовой пояс</b>"] }
+        - { method: editMessageText, text_contains: ["🌍 Часовой пояс: Asia/Tbilisi (сейчас 11:00)"], text_not_contains: ["Поездка"] }
+    # Поездки больше нет — и вопроса тоже
+    - clock: "2026-10-09T16:00:00Z"
+    - tick: true
+    - expect_no_telegram: true

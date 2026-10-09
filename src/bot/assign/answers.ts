@@ -38,9 +38,9 @@ import { planAssignmentJobs } from "./logic";
 import { notifyMember, offerMarkup, refreshMessages, renderMessage, sendOffers, viewerOf } from "./notify";
 import { type AssignAct, assignCallback, declinedButtons, doneButtons, parseAssignCallback, whenOfAssignment } from "./view";
 
-const params = (ctx: AppContext, a: Assignment, home: Home, v: { locale: string; home_tz: string }) => ({
+const params = (ctx: AppContext, a: Assignment, home: Home, v: { locale: string; tz: string }) => ({
   title: a.title,
-  when: whenOfAssignment(a, ctx.clock.now(), v.home_tz, v.locale),
+  when: whenOfAssignment(a, ctx.clock.now(), v.tz, v.locale),
   name: memberName(home, a.assigneeUserId),
 });
 
@@ -193,7 +193,7 @@ export async function actOnAssignment(
       const mine = await transition(ctx.db, a.id, { from: ["declined", "pending"], to: "accepted", assignee: user.id, now });
       if (!mine) return fail("assignNotActual");
       await answer();
-      await reschedule(ctx, mine, user.home_tz);
+      await reschedule(ctx, mine, user.tz);
       if (mine.event) await setEventFamily(ctx.db, mine.event, { responsibleUserId: user.id });
       await refreshMessages(ctx, mine, home, pressed);
       await editPressed(t("assignOnYou", user.locale, params(ctx, mine, home, user)), doneButtons(a.id, user.locale));
@@ -220,7 +220,7 @@ export async function actOnAssignment(
       if (!again) return fail("assignNotActual");
       await answer();
       await clearOfferAnswers(ctx.db, a.id);
-      await reschedule(ctx, again, user.home_tz);
+      await reschedule(ctx, again, user.tz);
       if (again.event) await setEventFamily(ctx.db, again.event, { responsibleUserId: target ?? null });
       await editPressed(t(target ? "assignSent" : "assignSentAll", user.locale));
       await refreshMessages(ctx, again, home, pressed);
@@ -256,7 +256,7 @@ export async function listAssignments(ctx: AppContext, user: User, chatId: numbe
   const locale = user.locale;
   if (!home) return void (await ctx.telegram.sendMessage(chatId, t("assignNotInHome", locale)));
   const now = ctx.clock.now();
-  const tz = user.home_tz;
+  const tz = user.tz;
   const period = periodOf(text, now, tz);
   const inPeriod = (a: Assignment) => {
     if (!period) return true;
@@ -338,7 +338,7 @@ async function shiftAssignments(ctx: AppContext, linked: Assignment[], deltaMs: 
     await setAssignmentDue(ctx.db, a.id, moved.dueAt!, deltaMs, now);
     const home = await homeById(ctx.db, a.householdId);
     if (!home) continue;
-    const tz = (await viewerOf(ctx, a.assigneeUserId ?? a.createdBy)).home_tz;
+    const tz = (await viewerOf(ctx, a.assigneeUserId ?? a.createdBy)).tz;
     await reschedule(ctx, moved, tz);
     await refreshMessages(ctx, moved, home);
     if (a.assigneeUserId && a.assigneeUserId !== actorUserId) {
@@ -389,7 +389,7 @@ export async function listAssignedByMe(ctx: AppContext, user: User, chatId: numb
     if (a.status === "declined") return a.assigneeUserId ? t("assignStatusDeclined", locale, { name }) : t("assignStatusNobody", locale);
     return a.assigneeUserId ? `${name} · ${t("assignStatusWaiting", locale)}` : t("assignStatusWaiting", locale);
   };
-  const lines = list.map((a) => `• ${whenOfAssignment(a, now, user.home_tz, locale)} — ${a.title} · ${status(a)}`);
+  const lines = list.map((a) => `• ${whenOfAssignment(a, now, user.tz, locale)} — ${a.title} · ${status(a)}`);
   // Решить «не сможет» — те же кнопки, что в сообщении автору
   const rows = list
     .filter((a) => a.status === "declined")
@@ -485,7 +485,7 @@ export async function releaseMemberAssignments(ctx: AppContext, householdId: str
     await notifyMember(
       ctx,
       back.createdBy,
-      (vv) => t("assignMemberLeft", vv.locale, { name, title: back.title, when: whenOfAssignment(back, now, vv.home_tz, vv.locale) }),
+      (vv) => t("assignMemberLeft", vv.locale, { name, title: back.title, when: whenOfAssignment(back, now, vv.tz, vv.locale) }),
       (vv) => declinedButtons(back.id, vv.locale),
     );
   }

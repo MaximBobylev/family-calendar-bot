@@ -188,7 +188,7 @@ export async function startAssign(
   forcedAssignee?: string,
 ): Promise<void> {
   const locale = user.locale;
-  const tz = user.home_tz;
+  const tz = user.tz;
   const now = ctx.clock.now();
   const say = (s: string) => ctx.telegram.sendMessage(chatId, s);
   const home = await loadHome(ctx.db, user.id);
@@ -303,7 +303,7 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
   }
   // Создать событие в календаре (срок со временем): через Google автора или владельца дома
   if (choice === "cal" && d.newEvent && d.dueAt !== null) {
-    const start = utcToLocal(d.dueAt, user.home_tz);
+    const start = utcToLocal(d.dueAt, user.tz);
     const duration = user.settings.durationMin ?? DEFAULT_DURATION_MIN;
     let created: EventRef | undefined;
     const ok = await withCalendar(ctx, user, chatId, async (provider) => {
@@ -311,12 +311,12 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
         idempotencyKey: `${action.id}cal`,
         calendarId: d.newEvent!.calendarId,
         title: d.title,
-        tz: user.home_tz,
+        tz: user.tz,
         allDay: false,
         startDay: start.day,
         endDay: start.day,
         start,
-        end: utcToLocal(d.dueAt! + duration * 60_000, user.home_tz),
+        end: utcToLocal(d.dueAt! + duration * 60_000, user.tz),
       });
       created = res.ref;
     });
@@ -355,7 +355,7 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
     await scheduleAssignmentJobs(
       ctx.db,
       a.id,
-      planAssignmentJobs({ dueAt: a.dueAt, hasTime: a.dueHasTime, now, tz: user.home_tz, named: a.assigneeUserId !== null }),
+      planAssignmentJobs({ dueAt: a.dueAt, hasTime: a.dueHasTime, now, tz: user.tz, named: a.assigneeUserId !== null }),
     );
   if (action.messageId) {
     const role = chatId < 0 ? "group" : "author";

@@ -26,6 +26,7 @@ import { routeIntent } from "./route-intent";
 import { sendReconnect, showSettings } from "./settings/common";
 import { handleSettingsInput } from "./settings/input";
 import { attachUndoMessage, recordUndo, undoLast } from "./undo";
+import { answerTripUntil, handleTimezoneCommand } from "./timezone";
 import { escalateVoice } from "./voice-rehear";
 import { withCalendar } from "./with-calendar";
 
@@ -74,7 +75,7 @@ export async function runCommand(
     const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, opts.replyTo, ctx.clock.now());
     if (q && (await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) {
       await withCalendar(ctx, user, chatId, async (provider) => {
-        const res = await provider.updateEvent(q.payload.ref, { tz: user.home_tz, title: text }, { notify: false });
+        const res = await provider.updateEvent(q.payload.ref, { tz: user.tz, title: text }, { notify: false });
         const undo = await recordUndo(ctx, {
           conversationId,
           user,
@@ -82,7 +83,7 @@ export async function runCommand(
           record: {
             kind: "update",
             ref: q.payload.ref,
-            tz: user.home_tz,
+            tz: user.tz,
             notify: false,
             before: { title: q.payload.title ?? t("defaultTitle", user.locale) },
             ...(res.etag ? { etag: res.etag } : {}),
@@ -104,8 +105,10 @@ export async function runCommand(
     if (aw.expiresAt > ctx.clock.now() && (aw.kind === "settings_tz" || aw.kind === "settings_digest_time" || aw.kind === "settings_alias")) {
       if (await handleSettingsInput(ctx, user, chatId, aw, text)) return;
     }
+    // «До какого числа поездка?» (US-07): дата — запомнить; не дата — дальше как новая команда
+    if (aw.kind === "trip_until" && aw.expiresAt > ctx.clock.now() && (await answerTripUntil(ctx, user, chatId, text))) return;
     if (state.awaiting.kind === "create_time" && state.awaiting.expiresAt > ctx.clock.now()) {
-      const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.home_tz)), user.home_tz);
+      const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.tz)), user.tz);
       if (draft) {
         await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
         return;
@@ -124,6 +127,9 @@ export async function runCommand(
     }
     return;
   }
+
+  // «Я в Тбилиси», «Я вернулся», «Какой у меня пояс?» (US-07) — без LLM
+  if (await handleTimezoneCommand(ctx, user, chatId, conversationId, text)) return;
 
   // Голосовое, которое текстовый путь, похоже, не понял, — переслушать мультимодальной моделью (multimodal-voice, D)
   const nowMs = ctx.clock.now();

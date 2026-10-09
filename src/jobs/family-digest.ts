@@ -33,7 +33,7 @@ export async function assignmentsBlock(
   day: Day,
   title: "digestAssignments" | "digestAssignmentsTomorrow" = "digestAssignments",
 ): Promise<string | null> {
-  const tz = user.home_tz;
+  const tz = user.tz;
   const list = await assignmentsDueBetween(ctx.db, user.id, localToUtc({ day, minutes: 0 }, tz), localToUtc({ day: day + 1, minutes: 0 }, tz));
   if (list.length === 0) return null;
   const now = ctx.clock.now();

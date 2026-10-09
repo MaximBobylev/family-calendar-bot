@@ -61,7 +61,7 @@ async function findCandidates(
   conversationId: string,
   req: EventRequest,
 ): Promise<{ events: CalendarEvent[]; fuzzy: boolean; elsewhere?: boolean }> {
-  const tz = user.home_tz;
+  const tz = user.tz;
   const nowUtc = ctx.clock.now();
   const now = utcToLocal(nowUtc, tz);
 
@@ -143,7 +143,7 @@ export interface LocateArgs {
 export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a: LocateArgs): Promise<CalendarEvent | null> {
   const { user, chatId } = a;
   const locale = user.locale;
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
   const { events: candidates, fuzzy, elsewhere } = await findCandidates(ctx, provider, user, a.conversationId, a.request);
 
   if (candidates.length === 0) {
@@ -188,13 +188,13 @@ export async function confirmPick(
 ): Promise<{ event: CalendarEvent; request: EventRequest; purpose: EventPurpose; chatId: number } | null> {
   const { chatId, refs, request } = action.payload;
   const purpose = action.payload.purpose ?? "modify";
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", user.locale));
     return null;
   }
   const ref = refs[Number(choice.slice(1))];
-  const e = ref ? await provider.getEvent(ref, user.home_tz) : null;
+  const e = ref ? await provider.getEvent(ref, user.tz) : null;
   if (!e) {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("eventGone", user.locale));
     return null;

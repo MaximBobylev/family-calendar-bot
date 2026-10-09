@@ -52,7 +52,7 @@ export async function proposeDelete(
   req: EventRequest,
 ): Promise<void> {
   const locale = user.locale;
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
   const cal = (await provider.calendars()).find((c) => c.id === e.ref.calendarId);
   if (!cal?.writable) {
     await ctx.telegram.sendMessage(chatId, t("calendarReadOnly", locale, { name: e.calendarTitle }));
@@ -62,7 +62,7 @@ export async function proposeDelete(
   const decline = !e.organizerIsSelf;
   const payload: DeleteCardPayload = {
     chatId,
-    tz: user.home_tz,
+    tz: user.tz,
     ref: e.ref,
     title: e.title,
     when: whenOf(e, today, locale),

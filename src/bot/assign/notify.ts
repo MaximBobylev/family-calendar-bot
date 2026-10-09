@@ -12,16 +12,16 @@ import { assignCallback, assignmentText, doneButtons, offerButtons, whenOfAssign
 
 export interface Viewer {
   locale: string;
-  home_tz: string;
+  tz: string;
 }
 
-const FALLBACK: Viewer = { locale: "ru", home_tz: "UTC" };
+const FALLBACK: Viewer = { locale: "ru", tz: "UTC" };
 
 /** Язык и пояс участника; чат в Telegram. */
 export async function viewerOf(ctx: AppContext, userId: string | null): Promise<Viewer & { chatId: string | null }> {
   if (!userId) return { ...FALLBACK, chatId: null };
   const [u, chatId] = await Promise.all([findUserById(ctx.db, userId), telegramChatOf(ctx.db, userId)]);
-  return { locale: u?.locale ?? "ru", home_tz: u?.home_tz ?? "UTC", chatId };
+  return { locale: u?.locale ?? "ru", tz: u?.tz ?? "UTC", chatId };
 }
 
 const markup = (rows: InlineKeyboardButton[][]): ReplyMarkup => ({ inline_keyboard: rows });
@@ -35,10 +35,10 @@ export async function statusMarkup(
   role: "author" | "group",
 ): Promise<{ text: string; markup: ReplyMarkup }> {
   const { locale } = v;
-  const when = whenOfAssignment(a, ctx.clock.now(), v.home_tz, locale);
+  const when = whenOfAssignment(a, ctx.clock.now(), v.tz, locale);
   const p = { title: a.title, when, name: memberName(home, a.assigneeUserId) };
   const offer = t(a.assigneeUserId ? "assignOffer" : "assignOfferSomeone", locale, p);
-  const body = assignmentText(offer, a, home, locale, { to: true, now: ctx.clock.now(), tz: v.home_tz });
+  const body = assignmentText(offer, a, home, locale, { to: true, now: ctx.clock.now(), tz: v.tz });
   const cancel = [{ text: t("assignCancelButton", locale), callback_data: assignCallback(a.id, "cancel") }];
   switch (a.status) {
     case "pending": {
@@ -69,9 +69,9 @@ export function offerMarkup(
   answer: string | null,
 ): { text: string; markup: ReplyMarkup } {
   const { locale } = v;
-  const p = { title: a.title, when: whenOfAssignment(a, ctx.clock.now(), v.home_tz, locale), name: memberName(home, a.assigneeUserId) };
+  const p = { title: a.title, when: whenOfAssignment(a, ctx.clock.now(), v.tz, locale), name: memberName(home, a.assigneeUserId) };
   const mine = a.assigneeUserId === recipientId;
-  const details = (head: string) => assignmentText(head, a, home, locale, { from: true, now: ctx.clock.now(), tz: v.home_tz });
+  const details = (head: string) => assignmentText(head, a, home, locale, { from: true, now: ctx.clock.now(), tz: v.tz });
   switch (a.status) {
     case "pending":
       if (answer === "declined") return { text: t("assignDeclinedYou", locale, p), markup: markup([]) };

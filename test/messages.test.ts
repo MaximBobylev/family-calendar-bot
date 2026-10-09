@@ -15,6 +15,7 @@ import { modifyMessages } from "../src/bot/messages/modify";
 import { notifyMessages } from "../src/bot/messages/notify";
 import { readMessages } from "../src/bot/messages/read";
 import { settingsMessages } from "../src/bot/messages/settings";
+import { timezoneMessages } from "../src/bot/messages/timezone";
 import { undoMessages } from "../src/bot/messages/undo";
 
 const parts = [
@@ -31,6 +32,7 @@ const parts = [
   notifyMessages,
   readMessages,
   settingsMessages,
+  timezoneMessages,
   undoMessages,
   ingestMessages,
   helpMessages,

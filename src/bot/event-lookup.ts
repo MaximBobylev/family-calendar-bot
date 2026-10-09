@@ -29,7 +29,7 @@ export interface LookupArgs {
 export async function lookupEvent(ctx: AppContext, provider: CalendarProvider, a: LookupArgs): Promise<void> {
   const { user, chatId } = a;
   const locale = user.locale;
-  const tz = user.home_tz;
+  const tz = user.tz;
   const nowUtc = ctx.clock.now();
   const now = utcToLocal(nowUtc, tz);
   const calendars = await provider.calendars();

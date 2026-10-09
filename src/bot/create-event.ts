@@ -46,7 +46,7 @@ export interface CreateArgs {
 export async function startCreate(ctx: AppContext, provider: CalendarProvider, a: CreateArgs): Promise<void> {
   const { user, chatId } = a;
   const locale = user.locale;
-  const tz = user.home_tz;
+  const tz = user.tz;
   const now = utcToLocal(ctx.clock.now(), tz);
 
   const calendars = await provider.calendars();
@@ -148,7 +148,7 @@ export async function confirmCreate(
 ): Promise<boolean> {
   const { chatId, options } = action.payload;
   const locale = user.locale;
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
 
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", locale));
@@ -231,7 +231,7 @@ export async function confirmCreate(
 async function homeTzNote(ctx: AppContext, o: CreateOption, locale: string): Promise<string> {
   if (!ctx.calendarScope || o.allDay || !o.start || o.series) return "";
   const owner = await findUserById(ctx.db, ctx.calendarScope.ownerUserId);
-  if (!owner || owner.home_tz === o.tz) return "";
-  const home = utcToLocal(localToUtc(o.start, o.tz), owner.home_tz);
-  return `\n${t("createHomeTzNote", locale, { time: hhmm(o.start.minutes), tz: o.tz, homeTime: hhmm(home.minutes), homeTz: owner.home_tz })}`;
+  if (!owner || owner.tz === o.tz) return "";
+  const home = utcToLocal(localToUtc(o.start, o.tz), owner.tz);
+  return `\n${t("createHomeTzNote", locale, { time: hhmm(o.start.minutes), tz: o.tz, homeTime: hhmm(home.minutes), homeTz: owner.tz })}`;
 }

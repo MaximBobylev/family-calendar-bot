@@ -33,7 +33,7 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
   const assign = assignOverride(text, parsedIntent);
   const intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
   // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
-  const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
+  const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
   switch (intent.name) {
     case "unsupported":
       await ctx.telegram.sendMessage(chatId, t("unsupported", user.locale));
@@ -53,12 +53,12 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       const fam = await familyHints(ctx, user.id, text);
       const famText = fam.remove.reduce((s, r) => s.replace(r, " "), text);
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
-      const rec = extractRecurrenceSpan(famText, localNow, user.home_tz);
-      const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.home_tz, "point");
+      const rec = extractRecurrenceSpan(famText, localNow, user.tz);
+      const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.tz, "point");
       // Сверка с LLM (ревью 2026-10-08): структура `when` (или `start`) — второе мнение; разные даты — варианты кнопками
       // Незнакомый пояс («в 15 по Варне»): LLM его тоже не пересчитает — спрашиваем время по своему поясу
       const llm = spans.unknownZone ? {} : { start: intent.start, ...(intent.when ? { when: intent.when } : {}) };
-      const check = rec ? undefined : llmDateCheck(famText, spans.point, llm, parseLocal(localNow), user.home_tz);
+      const check = rec ? undefined : llmDateCheck(famText, spans.point, llm, parseLocal(localNow), user.tz);
       if (check) {
         const unknownZone = spans.unknownZone ? true : undefined;
         log("date_check", { source: "message", llm: check.llm, agreement: check.agreement, unsure: spans.unsure, unknown_zone: unknownZone });
@@ -114,7 +114,7 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       }
       const eventText = details.rest;
       const hints = modifyHints(eventText);
-      const spans = extractModifySpans(eventText, localNow, user.home_tz);
+      const spans = extractModifySpans(eventText, localNow, user.tz);
       const newTitle = isModify ? (hints.newTitle ?? llmModify?.newTitle) : undefined;
       // Место: явное («место: …») — из текста; иначе — от LLM; «будет в офисе» — догадка, если LLM промолчала
       const newLocation = details.location ?? llmModify?.newLocation ?? details.locationGuess;
@@ -161,8 +161,8 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
           userId: user.id,
           chatId,
           locale: user.locale,
-          tz: user.home_tz,
-          range: extractDateSpans(text, localNow, user.home_tz, "range").range ?? intent.range,
+          tz: user.tz,
+          range: extractDateSpans(text, localNow, user.tz, "range").range ?? intent.range,
           conversationId,
           ...(intent.calendar ? { calendar: intent.calendar } : {}),
         }),

@@ -1,0 +1,46 @@
+# Фразы о часовом поясе и поездках (US-07, R2) — разбор без LLM, src/nlu/timezone-command.ts. Переносимые данные (ADR-0006).
+#   kind  — where | return | move | trip; null — не про пояс (обычная команда)
+#   tz    — пояс места (IANA); until — слова окончания поездки как сказаны (дату считает бот в поясе поездки)
+cases:
+  # Поездка
+  - { text: "Я в Тбилиси", kind: trip, tz: Asia/Tbilisi }
+  - { text: "я в тбилиси", kind: trip, tz: Asia/Tbilisi }
+  - { text: "Я сейчас в Берлине", kind: trip, tz: Europe/Berlin }
+  - { text: "Мы в Ереване до воскресенья", kind: trip, tz: Asia/Yerevan, until: "воскресенья" }
+  - { text: "Я в Москве до 15 октября", kind: trip, tz: Europe/Moscow, until: "15 октября" }
+  - { text: "Прилетел в Стамбул", kind: trip, tz: Europe/Istanbul }
+  - { text: "Приехала в Минск до пятницы", kind: trip, tz: Europe/Minsk, until: "пятницы" }
+  - { text: "Я в Нью-Йорке", kind: trip, tz: America/New_York }
+  - { text: "Я в Лиссабоне", kind: trip, tz: Europe/Lisbon }
+  - { text: "Я в Дубае до конца недели", kind: trip, tz: Asia/Dubai, until: "конца недели" }
+  - { text: "I'm in Berlin", kind: trip, tz: Europe/Berlin }
+  - { text: "I am in London until Friday", kind: trip, tz: Europe/London, until: "Friday" }
+  - { text: "Я в UTC+4", kind: trip, tz: Etc/GMT-4 }
+  # Переезд — домашний пояс
+  - { text: "Я переехал в Тбилиси", kind: move, tz: Asia/Tbilisi }
+  - { text: "Мы переехали в Белград", kind: move, tz: Europe/Belgrade }
+  - { text: "Я теперь живу в Ереване", kind: move, tz: Asia/Yerevan }
+  - { text: "I moved to Lisbon", kind: move, tz: Europe/Lisbon }
+  # Возвращение
+  - { text: "Я вернулся", kind: return }
+  - { text: "я вернулась", kind: return }
+  - { text: "Мы вернулись домой", kind: return }
+  - { text: "Я дома", kind: return }
+  - { text: "Я снова дома", kind: return }
+  - { text: "I'm back", kind: return }
+  - { text: "I'm back home", kind: return }
+  # Какой пояс
+  - { text: "Какой у меня часовой пояс?", kind: where }
+  - { text: "какой у меня пояс", kind: where }
+  - { text: "What's my time zone?", kind: where }
+  - { text: "What is my timezone", kind: where }
+  # Не про пояс — обычная команда
+  - { text: "Я в офисе до 6", kind: null }
+  - { text: "Я в шоке", kind: null }
+  - { text: "Я в Бангкоке", kind: null }
+  - { text: "Поставь встречу в Тбилиси завтра в 10", kind: null }
+  - { text: "Что у меня в пятницу?", kind: null }
+  - { text: "Я вернулся к задаче про отчёт, напомни завтра", kind: null }
+  - { text: "Перенеси встречу в Берлине на пятницу", kind: null }
+  - { text: "Я дома буду в 7, поставь ужин", kind: null }
+  - { text: "Созвон по Москве в 15", kind: null }

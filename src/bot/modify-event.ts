@@ -47,7 +47,7 @@ export async function proposeChange(
   req: ModifyRequest,
 ): Promise<void> {
   const locale = user.locale;
-  const tz = user.home_tz;
+  const tz = user.tz;
   const calendars: CalendarInfo[] = await provider.calendars();
   const cal = calendars.find((c) => c.id === e.ref.calendarId);
   if (!cal?.writable) {
@@ -114,7 +114,7 @@ export async function confirmModify(
 ): Promise<boolean> {
   const p = action.payload;
   const locale = user.locale;
-  const today = utcToLocal(ctx.clock.now(), user.home_tz).day;
+  const today = utcToLocal(ctx.clock.now(), user.tz).day;
   const edit = (text: string) =>
     action.messageId ? ctx.telegram.editMessageText(p.chatId, action.messageId, text, undefined, { html: true }) : Promise.resolve();
 

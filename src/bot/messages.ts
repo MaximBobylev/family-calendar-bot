@@ -16,6 +16,7 @@ import { modifyMessages } from "./messages/modify";
 import { notifyMessages } from "./messages/notify";
 import { readMessages } from "./messages/read";
 import { settingsMessages } from "./messages/settings";
+import { timezoneMessages } from "./messages/timezone";
 import { undoMessages } from "./messages/undo";
 
 export const messages = {
@@ -28,6 +29,7 @@ export const messages = {
   ...deleteMessages,
   ...undoMessages,
   ...settingsMessages,
+  ...timezoneMessages,
   ...inputMessages,
   ...householdMessages,
   ...ingestMessages,

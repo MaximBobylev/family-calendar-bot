@@ -11,6 +11,7 @@ import type { AppContext } from "./context";
 import { CREATE_CARD, confirmCreate, type CreateCardPayload } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete } from "./delete-event";
 import { runCommand } from "./dialog";
+import { confirmTimezone, TZ_CARDS } from "./timezone";
 import { DISCONNECT_CARD, confirmDisconnect } from "./disconnect";
 import { PICK_CARD, confirmPick } from "./find-event";
 import { FORWARD_CARD, confirmForwarded, type ForwardCardPayload } from "./forwarded";
@@ -119,6 +120,12 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
       await finishCard(ctx.db, action.id, "failed");
       if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("actionFailed", user.locale)).catch(() => undefined);
     }
+    return;
+  }
+  if (TZ_CARDS.has(action.kind)) {
+    // Пояс и поездки (US-07): календарь не нужен
+    await finishCard(ctx.db, action.id, "done");
+    await confirmTimezone(ctx, user, action, parsed.choice);
     return;
   }
   if (action.kind === DISCONNECT_CARD) {

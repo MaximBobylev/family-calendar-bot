@@ -66,7 +66,7 @@ const isUnreachable = (err: unknown) => err instanceof TelegramError && err.stat
  */
 async function sendCreateCard(ctx: AppContext, user: User, chatId: number, e: InlineEvent): Promise<boolean> {
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
-  const tz = user.home_tz;
+  const tz = user.tz;
   let card: { actionId: string; text: string; buttons: InlineKeyboardButton[][] } | undefined;
   await withCalendar(ctx, user, chatId, async (provider) => {
     const calendars = await provider.calendars();

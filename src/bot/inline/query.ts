@@ -26,7 +26,7 @@ export async function handleInlineQuery(ctx: AppContext, q: TgInlineQuery): Prom
   const now = ctx.clock.now();
   const user = await findUserByTelegramId(ctx.db, q.from.id);
   const locale = user?.locale ?? (q.from.language_code === "en" ? "en" : "ru");
-  const tz = user?.home_tz ?? "UTC";
+  const tz = user?.tz ?? "UTC";
   const events = parseInlineQuery(q.query, now, tz, user?.settings.durationMin ?? DEFAULT_DURATION_MIN, locale).slice(0, MAX_RESULTS);
 
   const today = utcToLocal(now, tz).day;

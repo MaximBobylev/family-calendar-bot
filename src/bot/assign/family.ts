@@ -147,10 +147,10 @@ export async function notifyResponsible(
   if (!family?.responsibleUserId || family.responsibleUserId === creatorId) return;
   const title = family.forName ? familyTitle(o.title, { name: family.forName, names: [family.forName] }) : o.title;
   await notifyMember(ctx, family.responsibleUserId, (v) => {
-    const today = utcToLocal(ctx.clock.now(), v.home_tz).day;
+    const today = utcToLocal(ctx.clock.now(), v.tz).day;
     let when = dateLabel(o.startDay, today, v.locale);
     if (!o.allDay && o.start) {
-      const local = utcToLocal(localToUtc(o.start, o.tz), v.home_tz);
+      const local = utcToLocal(localToUtc(o.start, o.tz), v.tz);
       when = `${dateLabel(local.day, today, v.locale)} ${hhmm(local.minutes)}`;
     }
     return t(family.forName ? "famYouLead" : "famYouResponsible", v.locale, { title, when });

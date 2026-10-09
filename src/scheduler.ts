@@ -5,6 +5,8 @@
 // Исполнитель должен быть идемпотентным по смыслу: при сбое после отправки задача может повториться.
 
 import type { AppContext } from "./bot/context";
+import { runTripCheckJob } from "./bot/timezone";
+import { TRIP_CHECK_JOB } from "./db/settings";
 import { ASSIGN_JOB, runAssignJob } from "./jobs/assign";
 import { DIGEST_JOB, runDigestJob, TOMORROW_DIGEST_JOB, WEEK_DIGEST_JOB } from "./jobs/digest";
 import { errorClass, log } from "./log";
@@ -45,6 +47,8 @@ const HANDLERS: Record<string, JobHandler> = {
   [NOTIFY_FLUSH_JOB]: runNotifyFlushJob,
   [TG_REMINDER_JOB]: runReminderJob,
   [ASSIGN_JOB]: runAssignJob,
+  // Поездки (US-07): «Вернулись?»
+  [TRIP_CHECK_JOB]: runTripCheckJob,
 };
 
 export async function claimDueJobs(db: D1Database, now: number, limit = 500): Promise<DueJob[]> {

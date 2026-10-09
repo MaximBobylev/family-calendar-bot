@@ -115,5 +115,5 @@ export async function runReminderJob(ctx: AppContext, job: DueJob): Promise<void
   if (!(await userCalendarIds(ctx.db, user.id)).includes(p.pcid)) return;
   const chatId = await telegramChatOf(ctx.db, user.id);
   if (!chatId) return;
-  await ctx.telegram.sendMessage(Number(chatId), reminderText(snap, p.minutes, user.locale, user.home_tz, now), undefined, { html: true });
+  await ctx.telegram.sendMessage(Number(chatId), reminderText(snap, p.minutes, user.locale, user.tz, now), undefined, { html: true });
 }

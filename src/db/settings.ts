@@ -1,6 +1,8 @@
 // Настройки пользователя (US-04): users.settings_json, users.locale, users.home_tz, календарь по умолчанию
 // (calendars.is_default) и алиасы календарей (calendar_aliases, US-06).
 
+import { localToUtc, parseLocal } from "../dates/calendar";
+
 export interface UserSettings {
   /** Длительность новой встречи, минуты. Нет — 60. */
   durationMin?: number;
@@ -50,8 +52,45 @@ export async function setLocale(db: D1Database, userId: string, locale: "ru" | "
   await db.prepare("UPDATE users SET locale = ? WHERE id = ?").bind(locale, userId).run();
 }
 
+/** Домашний пояс (/settings, «я переехал», US-07): поездка снимается. */
 export async function setHomeTz(db: D1Database, userId: string, tz: string): Promise<void> {
-  await db.prepare("UPDATE users SET home_tz = ? WHERE id = ?").bind(tz, userId).run();
+  await db.prepare("UPDATE users SET home_tz = ?, trip_tz = NULL, trip_until = NULL WHERE id = ?").bind(tz, userId).run();
+}
+
+/** День окончания «YYYY-MM-DD» по поясу поездки → полночь в мс UTC (users.trip_until — INTEGER из 0001). */
+const untilMs = (until: string | null, tz: string) => (until ? localToUtc({ day: parseLocal(`${until}T00:00`).day, minutes: 0 }, tz) : null);
+
+/** Поездка (US-07): временный пояс поверх домашнего; until — день окончания по её поясу или null. */
+export async function setTrip(db: D1Database, userId: string, tz: string, until: string | null): Promise<void> {
+  await db.prepare("UPDATE users SET trip_tz = ?, trip_until = ? WHERE id = ?").bind(tz, untilMs(until, tz), userId).run();
+}
+
+export async function setTripUntil(db: D1Database, userId: string, tz: string, until: string | null): Promise<void> {
+  await db.prepare("UPDATE users SET trip_until = ? WHERE id = ? AND trip_tz = ?").bind(untilMs(until, tz), userId, tz).run();
+}
+
+export async function endTrip(db: D1Database, userId: string): Promise<void> {
+  await db.prepare("UPDATE users SET trip_tz = NULL, trip_until = NULL WHERE id = ?").bind(userId).run();
+}
+
+/** Задача «Вернулись?» (US-07): одна на пользователя — прежние снимаются. */
+export const TRIP_CHECK_JOB = "trip_check";
+
+export function cancelTripChecks(db: D1Database, userId: string): D1PreparedStatement {
+  return db.prepare("UPDATE scheduled_jobs SET status = 'cancelled' WHERE user_id = ? AND kind = ? AND status = 'pending'").bind(userId, TRIP_CHECK_JOB);
+}
+
+export async function scheduleTripCheck(db: D1Database, userId: string, fireAt: number): Promise<void> {
+  await db.batch([
+    cancelTripChecks(db, userId),
+    db
+      .prepare(
+        `INSERT INTO scheduled_jobs (id, kind, user_id, fire_at, status, dedupe_key)
+         VALUES (?, ?, ?, ?, 'pending', ?)
+         ON CONFLICT (dedupe_key) DO UPDATE SET status = 'pending'`,
+      )
+      .bind(crypto.randomUUID(), TRIP_CHECK_JOB, userId, fireAt, `${TRIP_CHECK_JOB}:${userId}:${fireAt}`),
+  ]);
 }
 
 /** Сделать календарь основным (только свой и доступный для записи). */

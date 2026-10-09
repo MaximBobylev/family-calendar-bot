@@ -30,7 +30,9 @@ export interface DialogState {
     /** Вопросы дома (ревью R1 #3, #7): «Как вас называть?» (userId — кого называет владелец), имя ребёнка, название дома. */
     | { kind: "home_name"; userId?: string; expiresAt: number }
     | { kind: "home_kid"; expiresAt: number }
-    | { kind: "home_create"; expiresAt: number };
+    | { kind: "home_create"; expiresAt: number }
+    /** «До какого числа поездка?» (US-07): ответ датой дополняет поездку. */
+    | { kind: "trip_until"; expiresAt: number };
   /** Последний показанный список — для «перенеси вторую» (US-60). */
   lastList?: { refs: StoredRef[]; at: number };
   /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */

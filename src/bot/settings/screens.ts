@@ -2,13 +2,13 @@
 // Без записи в D1: только отображение текущих настроек.
 
 import type { CalendarInfo } from "../../calendar/model";
-import { utcToLocal } from "../../dates/calendar";
+import { parseLocal, utcToLocal } from "../../dates/calendar";
 import { TZ_PRESETS } from "../../dates/timezone";
 import { DEFAULT_DIGEST_TIME, DEFAULT_DURATION_MIN } from "../../db/settings";
 import type { User } from "../../db/users";
 import type { InlineKeyboardButton } from "../../telegram/types";
 import type { AppContext } from "../context";
-import { escapeHtml, hhmm } from "../format";
+import { dateLabel, escapeHtml, hhmm } from "../format";
 import { t } from "../messages";
 import { allDayRemindersLabel, durationLabel, remindersLabel } from "./labels";
 import { TG_REMINDER_PRESETS } from "../../sync/reminders";
@@ -32,6 +32,15 @@ export const ALL_DAY_PRESETS: Record<string, number[]> = { n: [], e18: [360], e9
 
 export const nowIn = (ctx: AppContext, tz: string) => hhmm(utcToLocal(ctx.clock.now(), tz).minutes);
 
+/** Пояс в меню: домашний или поездка поверх него (US-07). */
+function tzLine(ctx: AppContext, user: User): string {
+  const l = user.locale;
+  const trip = user.trip;
+  if (!trip) return t("settingsTz", l, { value: user.home_tz, time: nowIn(ctx, user.home_tz) });
+  const until = trip.until ? t("tzUntilPart", l, { day: dateLabel(parseLocal(`${trip.until}T00:00`).day, utcToLocal(ctx.clock.now(), trip.tz).day, l) }) : "";
+  return t("settingsTzTrip", l, { tz: trip.tz, time: nowIn(ctx, trip.tz), until, home: user.home_tz });
+}
+
 // --- Экраны ----------------------------------------------------------------------
 
 export interface Screen {
@@ -53,7 +62,7 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
     t("settingsTitle", l),
     "",
     t("settingsCalendar", l, { value: escapeHtml(def?.title ?? t("settingsNone", l)) }),
-    t("settingsTz", l, { value: user.home_tz, time: nowIn(ctx, user.home_tz) }),
+    tzLine(ctx, user),
     t("settingsDuration", l, { value: durationLabel(s.durationMin ?? DEFAULT_DURATION_MIN, l) }),
     t("settingsReminders", l, { value: remindersLabel(s.reminders, l) }),
     t("settingsAllDayReminders", l, { value: allDayRemindersLabel(s.allDayReminders, l) }),
@@ -86,7 +95,7 @@ function memberScreen(ctx: AppContext, user: User): Screen {
   const text = [
     t("settingsTitle", l),
     "",
-    t("settingsTz", l, { value: user.home_tz, time: nowIn(ctx, user.home_tz) }),
+    tzLine(ctx, user),
     s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
     t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
     t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
@@ -167,7 +176,7 @@ export function digestScreen(user: User): Screen {
   // «Завтра» и «Неделя» (US-70, R1) — на том же экране
   const week = user.settings.weekDigest;
   return {
-    text: `${t("settingsChooseDigest", l, { tz: user.home_tz })}\n\n${t("settingsDigestMore", l)}`,
+    text: `${t("settingsChooseDigest", l, { tz: user.tz })}\n\n${t("settingsDigestMore", l)}`,
     buttons: [
       ...rows(items, 3),
       [btn(t("settingsOtherTime", l), "digother"), ...(cur ? [btn(t("settingsDigestDisable", l), "digoff")] : [])],

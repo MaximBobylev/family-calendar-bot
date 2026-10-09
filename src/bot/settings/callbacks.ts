@@ -96,7 +96,9 @@ export async function handleSettingsCallback(
       if (p) {
         await setHomeTz(ctx.db, user.id, p.tz);
         await rescheduleDigest(ctx.db, user.id, ctx.clock.now());
-        u = { ...u, home_tz: p.tz };
+        // Пояс в настройках — домашний: поездка снимается (US-07)
+        const { trip: _trip, ...rest } = u;
+        u = { ...rest, tz: p.tz, home_tz: p.tz };
         saved = true;
       }
       break;

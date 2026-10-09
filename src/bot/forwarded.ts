@@ -68,8 +68,8 @@ export async function proposeForwarded(
   });
   // Похоже на событие (в тексте есть дата) — главный сценарий R1: «Создать событие» первым, без вопроса безопасности
   // в заголовке (ревью R1 #8). Без нажатия ничего не выполняется при любом порядке кнопок.
-  const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.home_tz));
-  const looksEvent = !!foreignDateSpans(stored, nowLocal, user.home_tz).point;
+  const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
+  const looksEvent = !!foreignDateSpans(stored, nowLocal, user.tz).point;
   const l = user.locale;
   const limit = looksEvent ? MAX_SHOWN_EVENT_LEN : MAX_SHOWN_LEN;
   const shown = escapeHtml(stored.length > limit ? `${stored.slice(0, limit)}…` : stored);

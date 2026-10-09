@@ -33,7 +33,7 @@ const digestMinutes = (user: User) => parseHhmm(user.settings.digestTime ?? DEFA
 
 /** Ближайший момент отправки дайджеста этого вида; null — выключен. */
 function nextFireAt(kind: DigestKind, user: User, now: number): number | null {
-  const tz = user.home_tz;
+  const tz = user.tz;
   if (kind === DIGEST_JOB) return user.settings.digestOff ? null : nextDailyAt(now, tz, digestMinutes(user));
   if (kind === TOMORROW_DIGEST_JOB) return user.settings.tomorrowDigest ? nextDailyAt(now, tz, parseHhmm(TOMORROW_DIGEST_TIME)!) : null;
   const slot = user.settings.weekDigest ? WEEK_SLOTS[user.settings.weekDigest] : undefined;
@@ -121,7 +121,7 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
   const chatId = await telegramChatOf(ctx.db, user.id);
   if (!chatId) return;
 
-  const tz = user.home_tz;
+  const tz = user.tz;
   const today = utcToLocal(job.fire_at, tz).day;
   const period = digestPeriod(kind, user, today);
   // Участник дома без Google — общие календари дома через Google владельца (US-93)
@@ -157,6 +157,8 @@ export async function runDigestJob(ctx: AppContext, job: DueJob): Promise<void> 
     parts[0] = `${t(period.title, user.locale)}\n\n${parts[0]}`;
   }
   if (tasks) parts[parts.length - 1] += `\n\n${tasks}`;
+  // Во время поездки — пояс в шапке (US-07): время в сводке уже по нему
+  if (user.trip) parts[0] = `${t("tzDigestTrip", user.locale, { tz: user.trip.tz, home: user.home_tz })}\n${parts[0]}`;
   appendFailedNote(parts, list.failed, user.locale);
   for (const text of parts) await ctx.telegram.sendMessage(Number(chatId), text, undefined, { html: true });
   await recordFeature(ctx.db, user.id, "digest", ctx.clock.now());

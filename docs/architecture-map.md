@@ -49,6 +49,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Качество дат: сверка с LLM и правки после карточки | лог `date_check` (`bot/route-intent.ts`, `bot/ingest.ts`), `date_fix` — `src/bot/date-fix.ts`, сводка — `/admin/usage#date-fix` |
 | Учёт функций (US-64) | `src/db/features.ts` (`Feature`, `recordFeature` — вызывать после успешного действия), сводка — `/admin/usage` |
 | Настройки пользователя | `src/bot/settings/*` (экраны, кнопки, ввод текстом, подписи), `src/db/settings.ts` |
+| Часовой пояс и поездки (US-07, R2) | фразы — `src/nlu/timezone-command.ts` (без LLM, до шага NLU в `bot/dialog.ts`; кейсы `testdata/nlu/timezone.yaml`), сценарий и карточки «поездка / навсегда», «Не знаю», «Вернулись?», задача `trip_check` — `src/bot/timezone.ts`, когда спрашивать — `src/bot/trip-logic.ts`; текущий пояс `User.tz` = поездка ?? дом (`src/db/users.ts`), запись — `setTrip`/`endTrip`/`setHomeTz` в `src/db/settings.ts` |
 | Схема БД | `migrations/*.sql` (только новые файлы), доступ — `src/db/*` |
 | Внешние URL, лимиты, цены | `src/config.ts` |
 | Провайдеры LLM/STT, цепочки | `src/nlu/llm.ts`, `src/stt/whisper.ts`, `src/voice/understand.ts`; сборка цепочек — `scripts/deploy.ts` |
@@ -122,7 +123,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `help` (справка и /start), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `help` (справка и /start), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram), `timezone` (пояс и поездки); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |

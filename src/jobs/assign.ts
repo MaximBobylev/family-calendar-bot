@@ -39,7 +39,7 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
       const sent = await notifyMember(
         ctx,
         a.assigneeUserId,
-        (v) => t(what === "ask" ? "assignAsk" : "assignReminder", v.locale, { title: a.title, when: whenOfAssignment(a, now, v.home_tz, v.locale) }),
+        (v) => t(what === "ask" ? "assignAsk" : "assignReminder", v.locale, { title: a.title, when: whenOfAssignment(a, now, v.tz, v.locale) }),
         (v) => (a.status === "pending" ? offerButtons(a.id, v.locale) : doneButtons(a.id, v.locale)),
       );
       const chat = sent ? (await viewerOf(ctx, a.assigneeUserId)).chatId : null;
@@ -50,13 +50,13 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
       if (a.status !== "pending" || late) return;
       const p = (locale: string, tz: string) => ({ title: a.title, when: whenOfAssignment(a, now, tz, locale), name: memberName(home, a.assigneeUserId) });
       // Именное поручение — только автору, лично: публично в семейном чате это укор (эпик 9, ревью R1 #5)
-      await notifyMember(ctx, a.createdBy, (v) => t(a.assigneeUserId ? "assignEscalation" : "assignEscalationSomeone", v.locale, p(v.locale, v.home_tz)));
+      await notifyMember(ctx, a.createdBy, (v) => t(a.assigneeUserId ? "assignEscalation" : "assignEscalationSomeone", v.locale, p(v.locale, v.tz)));
       if (a.assigneeUserId) return;
       // «Кто-то должен» — нейтрально предложить в семейном чате дома (US-94): «Беру» может нажать любой взрослый
       const author = await viewerOf(ctx, a.createdBy);
       for (const chat of await householdGroupChats(ctx.db, a.householdId)) {
         const rows = [[{ text: t("assignTakeButton", author.locale), callback_data: assignCallback(a.id, "take") }]];
-        const sent = await ctx.telegram.sendMessage(chat, t("assignNeedSomeone", author.locale, p(author.locale, author.home_tz)), { inline_keyboard: rows });
+        const sent = await ctx.telegram.sendMessage(chat, t("assignNeedSomeone", author.locale, p(author.locale, author.tz)), { inline_keyboard: rows });
         await addAssignmentMessage(ctx.db, a.id, { chatId: chat, messageId: sent.message_id, userId: null, role: "group" });
       }
       return;
