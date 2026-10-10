@@ -211,3 +211,14 @@
     - expect_telegram:
         - { method: editMessageText, text_contains: ["Отменено"] }
         - { text_contains: ["🏠 С возвращением! Вернул Europe/Moscow (сейчас 10:00)."] }
+
+# Модель приняла запланированную поездку за смену пояса — даты в будущем: это событие (замер 2026-10-10, a05)
+- id: planned-trip-from-llm-is-an-event
+  story: US-07
+  steps:
+    - *setup
+    - llm:
+        "Поездка в Казань с 5 по 8 декабря": { tool: set_timezone, args: { action: trip, place: "Казань", tz: "Europe/Moscow", until: "с 5 по 8 декабря" } }
+    - telegram: { from: 1001, text: "Поездка в Казань с 5 по 8 декабря" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Поездка в Казань</b>", "5 декабря", "8 декабря"], text_not_contains: ["дома", "пояс"] }

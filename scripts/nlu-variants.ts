@@ -1,7 +1,7 @@
 // Варианты промпта/схем для замера разбора интентов (scripts/eval-intents.ts, docs/research/llm-intents-eval.md).
 // A — промпт до замера 2026-10-05 (копия); E — победитель, он же теперь SYSTEM_PROMPT в src/nlu/intents.ts.
 
-import { SYSTEM_PROMPT, TOOLS } from "../src/nlu/intents";
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_NO_WHEN, TOOLS, TOOLS_NO_WHEN } from "../src/nlu/intents";
 import type { ToolDefinition } from "../src/nlu/llm";
 
 export interface Variant {
@@ -183,5 +183,7 @@ export const VARIANTS: Record<string, Variant> = {
   C: { id: "C", label: "краткие правила + 16 контрастных примеров", systemPrompt: C_PROMPT, tools: TOOLS, examples: examplesOf(C_PROMPT) },
   E: { id: "E", label: "A + точечные контрастные примеры", systemPrompt: E_PROMPT, tools: TOOLS, examples: examplesOf(E_PROMPT) },
   F: { id: "F", label: "E + calendar первым в схеме", systemPrompt: E_PROMPT, tools: F_TOOLS, examples: examplesOf(E_PROMPT) },
+  /** Прод для звена с dateStructure: false (запасной Workers AI, tech-debt #27а): E без структуры даты `when`. */
+  W: { id: "W", label: "E без when (прод Workers AI)", systemPrompt: SYSTEM_PROMPT_NO_WHEN, tools: TOOLS_NO_WHEN, examples: examplesOf(SYSTEM_PROMPT_NO_WHEN) },
   D: { id: "D", label: "C + улучшенные описания полей, start необязателен", systemPrompt: C_PROMPT, tools: D_TOOLS, examples: examplesOf(C_PROMPT) },
 };

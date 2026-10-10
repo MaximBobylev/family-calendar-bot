@@ -1,6 +1,7 @@
 // Интент → обработчик фичи (создание, изменение, удаление, поиск, список). Общий путь для текста, голоса,
 // переслушанного голосового и пересланного после «Выполнить». Даты и «что менять» — из текста детерминированно.
 
+import { parseDateFragment } from "../dates";
 import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, extractRecurrenceSpan, looksAllDay } from "../dates/extract";
 import { CONTEXT_TTL_MS, getDialogState, mergeDialogState } from "../db/conversations";
@@ -32,9 +33,14 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
   // Сильные слова в тексте важнее выбора LLM: глаголы изменения/удаления, «когда …?» (замер Qwen3, 2026-10-04)
   // Поручения (US-91): «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела» — по тексту, до остальных поправок
   const assign = assignOverride(text, parsedIntent);
-  const intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
+  let intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
   // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
   const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
+  // Запланированная поездка с датами в будущем («Поездка в Казань с 5 по 8 декабря») — событие, а не смена пояса (US-07)
+  if (intent.name === "set_timezone" && intent.action === "trip") {
+    const planned = plannedTripStart(text, localNow, user.tz);
+    if (planned) intent = { name: "create_event", start: planned, ...(cleanTitle(text, [planned]) ? { title: cleanTitle(text, [planned])! } : {}) };
+  }
   switch (intent.name) {
     case "unsupported":
       await ctx.telegram.sendMessage(chatId, t("unsupported", user.locale));
@@ -192,4 +198,26 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Дата во фразе «поездки» начинается после сегодняшнего дня — это планы (событие), а не «я сейчас там». */
+function plannedTripStart(text: string, localNow: string, tz: string): string | undefined {
+  const point = extractDateSpans(text, localNow, tz, "point").point;
+  if (!point) return undefined;
+  const r = parseDateFragment({ text: point, kind: "point", now: localNow, tz });
+  if ("error" in r) return undefined;
+  const v = "ambiguous" in r ? r.ambiguous[0]! : r;
+  const start =
+    "datetime" in v
+      ? v.datetime
+      : "interval" in v
+        ? v.interval.start
+        : "range" in v
+          ? v.range.from
+          : "date" in v
+            ? typeof v.date === "string"
+              ? v.date
+              : v.date.date
+            : undefined;
+  return start && start.slice(0, 10) > localNow.slice(0, 10) ? point : undefined;
 }

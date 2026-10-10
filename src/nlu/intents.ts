@@ -200,7 +200,7 @@ export const TOOLS: ToolDefinition[] = [
     function: {
       name: "set_timezone",
       description:
-        "The USER says where they are now (a trip), that they moved, that they are back home, or asks their time zone: «я на неделю улетаю в Бангкок», «мы сейчас в Таиланде», «переехали в Лиссабон», «I'm back home», «какой у меня часовой пояс». A city of an event («встреча в Берлине») is NOT this.",
+        "The USER says where they are NOW or are leaving for right now (a trip), that they moved, that they are back home, or asks their time zone: «я на неделю улетаю в Бангкок», «мы сейчас в Таиланде», «переехали в Лиссабон», «I'm back home», «какой у меня часовой пояс». A city of an event («встреча в Берлине») or a PLANNED trip with future dates («поездка в Казань с 5 по 8 декабря») is NOT this — that is create_event.",
       parameters: {
         type: "object",
         properties: {
@@ -265,7 +265,8 @@ const PROMPT_EXAMPLES = `Examples:
 "Tell Anya to buy milk" → assign_task {"assignee":"Anya","task":"buy milk"}   (task stays in the user's language)
 "Я на неделю улетаю в Бангкок" → set_timezone {"action":"trip","place":"Бангкок","tz":"Asia/Bangkok","until":"на неделю"}
 "Мы переехали в Таиланд" → set_timezone {"action":"move","place":"Таиланд","tz":"Asia/Bangkok"}
-"Встреча в Бангкоке завтра в 10" → create_event {"start":"завтра в 10","title":"Встреча в Бангкоке"}   (a city of an event is not the user's time zone)`;
+"Встреча в Бангкоке завтра в 10" → create_event {"start":"завтра в 10","title":"Встреча в Бангкоке"}   (a city of an event is not the user's time zone)
+"Поездка в Сочи с 3 по 9 ноября" → create_event {"start":"с 3 по 9 ноября","all_day":true,"title":"Поездка в Сочи"}   (a planned trip is an event)`;
 
 export const SYSTEM_PROMPT = PROMPT_HEAD + PROMPT_WHEN + PROMPT_EXAMPLES;
 
