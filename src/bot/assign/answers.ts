@@ -1,6 +1,5 @@
-// US-91: ответы на поручение кнопками — «Беру» (первый забирает «кто-то должен»), «Не могу» (автору — «Сделаю сам» /
-// «Предложить другому»), «Сделано», отмена автором; в группе дома «Беру» нажимает любой взрослый (US-94).
-// Список «мои дела», сдвиг поручений при переносе связанного события и отмена при его удалении.
+// Ответы на поручение кнопкой и словом; поручение следует за связанным событием (перенос, удаление) и за участником
+// (уход из дома).
 
 import type { EventRef } from "../../calendar/model";
 import { formatMoment, parseLocal, utcToLocal } from "../../dates/calendar";
@@ -54,7 +53,6 @@ async function reschedule(ctx: AppContext, a: Assignment, tz: string): Promise<v
     );
 }
 
-/** Нажатие кнопки поручения «as:…» — в личном чате и в группе дома. Нажимает сам участник (не от имени автора). */
 export async function handleAssignCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
   const parsed = parseAssignCallback(cq.data);
   const a = parsed ? await getAssignment(ctx.db, parsed.id) : null;
@@ -73,10 +71,7 @@ export async function handleAssignCallback(ctx: AppContext, user: User, cq: TgCa
 
 type AnswerFn = (key?: MessageKey, p?: Record<string, string>) => Promise<unknown>;
 
-/**
- * Действие с поручением — кнопкой или словом («Беру», «Не могу», «Сделано», ревью R1 #7). answer — короткий ответ
- * (всплывающий у кнопки, сообщение у слова); pressed — сообщение, где нажали. true — действие выполнено.
- */
+// answer — у кнопки всплывающий ответ, у слова — сообщение; true — действие выполнено.
 export async function actOnAssignment(
   ctx: AppContext,
   user: User,
@@ -182,7 +177,6 @@ export async function actOnAssignment(
       await answer();
       await cancelAssignmentJobs(ctx.db, a.id);
       await refreshMessages(ctx, cancelled, home);
-      // Исполнителю — отдельным сообщением «Отменено» (US-91), чтобы не держал дело в голове
       if (cancelled.assigneeUserId && cancelled.assigneeUserId !== user.id) {
         await notifyMember(ctx, cancelled.assigneeUserId, (v) => t("assignCancelledAssignee", v.locale, params(ctx, cancelled, home, v)));
       }
@@ -230,9 +224,6 @@ export async function actOnAssignment(
   }
 }
 
-// --- «Мои дела» --------------------------------------------------------------------------
-
-/** Период из «что на мне завтра» — дни [from, to]; нет периода — null. */
 function periodOf(text: string, now: number, tz: string): { from: number; to: number } | null {
   const range = extractDateSpans(text, formatMoment(utcToLocal(now, tz)), tz, "range").range;
   if (!range) return null;
@@ -250,7 +241,6 @@ function periodOf(text: string, now: number, tz: string): { from: number; to: nu
   return null;
 }
 
-/** «Мои дела», «что на мне завтра» (US-91): открытые поручения участнику и «кто-то должен», которые можно взять. */
 export async function listAssignments(ctx: AppContext, user: User, chatId: number, text: string): Promise<void> {
   const home = await loadHome(ctx.db, user.id);
   const locale = user.locale;
@@ -292,7 +282,6 @@ export async function listAssignments(ctx: AppContext, user: User, chatId: numbe
       : []),
     ...(open.length ? [[t("assignListOpen", locale), ...open.map(line)].join("\n")] : []),
   ];
-  // Кнопки «Беру» — у ждущих ответа (свои и «кто-то должен»), «Сделано» — у взятых (QA-11); не больше 5
   const actionable = [...mine.filter((a) => a.status === "pending"), ...open, ...mine.filter((a) => a.status === "accepted")].slice(0, 5);
   const rows = actionable.map((a) => {
     const done = a.status === "accepted";
@@ -306,19 +295,12 @@ export async function listAssignments(ctx: AppContext, user: User, chatId: numbe
   await ctx.telegram.sendMessage(chatId, parts.join("\n\n"), { inline_keyboard: rows });
 }
 
-// --- Перенос связанного события -----------------------------------------------------------------
-
-/**
- * Событие перенесли на deltaMs (через бота — modify-event.ts; в Google мимо бота — синхронизация, sync/engine.ts):
- * срок поручений сдвигается, напоминания — заново, исполнителю — «Время изменилось». actorUserId — кто перенёс
- * (ему не сообщаем); null — неизвестно (изменение в Google напрямую).
- */
+// actorUserId — кому не сообщать о переносе; null — перенесли в Google мимо бота.
 export async function shiftAssignmentsForEvent(ctx: AppContext, ref: EventRef, deltaMs: number, actorUserId: string | null): Promise<void> {
   if (deltaMs === 0) return;
   await shiftAssignments(ctx, await openAssignmentsForEvent(ctx.db, ref), deltaMs, actorUserId);
 }
 
-/** Перенос, найденный синхронизацией (US-72): событие календаря провайдера, без ссылки на календарь автора. */
 export async function shiftAssignmentsForProviderEvent(
   ctx: AppContext,
   pcid: string,
@@ -347,10 +329,7 @@ async function shiftAssignments(ctx: AppContext, linked: Assignment[], deltaMs: 
   }
 }
 
-/**
- * Связанное событие удалено (через бота — delete-event.ts; в Google — синхронизация): открытые поручения отменяются,
- * исполнителю — «Отменено» (кроме того, кто удалил). Отмена удаления не возвращает поручение (удаление не отменяется, US-61).
- */
+// Поручение не возвращается: удаление события не отменяется (US-61).
 export async function cancelAssignmentsForEvent(ctx: AppContext, ref: EventRef, actorUserId: string | null): Promise<void> {
   await cancelAssignments(ctx, await openAssignmentsForEvent(ctx.db, ref), actorUserId);
 }
@@ -373,9 +352,6 @@ async function cancelAssignments(ctx: AppContext, linked: Assignment[], actorUse
   }
 }
 
-// --- «Что я поручил» (ревью R1 #10) -------------------------------------------------------------
-
-/** «Что я поручил», «мои поручения»: открытые поручения автора — кому, срок, статус; решить — кнопками у «не сможет». */
 export async function listAssignedByMe(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const home = await loadHome(ctx.db, user.id);
   const locale = user.locale;
@@ -390,7 +366,6 @@ export async function listAssignedByMe(ctx: AppContext, user: User, chatId: numb
     return a.assigneeUserId ? `${name} · ${t("assignStatusWaiting", locale)}` : t("assignStatusWaiting", locale);
   };
   const lines = list.map((a) => `• ${whenOfAssignment(a, now, user.tz, locale)} — ${a.title} · ${status(a)}`);
-  // Решить «не сможет» — те же кнопки, что в сообщении автору
   const rows = list
     .filter((a) => a.status === "declined")
     .slice(0, 3)
@@ -398,17 +373,13 @@ export async function listAssignedByMe(ctx: AppContext, user: User, chatId: numb
   await ctx.telegram.sendMessage(chatId, [t("assignListByMeTitle", locale), ...lines].join("\n"), { inline_keyboard: rows });
 }
 
-// --- Ответ словом (ревью R1 #7) ----------------------------------------------------------------
-
 const TAKE_WORDS =
   /^(?:беру|возьму|заберу|сделаю|ок,?\s*(?:беру|возьму|заберу|сделаю)|да,?\s*(?:беру|возьму|заберу|сделаю)|i'?ll do it|i'?ll take it|i take it)[.!]?$/iu;
 const DECLINE_WORDS = /^(?:не могу|не смогу|нет,?\s*не (?:могу|смогу)|can'?t|i can'?t|cannot)[.!]?$/iu;
 const DONE_WORDS = /^(?:сделано|сделал[аи]?|готово|выполнено|done)[.!]?$/iu;
-/** Короткие «да / ок / нет» — только ответом (reply) на сообщение поручения. */
 const REPLY_YES = /^(?:да|ок|ok|okay|хорошо|yes)[.!]?$/iu;
 const REPLY_NO = /^(?:нет|no)[.!]?$/iu;
 
-/** Слово-ответ на поручение: что сделать; null — не ответ. */
 export function textAnswerAct(text: string, isReply: boolean): "take" | "decline" | "done" | null {
   const s = text.trim();
   if (TAKE_WORDS.test(s) || (isReply && REPLY_YES.test(s))) return "take";
@@ -417,10 +388,7 @@ export function textAnswerAct(text: string, isReply: boolean): "take" | "decline
   return null;
 }
 
-/**
- * «Беру» / «Не могу» / «Сделано» словом — сразу после сообщения поручения или ответом на него: действует на последнее
- * подходящее поручение этого участника в этом чате. true — ответ понят и обработан; false — дальше обычный путь.
- */
+// Действует на последнее подходящее поручение участника в этом чате; false — текст идёт обычным путём.
 export async function handleTextAnswer(ctx: AppContext, user: User, chatId: number, text: string, replyTo?: number): Promise<boolean> {
   const act = textAnswerAct(text, replyTo !== undefined);
   if (!act) return false;
@@ -444,13 +412,7 @@ export async function handleTextAnswer(ctx: AppContext, user: User, chatId: numb
   return true;
 }
 
-// --- Участник ушёл из дома (QA-06, QA-07, QA-14) --------------------------------------------------
-
-/**
- * Участник уходит из дома (/leave, убрали, /disconnect): поручения на нём возвращаются авторам («Сделаю я / Предложить
- * другому»), его напоминания снимаются, сообщения с кнопками у него — «Отменено»; открытые поручения, которые он сам
- * дал, отменяются (исполнителю — «Отменено»). Вызывать ДО удаления из дома: нужны имена.
- */
+// Вызывать ДО удаления из дома: нужны имена.
 export async function releaseMemberAssignments(ctx: AppContext, householdId: string, userId: string): Promise<void> {
   const home = await homeById(ctx.db, householdId);
   if (!home) return;
@@ -491,7 +453,7 @@ export async function releaseMemberAssignments(ctx: AppContext, householdId: str
   }
 }
 
-/** Дом распускают (QA-15): открытые поручения — «Отменено» во всех их сообщениях. До удаления дома. */
+// Вызывать до удаления дома.
 export async function cancelHouseholdAssignments(ctx: AppContext, householdId: string): Promise<void> {
   const home = await homeById(ctx.db, householdId);
   if (!home) return;

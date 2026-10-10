@@ -1,5 +1,4 @@
-// Сообщения о поручении (US-91): предложения исполнителям, итог автору и в группе, их обновление при каждом переходе
-// статуса (взял один — у остальных кнопки убираются). Каждое сообщение — на языке и в поясе своего получателя.
+// Каждое сообщение о поручении — на языке и в поясе своего получателя; при каждом переходе статуса обновляются все.
 
 import { telegramChatOf } from "../../db/accounts";
 import { addAssignmentMessage, type Assignment, type AssignmentMessage, assignmentMessages } from "../../db/assignments";
@@ -17,7 +16,6 @@ export interface Viewer {
 
 const FALLBACK: Viewer = { locale: "ru", tz: "UTC" };
 
-/** Язык и пояс участника; чат в Telegram. */
 export async function viewerOf(ctx: AppContext, userId: string | null): Promise<Viewer & { chatId: string | null }> {
   if (!userId) return { ...FALLBACK, chatId: null };
   const [u, chatId] = await Promise.all([findUserById(ctx.db, userId), telegramChatOf(ctx.db, userId)]);
@@ -26,7 +24,6 @@ export async function viewerOf(ctx: AppContext, userId: string | null): Promise<
 
 const markup = (rows: InlineKeyboardButton[][]): ReplyMarkup => ({ inline_keyboard: rows });
 
-/** Итог у автора («author») или в групповом чате («group»): статус, детали, «Отменить» пока открыто; в группе — «Беру» для «кто-то должен». */
 export async function statusMarkup(
   ctx: AppContext,
   a: Assignment,
@@ -59,7 +56,6 @@ export async function statusMarkup(
   }
 }
 
-/** Сообщение исполнителю (или кандидату для «кто-то должен»): от статуса и его ответа. */
 export function offerMarkup(
   ctx: AppContext,
   a: Assignment,
@@ -89,12 +85,11 @@ export function offerMarkup(
     case "cancelled":
       return { text: t("assignCancelledAssignee", locale, p), markup: markup([]) };
     case "expired":
-      // Без упрёков: срок прошёл; исполнитель всё ещё может отметить «Сделано»
+      // Срок прошёл, но исполнитель всё ещё может отметить «Сделано».
       return { text: t("assignExpired", locale, p), markup: markup(mine ? doneButtons(a.id, locale) : []) };
   }
 }
 
-/** Обновить все сообщения поручения по текущему статусу (кнопки у остальных — убрать, у взявшего — «Сделано»). */
 export async function refreshMessages(ctx: AppContext, a: Assignment, home: Home, except?: { chatId: string; messageId: number }): Promise<void> {
   const messages = await assignmentMessages(ctx.db, a.id);
   const author = await viewerOf(ctx, a.createdBy);
@@ -116,10 +111,7 @@ export async function renderMessage(
   return statusMarkup(ctx, a, home, author, m.role === "group" ? "group" : "author");
 }
 
-/**
- * Предложение исполнителю, а для «кто-то должен» — всем взрослым дома, кроме автора (US-91). Участник без Google —
- * тоже: всё идёт через Telegram. `only` — только этим (повторное предложение другому).
- */
+// Участник без Google тоже получает предложение: всё идёт через Telegram.
 export async function sendOffers(ctx: AppContext, a: Assignment, home: Home, only?: string[]): Promise<void> {
   const recipients = (a.assigneeUserId ? [a.assigneeUserId] : home.members.filter((m) => m.userId !== a.createdBy).map((m) => m.userId)).filter(
     (id) => !only || only.includes(id),
@@ -133,7 +125,6 @@ export async function sendOffers(ctx: AppContext, a: Assignment, home: Home, onl
   }
 }
 
-/** Отдельное сообщение участнику (автору: «Дима взял(а)», исполнителю: «Отменено»). */
 export async function notifyMember(ctx: AppContext, userId: string, text: (v: Viewer) => string, rows: (v: Viewer) => InlineKeyboardButton[][] = () => []) {
   const v = await viewerOf(ctx, userId);
   if (!v.chatId) return null;

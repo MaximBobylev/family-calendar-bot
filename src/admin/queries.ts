@@ -1,5 +1,4 @@
-// Весь SQL админки — в одном месте (docs/admin-console.md, «Архитектура»): тонкий слой, легко повторить на Go.
-// admin_audit — только INSERT и SELECT (без UPDATE/DELETE).
+// Весь SQL админки — тонкий слой, легко повторить на Go. admin_audit — только INSERT и SELECT.
 
 import { setOpsState } from "../db/ops-state";
 import type { SyncCalendarRow } from "../ops/sync-health";
@@ -7,8 +6,6 @@ import type { SyncCalendarRow } from "../ops/sync-health";
 const MIN_MS = 60_000;
 const HOUR_MS = 60 * MIN_MS;
 const DAY_MS = 24 * HOUR_MS;
-
-// --- Здоровье ---------------------------------------------------------------------------------------
 
 export interface Totals {
   users: number;
@@ -29,13 +26,11 @@ export async function totals(db: D1Database): Promise<Totals> {
 export interface InboxHealth {
   pending: number;
   processing: number;
-  /** Самый старый апдейт в pending/processing (received_at). */
   oldestOpenAt: number | null;
   receivedHour: number;
   receivedDay: number;
   failedHour: number;
   failedDay: number;
-  /** Апдейты за сутки, обработанные не с первой попытки. */
   retriedDay: number;
 }
 
@@ -125,10 +120,10 @@ export async function jobsByKindStatus(db: D1Database): Promise<JobsGroup[]> {
 }
 
 export interface JobsLag {
-  /** pending, у которых fire_at прошёл больше 2 минут назад (cron раздаёт раз в минуту). */
+  // fire_at прошёл больше 2 минут назад: cron раздаёт раз в минуту.
   overdue: number;
   oldestOverdueAt: number | null;
-  /** queued/running дольше 10 минут — вернутся в pending (scheduler.ts, STALE_MS). */
+  // Дольше 10 минут — вернутся в pending (scheduler.ts, STALE_MS).
   stuck: number;
   failedDay: number;
 }
@@ -157,7 +152,6 @@ export interface ProblemJob {
   last_error: string | null;
 }
 
-/** failed и pending-с-ошибкой (повтор ждёт), самые свежие. */
 export async function problemJobs(db: D1Database, limit = 10): Promise<ProblemJob[]> {
   const { results } = await db
     .prepare(
@@ -171,9 +165,7 @@ export async function problemJobs(db: D1Database, limit = 10): Promise<ProblemJo
 }
 
 export interface DigestDelivery {
-  /** Наступившие за последние 24 ч, по статусу задачи. */
   fired: Record<string, number>;
-  /** Запланированы на ближайшие 24 ч. */
   upcoming: number;
 }
 
@@ -207,8 +199,6 @@ export async function opsState(db: D1Database, keys: string[]): Promise<Map<stri
 
 export const saveOpsState = setOpsState;
 
-// --- Журнал распознанного ----------------------------------------------------------------------------
-
 export interface JournalRow {
   id: string;
   user_id: string | null;
@@ -222,7 +212,7 @@ export interface JournalRow {
   tokens_out: number | null;
   audio_ms: number | null;
   cost_micro_usd: number | null;
-  /** Пояс пользователя сейчас (истории поясов нет); NULL — пользователь удалён. */
+  // Пояс сейчас: истории поясов нет. NULL — пользователь удалён.
   tz: string | null;
 }
 
@@ -230,9 +220,9 @@ export interface JournalFilter {
   kind?: string;
   outcome?: string;
   intent?: string;
-  /** Пользователи по псевдониму (обратного отображения нет — список id подбирает роутер). */
+  // Обратного отображения псевдонима нет — список id подбирает роутер.
   userIds?: string[];
-  /** Курсор: записи строго раньше этого момента. */
+  // Строго раньше этого момента.
   before?: number;
 }
 
@@ -278,13 +268,11 @@ export async function journalRow(db: D1Database, id: string): Promise<JournalRow
   return db.prepare(`SELECT ${JOURNAL_COLUMNS} FROM usage_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.id = ?`).bind(id).first<JournalRow>();
 }
 
-/** Все id пользователей — для поиска по псевдониму (на MVP-объёмах дешевле, чем хранить псевдонимы). */
+// Для поиска по псевдониму: на MVP-объёмах дешевле, чем хранить псевдонимы.
 export async function userIds(db: D1Database): Promise<string[]> {
   const { results } = await db.prepare("SELECT id FROM users").all<{ id: string }>();
   return results.map((r) => r.id);
 }
-
-// --- Аудит --------------------------------------------------------------------------------------------
 
 export interface AuditEntry {
   at: number;
@@ -322,8 +310,6 @@ export async function auditLog(db: D1Database, limit = 100): Promise<AuditRow[]>
   return results;
 }
 
-// --- Расход -------------------------------------------------------------------------------------------
-
 export interface UserUsage {
   user_id: string | null;
   kind: string;
@@ -334,7 +320,7 @@ export interface UserUsage {
   errors_7d: number;
   cost_today: number;
   cost_7d: number;
-  /** Записи без cost_micro_usd (до учёта стоимости в момент вызова). */
+  // Записи до учёта стоимости в момент вызова.
   no_cost: number;
 }
 
@@ -397,7 +383,6 @@ export async function cardCounts(db: D1Database, now: number): Promise<{ kind: s
   return results;
 }
 
-/** Даты (tech-debt #26): по дням UTC — создано из карточки и правки даты сразу после, по видам. Только счётчики. */
 export interface DateFixDay {
   day: string;
   created: number;
@@ -439,7 +424,6 @@ export interface FeatureRow {
   first_at: number;
 }
 
-/** US-64: какие функции использовали — пользователей, раз всего, самое раннее первое использование. */
 export async function featureUsage(db: D1Database): Promise<FeatureRow[]> {
   const { results } = await db
     .prepare(
@@ -452,10 +436,9 @@ export async function featureUsage(db: D1Database): Promise<FeatureRow[]> {
   return results;
 }
 
-// --- Синхронизация, уведомления, напоминания (итерация 3) -----------------------------------------------
 // id календаря (почта) и тексты уведомлений не выбираются — только времена, статусы и счётчики.
 
-/** Строки calendar_sync для сводки (src/ops/sync-health.ts) — по ней же алерт sync_stale. */
+// По ней же алерт sync_stale (src/ops/sync-health.ts).
 export async function syncCalendars(db: D1Database): Promise<SyncCalendarRow[]> {
   const { results } = await db
     .prepare(
@@ -470,7 +453,7 @@ export async function syncCalendars(db: D1Database): Promise<SyncCalendarRow[]> 
   return results;
 }
 
-/** Исходы и классы ошибок синка за сутки (errorClass — без текста ответа): сколько календарей. */
+// errorClass — без текста ответа.
 export async function syncErrorClasses(db: D1Database, now: number): Promise<{ outcome: string; error: string; n: number }[]> {
   const { results } = await db
     .prepare(
@@ -485,15 +468,13 @@ export async function syncErrorClasses(db: D1Database, now: number): Promise<{ o
 export interface KindStats {
   kind: string;
   pending: number;
-  /** pending с last_error — ждут повтора. */
   retrying: number;
-  /** Наступили за сутки: выполнены (done, включая тихие пропуски) / упали / сняты. */
+  // Включая тихие пропуски.
   done_day: number;
   failed_day: number;
   cancelled_day: number;
 }
 
-/** Задачи синка, продления каналов, отправки уведомлений и напоминаний — по виду. */
 export async function jobKindStats(db: D1Database, now: number, kinds: string[]): Promise<KindStats[]> {
   const { results } = await db
     .prepare(
@@ -509,9 +490,8 @@ export async function jobKindStats(db: D1Database, now: number, kinds: string[])
 }
 
 export interface NoticeStats {
-  /** Ждут конца тихих часов. */
   quiet: number;
-  /** queued, срок наступил больше 10 минут назад — отправка не прошла. */
+  // Срок наступил больше 10 минут назад — отправка не прошла.
   overdue: number;
   oldestOverdueAt: number | null;
   sending: number;
@@ -542,7 +522,6 @@ export async function noticeStats(db: D1Database, now: number): Promise<NoticeSt
   };
 }
 
-/** Пользователи с включёнными напоминаниями в Telegram (US-71). */
 export async function reminderUsersCount(db: D1Database): Promise<number> {
   const r = await db
     .prepare("SELECT count(*) n FROM users WHERE json_valid(settings_json) AND coalesce(settings_json ->> '$.tgReminderMin', 0) > 0")
@@ -550,7 +529,6 @@ export async function reminderUsersCount(db: D1Database): Promise<number> {
   return r?.n ?? 0;
 }
 
-// --- Дома (итерация 3) ------------------------------------------------------------------------------------
 // Название дома, имена и другие имена участников, имена детей и коды приглашений не выбираются никогда.
 
 export interface HouseholdRow {
@@ -633,8 +611,6 @@ export async function householdChats(db: D1Database, householdId: string): Promi
   return results.map((r) => r.chat_id);
 }
 
-// --- Контент → событие и inline (итерация 3) --------------------------------------------------------------
-
 export interface SourceUsage {
   source: string;
   n: number;
@@ -642,7 +618,6 @@ export interface SourceUsage {
   cost: number;
 }
 
-/** Вызовы LLM по источнику (result_json.source: forward — пересланное, image — vision по фото) за 7 дней. */
 export async function llmBySource(db: D1Database, now: number): Promise<SourceUsage[]> {
   const { results } = await db
     .prepare(
@@ -658,7 +633,7 @@ export async function llmBySource(db: D1Database, now: number): Promise<SourceUs
 }
 
 export interface InlineStats {
-  /** Карточки (inline_events), созданные за 7 дней; строки живут до expires_at — старше не видно. */
+  // Строки живут до expires_at — старше не видно.
   cards7d: number;
   cardsStored: number;
   authors7d: number;

@@ -1,10 +1,7 @@
-// Замер «фото → событие» (US-66) на синтетических картинках testdata/images (scripts/image-synth.sh) — ручной запуск, не тест.
-// Один вызов на картинку: видимый текст + create_event / no_event, как src/vision/understand.ts. Дату считает НАШ парсер
-// по видимому тексту (foreignDateSpans — как bot/ingest.ts), от модели — название и место.
-// Модели: «or:<модель>» — OpenRouter chat/completions, image_url data:URL (промпт и tools — копия src/vision/understand.ts);
-// «ds:<модель>» — DeepSeek, прод-путь understandImageChain (kind "openai", с `when`; thinking off, DS_EXTRA — свои поля);
-// «gg:<модель>» — Gemini напрямую, прод-путь understandImageChain; «oracle» — без вызовов: эталонный текст из index.yaml
-// (проверка набора и парсера). Итоги — docs/research/free-models-eval.md.
+// Замер «фото → событие» на testdata/images. Дату считает наш парсер по видимому тексту, от модели — название и место.
+// Живые вызовы тратят квоты прода — только с разрешения владельца, сначала --dry-run. Итоги — docs/research/free-models-eval.md.
+// Модели: or:<id> — OpenRouter (копия промпта); ds:<id> — DeepSeek и gg:<id> — Gemini через прод-путь understandImageChain
+// (DS_EXTRA — свои поля); oracle — без вызовов, эталонный текст из index.yaml (проверка набора и парсера).
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-images.ts --models or:<модель>,gg:gemini-3.5-flash-lite \
 //     [--ids 01,02] [--delay-ms 2500] [--out reports/free-eval/images.jsonl] [--dry-run] [--report]
 //   OR_EXTRA='{"reasoning":{"enabled":false}}' — поля запроса OpenRouter (по умолчанию reasoning off).
@@ -42,10 +39,9 @@ interface Img {
   title?: string[];
   place?: string;
   text: string;
-  /** «Сейчас» и пояс этой картинки (реальные афиши — свой год); нет — defaults. */
+  // У реальных афиш свой год; нет — defaults
   now?: string;
   tz?: string;
-  /** Реальные картинки: откуда, лицензия, автор (testdata/images/LICENSES.md). */
   source?: string;
   license?: string;
   author?: string;
@@ -58,7 +54,7 @@ const images = SET.images.filter((i) => !ids.size || ids.has(i.id));
 const OUT = opt("out") ?? "reports/free-eval/images.jsonl";
 const DELAY_MS = Number(opt("delay-ms") ?? 2500);
 
-// --- Промпт и tools: копия src/vision/understand.ts (там они в формате Gemini и не экспортируются) ---------------------
+// Копия промпта и tools из src/vision/understand.ts (там они в формате Gemini и не экспортируются) — менять вместе
 
 const SYSTEM = `You read an IMAGE the user sent to their calendar assistant: a chat screenshot, a poster, a booking e-mail, a ticket, a schedule on a door.
 In EVERY call fill "text" with the visible text verbatim: same language, line by line, dates and times EXACTLY as written (never convert, compute or "correct" them).
@@ -102,7 +98,7 @@ interface Answer {
   text: string;
   title?: string;
   start?: string;
-  /** Структура даты (только прод-путь gg:/ds:, понимает src/vision/understand.ts; копия промпта для or: — без неё). */
+  // Только прод-путь gg:/ds:; в копии промпта для or: её нет
   when?: DateStructure;
   location?: string;
   tokens?: string;
@@ -134,7 +130,7 @@ async function viaOpenAi(model: string, mime: string, b64: string): Promise<Answ
     choices?: { message?: { tool_calls?: { function: { name: string; arguments: string } }[]; content?: string } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
-  // 200 с {"error":{…}} — сбой провайдера (Nemotron Nano: «ResourceExhausted»), не ответ модели
+  // 200 с {"error":{…}} — сбой провайдера, не ответ модели
   if (j.error) throw new Error(`openrouter ${j.error.code ?? 502} (в теле 200): ${String(j.error.message).slice(0, 200)}`);
   const call = j.choices?.[0]?.message?.tool_calls?.[0]?.function;
   let a: Record<string, unknown> = {};
@@ -148,7 +144,6 @@ async function viaOpenAi(model: string, mime: string, b64: string): Promise<Answ
   return { noEvent: call?.name !== "create_event", text: s(a.text) ?? "", title: s(a.title), start: s(a.start), location: s(a.location), tokens };
 }
 
-/** Прод-путь src/vision/understand.ts: «gg:» — Gemini, «ds:» — DeepSeek. */
 function prodConfig(model: string): VisionConfig {
   if (model.startsWith("ds:"))
     return {
@@ -183,7 +178,7 @@ async function viaProd(model: string, mime: string, bytes: ArrayBuffer): Promise
   };
 }
 
-// --- Оценка: как bot/ingest.ts proposeFromForeign ------------------------------------------------------------------------
+// Оценка — как bot/ingest.ts proposeFromForeign
 
 interface Clock {
   now: string;
@@ -213,12 +208,10 @@ interface Result {
   error?: string;
   ms: number;
   answer?: Answer;
-  /** Карточка: событие предложено (create_event и есть видимый текст). */
   card?: boolean;
   start?: string | null;
-  /** Начало, если первой — дата модели (llmFirst). */
   llmFirstStart?: string | null;
-  /** Начало по полю start от модели (справочно: прод берёт дату из текста). */
+  // Справочно: прод берёт дату из текста
   modelStart?: string | null;
   title?: string;
   place?: string;
@@ -236,7 +229,7 @@ function grade(img: Img, r: Result): Result {
   const dates = foreignDateSpans(a.text, c.now, c.tz);
   const place = a.location ?? guessPlace(a.text);
   const title = a.title ?? heuristicTitle(dates.sentence, dates.fragments, place);
-  // Как ingest.ts: наш кусок, структура `when` (или `start`) модели — второе мнение; у нас только день, у модели момент — модель
+  // Как ingest.ts: `when` (или `start`) модели — второе мнение; у нас только день, у модели момент — берём модель
   const pick = llmDateCheck(a.text, dates.point, { start: a.start, ...(a.when ? { when: a.when } : {}) }, parseLocal(c.now), c.tz).pick;
   const ours = resolvePoint(pick.startText, c);
   const alt = pick.altWhen ? firstOf(resolveDateStructure(pick.altWhen, "point", parseLocal(c.now), c.tz)) : resolvePoint(pick.altStartText, c);
@@ -244,7 +237,7 @@ function grade(img: Img, r: Result): Result {
   // Если первой ставить дату модели (llmFirst, как у пересланного): структура/start модели, нет — наш кусок
   const llmFirstStart = alt && alt !== "past" ? alt : ours;
   const out: Result = { ...r, card, start, llmFirstStart, modelStart: resolvePoint(a.start, c), title, place };
-  // Не-событие: верно, если карточки нет или в ней нет даты (бот спросит «когда?» — мягкая ошибка, считаем неверным)
+  // Не-событие верно, только если карточки нет: карточка без даты (бот спросит «когда?») — тоже ошибка
   out.eventOk = img.event ? card : !card;
   if (img.event && card) {
     out.startOk = [img.start ?? []].flat().includes(start ?? "");
@@ -262,8 +255,6 @@ function grade(img: Img, r: Result): Result {
   return out;
 }
 
-// --- Сводка ----------------------------------------------------------------------------------------------------------------
-
 const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}% (${a}/${b})` : "—");
 const q = (xs: number[], p: number) => {
   if (!xs.length) return "—";
@@ -275,7 +266,6 @@ function summary(rs: Result[]): void {
     "| Модель | картинок | событие верно | дата/время (наш парсер) | дата, модель первой | дата по start модели | название | место | p50 / p95, с | ошибок |",
   );
   console.log("|---|---|---|---|---|---|---|---|---|---|");
-  // Части набора: синтетика (01…), реальные с Commons (r…), рукописные (h…) — отдельными строками и итогом
   const setOf = (id: string) => (id.startsWith("r") ? "реальные" : id.startsWith("h") ? "рукописные" : "синтетика");
   const groups: [string, Result[]][] = [];
   for (const model of [...new Set(rs.map((r) => r.model))]) {
@@ -309,8 +299,6 @@ function summary(rs: Result[]): void {
   }
 }
 
-// --- Запуск ----------------------------------------------------------------------------------------------------------------
-
 const readResults = (): Result[] => {
   try {
     return readFileSync(OUT, "utf8")
@@ -323,7 +311,7 @@ const readResults = (): Result[] => {
   }
 };
 if (argv.includes("--report")) {
-  // Последняя запись по (модель, картинка) — повтор заменяет прежнюю; переоценка по сохранённым ответам
+  // Повтор заменяет прежнюю запись; оценка — заново по сохранённым ответам
   const latest = [...new Map(readResults().map((r) => [`${r.model}|${r.id}`, r])).values()];
   summary(latest.map((r) => grade(SET.images.find((i) => i.id === r.id)!, r)));
   process.exit(0);

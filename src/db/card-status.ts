@@ -1,5 +1,4 @@
-// tech-debt #6: машина состояний карточки (pending_actions.status) и решение для нажатия на уже «забранную».
-// Чистый модуль без D1 — правила проверяются юнит-тестом (test/card-status.test.ts); SQL — в conversations.ts.
+// Машина состояний карточки (pending_actions.status), без D1 — SQL в conversations.ts (tech-debt #6).
 //
 //   open ──нажатие──▶ executing (claimed_at) ──успех──▶ done
 //     │                   │  └──сбой обработан (Google 5xx, ошибка Telegram и т.п.)──▶ failed (карточка: «Не получилось»)
@@ -13,16 +12,13 @@
 export const CARD_STALE_MS = 60 * 1000;
 
 export type CardVerdict =
-  /** Забрать заново и выполнить ещё раз (идемпотентный kind, прошлый обработчик умер). */
   | "retry"
-  /** Выполняется прямо сейчас — подождать. */
   | "inProgress"
-  /** Сбой уже обработан (failed, карточка показывает «Не получилось») — повторить командой. */
   | "notCompleted"
-  /** Обработчик умер, повтор небезопасен (или карточка истекла) — пометить failed, повторить командой. */
+  /** Обработчик умер, а повтор небезопасен или карточка уже истекла — пометить failed. */
   | "abandoned"
   | "done"
-  /** Отменена новой командой, истекла или не найдена — «Карточка устарела». */
+  /** Отменена новой командой, истекла или не найдена. */
   | "stale";
 
 export interface CardRow {
@@ -31,7 +27,6 @@ export interface CardRow {
   expiresAt: number;
 }
 
-/** Что делать с нажатием на карточку, которую не удалось забрать из open. */
 export function cardVerdict(row: CardRow | null, now: number, retryable: boolean): CardVerdict {
   if (!row) return "stale";
   switch (row.status) {

@@ -1,5 +1,4 @@
 // Календарная арифметика в «плавающем» локальном времени (wall clock) и перевод между поясами.
-// Дата хранится как число дней от эпохи — так сложение дней и сравнение тривиальны.
 
 import type { LocalDate, LocalDateTime } from "./types";
 
@@ -79,8 +78,6 @@ export function parseLocal(local: LocalDateTime): Moment {
   return { day: makeDay(+m[1]!, +m[2]!, +m[3]!), minutes: +m[4]! * 60 + +m[5]! };
 }
 
-// --- Часовые пояса ---------------------------------------------------------
-
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function formatter(tz: string): Intl.DateTimeFormat {
@@ -100,7 +97,6 @@ function formatter(tz: string): Intl.DateTimeFormat {
   return f;
 }
 
-/** Локальное время в поясе `tz` для момента UTC. */
 export function utcToLocal(utcMs: number, tz: string): Moment {
   const p = Object.fromEntries(
     formatter(tz)
@@ -115,10 +111,7 @@ function wallMs(m: Moment): number {
   return n.day * DAY_MS + n.minutes * MINUTE_MS;
 }
 
-/**
- * Момент UTC для локального времени в поясе `tz`.
- * При неоднозначности (переход на зимнее время) — более раннее из двух.
- */
+/** При неоднозначности (переход на зимнее время) — более раннее из двух. */
 export function localToUtc(m: Moment, tz: string): number {
   const wall = wallMs(m);
   // Два прохода уточнения смещения достаточно для любых реальных поясов.
@@ -127,7 +120,6 @@ export function localToUtc(m: Moment, tz: string): number {
     const offset = wallMs(utcToLocal(guess, tz)) - guess;
     guess = wall - offset;
   }
-  // Если раньше на час то же локальное время — берём раннее вхождение.
   const earlier = guess - HOUR_MS;
   return wallMs(utcToLocal(earlier, tz)) === wall ? earlier : guess;
 }
@@ -136,7 +128,6 @@ export function convertZone(m: Moment, fromTz: string, toTz: string): Moment {
   return fromTz === toTz ? m : utcToLocal(localToUtc(m, fromTz), toTz);
 }
 
-/** Прибавить реальные минуты с учётом переходов времени в поясе `tz`. */
 export function addRealMinutes(m: Moment, minutes: number, tz: string): Moment {
   return utcToLocal(localToUtc(m, tz) + minutes * MINUTE_MS, tz);
 }

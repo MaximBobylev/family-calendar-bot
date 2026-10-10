@@ -1,4 +1,3 @@
-// tech-debt #13: срок кеша access token Google и политика повтора GET (чистые функции).
 import { describe, expect, it } from "vitest";
 import { ACCESS_TOKEN_MARGIN_MS, accessTokenExpiresAt, accessTokenUsable } from "../src/google/token-cache";
 import { isRetryableStatus, RETRY_POLICY, retryDelayMs } from "../src/net/retry";

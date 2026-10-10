@@ -1,5 +1,4 @@
-// US-40 / US-41 / US-42: отображение изменения — карточка «Было → Стало», кнопки «только эту / всю серию», итог.
-// Чистые функции без ввода-вывода (tech-debt #10).
+// Чистые функции: текст и кнопки карточки «Было → Стало», без ввода-вывода.
 
 import type { CalendarEvent, EventReminders } from "../calendar/model";
 import type { Day } from "../dates/calendar";
@@ -11,10 +10,8 @@ import { t } from "./messages";
 import { type Change, DEFAULT_REMINDERS, type ModifyCardPayload, type ModifyRequest } from "./modify-logic";
 import { beforeLabel } from "./settings/labels";
 
-/** Сколько описания показываем в карточке. */
 const MAX_SHOWN_DESCRIPTION = 200;
 
-/** Карточка подтверждения изменения: текст и кнопки (варианты времени, «только эту / все» или «подтвердить»). */
 export function modifyCard(
   e: CalendarEvent,
   options: Change[],
@@ -64,7 +61,6 @@ export function modifyCard(
   return { text: lines.join("\n"), buttons };
 }
 
-/** Итог после изменения: название, новое время и детали. */
 export function modifiedDetails(o: Change, p: ModifyCardPayload, wholeSeries: boolean, today: Day, locale: string): string[] {
   const details = [`<b>${escapeHtml(o.title ?? p.title)}</b>`];
   if (o.start) details.push(`🕒 ${spanLabel(o.start, o.end!, today, locale)}`);
@@ -75,11 +71,8 @@ export function modifiedDetails(o: Change, p: ModifyCardPayload, wholeSeries: bo
   return details;
 }
 
-// --- Детали в карточке ---------------------------------------------------------
-
 const clip = (s: string) => (s.length > MAX_SHOWN_DESCRIPTION ? `${s.slice(0, MAX_SHOWN_DESCRIPTION)}…` : s);
 
-/** «за 1 ч, за 1 дн. (на почту)», «без напоминаний», «как в календаре». */
 function remindersText(r: EventReminders, locale: string): string {
   if (r.useDefault) return t("remindersCalendarDefault", locale);
   if (r.overrides.length === 0) return t("remindersNone", locale);
@@ -89,7 +82,6 @@ function remindersText(r: EventReminders, locale: string): string {
     .join(", ");
 }
 
-/** Строки «Было → Стало» по изменённым деталям: место, описание, напоминания (US-41, US-42). */
 function detailLines(o: Change, p: ModifyCardPayload, locale: string): string[] {
   const lines: string[] = [];
   const none = "—";

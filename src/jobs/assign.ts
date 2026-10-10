@@ -1,7 +1,5 @@
-// US-91: задачи поручения в планировщике — напоминания исполнителю (за день, «ответьте, пожалуйста» за 3 ч, за час; без
-// времени — утром в день срока), эскалация (именное — только автору лично; «кто-то должен» — автору и нейтрально в групповой
-// чат дома с «Беру»), если никто не ответил, и «истекло» в конце дня — без упрёков. Расписание — planAssignmentJobs.
 // Что делать, решается по текущему состоянию поручения: взяли, отменили, перенесли — устаревшая задача ничего не шлёт.
+// Расписание задач — planAssignmentJobs.
 
 import { assignCallback, offerButtons, doneButtons, whenOfAssignment } from "../bot/assign/view";
 import { homeById, memberName } from "../bot/assign/family";
@@ -15,7 +13,6 @@ import type { DueJob } from "../scheduler";
 
 export { ASSIGN_JOB } from "../db/assignments";
 
-/** Опоздавшее напоминание (сбой дольше часа) не шлём — оно уже не к месту. */
 const MAX_LATE_MS = 60 * 60 * 1000;
 
 export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> {
@@ -32,9 +29,8 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
     case "ask":
     case "hour":
     case "morning": {
-      // «Кто-то должен» без исполнителя — напоминать некому, это забота эскалации. Исполнитель ушёл из дома — молчим (QA-06)
+      // Без исполнителя («кто-то должен») — это забота эскалации. Исполнитель ушёл из дома — молчим.
       if (!a.assigneeUserId || late || !home.members.some((m) => m.userId === a.assigneeUserId)) return;
-      // «Ответьте, пожалуйста» — только пока не ответили
       if (what === "ask" && a.status !== "pending") return;
       const sent = await notifyMember(
         ctx,
@@ -49,10 +45,10 @@ export async function runAssignJob(ctx: AppContext, job: DueJob): Promise<void> 
     case "escalate": {
       if (a.status !== "pending" || late) return;
       const p = (locale: string, tz: string) => ({ title: a.title, when: whenOfAssignment(a, now, tz, locale), name: memberName(home, a.assigneeUserId) });
-      // Именное поручение — только автору, лично: публично в семейном чате это укор (эпик 9, ревью R1 #5)
+      // Именное поручение — только автору лично: публично в семейном чате это укор (решение владельца)
       await notifyMember(ctx, a.createdBy, (v) => t(a.assigneeUserId ? "assignEscalation" : "assignEscalationSomeone", v.locale, p(v.locale, v.tz)));
       if (a.assigneeUserId) return;
-      // «Кто-то должен» — нейтрально предложить в семейном чате дома (US-94): «Беру» может нажать любой взрослый
+      // «Кто-то должен» — не укор: в семейный чат, «Беру» может нажать любой взрослый
       const author = await viewerOf(ctx, a.createdBy);
       for (const chat of await householdGroupChats(ctx.db, a.householdId)) {
         const rows = [[{ text: t("assignTakeButton", author.locale), callback_data: assignCallback(a.id, "take") }]];

@@ -1,6 +1,4 @@
-// US-40 / US-41 / US-43: перенос и изменение события — сценарий (I/O).
-// Поиск события → расчёт изменений (modify-logic.ts) → карточка «Было → Стало» (modify-view.ts) → подтверждение.
-// Повторяющиеся — «только эту / все».
+// Только сценарий с I/O; расчёт изменений — modify-logic.ts, карточка «Было → Стало» — modify-view.ts.
 
 import { findCalendarByName } from "../calendar/match";
 import { EventConflict, EventGone, type CalendarEvent, type CalendarInfo, type CalendarProvider, type EventReminders } from "../calendar/model";
@@ -22,8 +20,6 @@ export const MODIFY_CARD = "modify";
 
 const plus = addMinutes;
 const diff = minutesBetween;
-
-// --- Сценарий ---------------------------------------------------------------
 
 export interface ModifyArgs {
   user: User;
@@ -54,13 +50,13 @@ export async function proposeChange(
     await ctx.telegram.sendMessage(chatId, t("calendarReadOnly", locale, { name: e.calendarTitle }));
     return;
   }
-  // Не организатор: изменение увидит только он сам — запрещаем (US-40)
+  // Изменение не организатора увидит только он сам — запрещаем (US-40)
   if (!e.organizerIsSelf) {
     await ctx.telegram.sendMessage(chatId, t("notOrganizer", locale, { title: escapeHtml(e.title) }), undefined, { html: true });
     return;
   }
 
-  // «Встреча будет в семейном календаре» — это перенос в другой календарь, а не место (R2)
+  // «Встреча будет в семейном календаре» — это перенос в другой календарь, а не место
   if (req.newLocation && (/календар|calendar/i.test(req.newLocation) || findCalendarByName(calendars, req.newLocation))) {
     await ctx.telegram.sendMessage(chatId, t("moveToCalendarUnsupported", locale));
     return;
@@ -94,7 +90,6 @@ export async function proposeChange(
     ...(e.etag ? { etag: e.etag } : {}),
     ...(calTz && calTz !== tz ? { calendarTz: calTz } : {}),
   };
-  // «Все» — только изменения в пределах дня; перенос серии на другой день — R2
   if (req.scope === "all" && !sameDay) {
     await ctx.telegram.sendMessage(chatId, t("seriesMoveUnsupported", locale));
     return;
@@ -106,7 +101,6 @@ export async function proposeChange(
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
-/** Подтверждение изменения. Карточка уже «забрана» атомарно. */
 export async function confirmModify(
   ctx: AppContext,
   provider: CalendarProvider,
@@ -128,7 +122,7 @@ export async function confirmModify(
   const o = p.options[wholeSeries ? 0 : Number(choice.slice(1))];
   if (!o) return false;
 
-  // Что вернуть при отмене (US-61): только изменённые поля
+  // Для отмены (US-61) — только изменённые поля
   const beforeOf = (cur: { start?: Moment; end?: Moment; title: string; location?: string; description?: string; reminders?: EventReminders }) => ({
     ...(o.start ? { start: cur.start!, end: cur.end! } : {}),
     ...(o.title !== undefined ? { title: cur.title } : {}),
@@ -139,7 +133,7 @@ export async function confirmModify(
   let undoRecord: UndoRecord;
   try {
     if (wholeSeries && p.seriesId) {
-      // Серия: тот же сдвиг и длительность применяются к мастер-событию (только в пределах дня)
+      // Тот же сдвиг и длительность применяются к мастер-событию серии
       const masterRef = { ...p.ref, providerEventId: p.seriesId };
       const master = await provider.getEvent(masterRef, p.tz);
       // Время серии меняем только у событий со временем; детали (место, напоминания) — у любых
@@ -189,7 +183,7 @@ export async function confirmModify(
     throw e;
   }
 
-  // Поручения, связанные с событием, сдвигаются вместе с ним (US-91); серия целиком — пока нет (экземпляры)
+  // Для серии целиком поручения пока не сдвигаем: они привязаны к экземплярам
   if (o.start && !wholeSeries) await shiftAssignmentsForEvent(ctx, p.ref, minutesBetween(o.start, p.oldStart) * 60_000, action.userId);
   const details = modifiedDetails(o, p, wholeSeries, today, locale);
   const undo = await recordUndo(ctx, { conversationId: action.conversationId, user, chatId: p.chatId, record: undoRecord, summary: details.join("\n") });
@@ -204,7 +198,6 @@ export async function confirmModify(
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: p.ref, at: ctx.clock.now() } }, ctx.clock.now());
-  // «нет, в 16» сразу после создания — правка даты карточки (метрика date_fix, tech-debt #26)
   await dateFixOnModified(ctx, action, p.ref, !!o.start);
   await recordFeature(ctx.db, user.id, "modify", ctx.clock.now());
   return true;

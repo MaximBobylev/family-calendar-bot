@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseDateStructure, resolveRawStructure } from "../src/dates/structured";
 
-// «Сейчас» — ср 7 октября 2026, 10:00 МСК (как в корпусе и приёмке).
+// Среда, как в корпусе и приёмке.
 const NOW = "2026-10-07T10:00";
 const TZ = "Europe/Moscow";
 const point = (raw: unknown, now = NOW) => resolveRawStructure(raw, "point", now, TZ);

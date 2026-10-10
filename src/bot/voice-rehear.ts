@@ -1,5 +1,4 @@
-// Переслушивание голосового мультимодальной моделью (multimodal-voice, вариант D): повтор фразы, «не так»
-// или «не понимаю» от текстового пути. Повторное скачивание по file_id, журнал (US-13), затем routeIntent.
+// Telegram отдаёт файл по file_id повторно — аудио не храним. Одно голосовое переслушиваем не больше одного раза.
 
 import { calendarNamesOf } from "../db/accounts";
 import { mergeDialogState } from "../db/conversations";
@@ -14,11 +13,7 @@ import { withinLimit } from "./input/limit";
 import { t } from "./messages";
 import { routeIntent } from "./route-intent";
 
-/**
- * Переслушать голосовое мультимодальной моделью (multimodal-voice, вариант D): то же сообщение по file_id —
- * Telegram отдаёт файл повторно, хранить аудио не нужно. false — эскалация не настроена (идём обычным путём).
- * Одно голосовое переслушиваем не больше одного раза.
- */
+// false — переслушивание не настроено: идём обычным путём
 export async function escalateVoice(
   ctx: AppContext,
   user: User,
@@ -73,7 +68,7 @@ export async function escalateVoice(
     tokensOut: result.tokensOut,
     costMicroUsd: llmCostMicroUsd({ ...ctx.config.costs, llmInPerM: via.inPerM ?? 0, llmOutPerM: via.outPerM ?? 0 }, result.tokensIn, result.tokensOut),
     text: result.noSpeech ? voice.transcript : result.transcript,
-    // Что слышал Whisper и что услышала модель — расхождения видны в журнале (/admin)
+    // whisper — чтобы расхождения с моделью были видны в журнале
     result: result.noSpeech
       ? { reheard: true, noSpeech: true, whisper: voice.transcript }
       : { ...result.intent, reheard: true, whisper: voice.transcript, ...(res.failed.length ? { fallbackFrom: res.failed } : {}) },

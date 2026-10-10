@@ -1,4 +1,4 @@
-// Access token Google из refresh token. Живёт ~1 час; кешируется на аккаунт в D1 (calendar/google-provider.ts, tech-debt #13).
+// Access token из refresh token; кеширует его calendar/google-provider.ts (tech-debt #13).
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
@@ -6,7 +6,6 @@ import { GoogleAuthError } from "./errors";
 
 export interface AccessToken {
   accessToken: string;
-  /** Через сколько секунд истечёт (expires_in из ответа Google). */
   expiresInSec?: number;
 }
 

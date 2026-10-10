@@ -1,5 +1,4 @@
-// Список событий для Telegram (US-20): по дням, события на весь день сверху, метка календаря,
-// разбиение на сообщения по лимиту Telegram.
+// Разбиение на сообщения по лимиту Telegram — дни между сообщениями не режем.
 
 import type { CalendarEvent } from "../calendar/model";
 import { parts, type Day } from "../dates/calendar";
@@ -36,7 +35,6 @@ function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: st
     time = `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}`;
     if (e.end!.day > e.start!.day) time += ` (${t("nextDayShort", locale)})`;
   }
-  // «Для кого» и ответственный (US-92): «Стоматолог (Ваня) — отводит Дима»
   const fam = family?.(e);
   let line = `• ${time}  ${escapeHtml(fam?.title ?? e.title)}`;
   if (fam?.note) line += ` — ${escapeHtml(fam.note)}`;
@@ -47,11 +45,6 @@ function eventLine(e: CalendarEvent, day: Day, showCalendar: boolean, locale: st
   return line;
 }
 
-/**
- * Тексты сообщений со списком событий периода [fromDay, toDay].
- * `showCalendarFor` — для каких календарей показывать метку (не по умолчанию, если календарей > 1).
- */
-/** Приписать к последнему сообщению, какие календари не загрузились. */
 export function appendFailedNote(messages: string[], failed: { title: string }[], locale: string): void {
   if (failed.length === 0 || messages.length === 0) return;
   const list = failed.map((f) => `«${escapeHtml(f.title)}»`).join(", ");
@@ -87,7 +80,6 @@ export function formatEvents(
       return [`<b>${dayTitle(day, today, locale)}</b>`, ...list.map((e) => eventLine(e, day, showCalendarFor(e.ref.calendarId), locale, family))].join("\n");
     });
 
-  // Разбиение по лимиту Telegram; дни не режем
   const messages: string[] = [];
   let current = "";
   for (const block of blocks) {

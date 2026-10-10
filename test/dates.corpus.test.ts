@@ -1,5 +1,3 @@
-// Золотой корпус дат (ADR-0006, набор 1): каждый кейс — отдельный тест.
-
 import { describe, expect, it } from "vitest";
 import { parseDateFragment } from "../src/dates";
 import { canonical, loadCorpus } from "./support/date-corpus";

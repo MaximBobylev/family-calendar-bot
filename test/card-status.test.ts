@@ -1,5 +1,3 @@
-// tech-debt #6: решение для нажатия на уже «забранную» карточку (src/db/card-status.ts).
-
 import { describe, expect, it } from "vitest";
 import { CARD_STALE_MS, cardVerdict } from "../src/db/card-status";
 

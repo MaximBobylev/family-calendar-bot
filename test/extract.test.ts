@@ -1,5 +1,3 @@
-// Извлечение дат из сообщения (testdata/extract/cases.yaml) + очистка названия и «весь день».
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,7 +41,7 @@ describe("looksAllDay", () => {
     ["Отпуск с 10 по 20 ноября", true],
     ["Созвон завтра", false],
     ["В пятницу у меня выходной", true],
-    // «в выходные» — дата (суббота или воскресенье), а не признак «весь день» (решение 2026-10-05)
+    // «в выходные» — дата (суббота или воскресенье), а не признак «весь день»
     ["Встреча с Машей в выходные", false],
   ] as const)("%s", (t, v) => {
     expect(looksAllDay(t)).toBe(v);

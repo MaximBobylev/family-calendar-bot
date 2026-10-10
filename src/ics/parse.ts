@@ -1,15 +1,13 @@
-// US-67: разбор файла приглашения .ics (RFC 5545) детерминированно, без LLM. VEVENT: UID, SUMMARY, LOCATION,
-// DESCRIPTION, DTSTART/DTEND/DURATION (UTC, TZID, «плавающее», DATE), RRULE — как есть. Чистый модуль (юнит-тесты):
-// время возвращается как в файле, перевод в пояс пользователя — src/bot/ics-import.ts.
+// Разбор .ics (RFC 5545) без LLM (US-67). Время — как в файле; в пояс пользователя переводит src/ics/convert.ts.
 
 export type IcsTime =
-  /** Событие на весь день: «2026-10-15». */
+  /** «2026-10-15». */
   | { kind: "date"; date: string }
-  /** Момент в UTC (…Z): «2026-10-15T09:30». */
+  /** Время UTC (в файле …Z) без «Z»: «2026-10-15T09:30». */
   | { kind: "utc"; local: string }
-  /** Локальное время в поясе (IANA, уже приведён): «2026-10-15T09:30». */
+  /** tz — уже IANA. */
   | { kind: "zoned"; local: string; tz: string }
-  /** Без пояса — в поясе пользователя. */
+  /** «Плавающее»: в поясе пользователя. */
   | { kind: "floating"; local: string };
 
 export interface IcsEvent {
@@ -19,9 +17,8 @@ export interface IcsEvent {
   description?: string;
   start: IcsTime;
   end?: IcsTime;
-  /** DURATION вместо DTEND, минуты. */
   durationMin?: number;
-  /** Правило повторения как в файле: «RRULE:FREQ=WEEKLY;BYDAY=MO». */
+  /** Как в файле, с префиксом: «RRULE:FREQ=WEEKLY;BYDAY=MO». */
   rrule?: string;
   /** TZID есть, но такого пояса мы не знаем — время считаем в поясе пользователя. */
   unknownTz?: string;
@@ -29,7 +26,7 @@ export interface IcsEvent {
 
 export type IcsResult = { events: IcsEvent[] } | { error: "not_calendar" | "no_events" };
 
-/** Самые частые не-IANA пояса (Outlook/Exchange пишут Windows-имена). */
+/** Outlook/Exchange пишут Windows-имена поясов; здесь самые частые. */
 const WINDOWS_TZ: Record<string, string> = {
   "russian standard time": "Europe/Moscow",
   "russia time zone 3": "Europe/Samara",
@@ -62,7 +59,7 @@ function isIana(tz: string): boolean {
   }
 }
 
-/** TZID → IANA: как есть, Windows-имя или хвост «/mozilla.org/…/Europe/Moscow»; не знаем — undefined. */
+/** TZID бывает IANA, Windows-именем или с хвостом «/mozilla.org/…/Europe/Moscow». */
 export function resolveTzid(tzid: string): string | undefined {
   const raw = tzid.trim().replace(/^"|"$/g, "");
   if (!raw) return undefined;
@@ -77,7 +74,7 @@ export function resolveTzid(tzid: string): string | undefined {
   return undefined;
 }
 
-/** Склейка свёрнутых строк: продолжение начинается с пробела или табуляции (RFC 5545 §3.1). */
+/** Продолжение свёрнутой строки начинается с пробела или табуляции (RFC 5545 §3.1). */
 export function unfold(text: string): string[] {
   return text
     .replace(/^﻿/, "")
@@ -135,7 +132,7 @@ function parseTime(p: Prop): { time: IcsTime; unknownTz?: string } | undefined {
   return { time: { kind: "floating", local } };
 }
 
-/** DURATION: P1D, PT1H30M, P1W, P1DT2H → минуты; отрицательная или битая — undefined. */
+/** Отрицательная или битая — undefined. */
 export function parseDuration(v: string): number | undefined {
   const m = /^\+?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i.exec(v.trim());
   if (!m || v.trim() === "P" || /^\+?PT?$/i.test(v.trim())) return undefined;

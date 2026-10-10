@@ -1,5 +1,3 @@
-// Синхронизация Google и то, что на ней держится (docs/admin-console.md, итерация 3): подписки calendar_sync
-// по режиму push/опрос, устаревшие (те же пороги, что у алерта sync_stale), outbox уведомлений US-72, напоминания US-71.
 // Только счётчики и классы ошибок: ни id календарей (почта), ни названий событий, ни текстов уведомлений.
 
 import type { KindStats, NoticeStats } from "../queries";
@@ -8,7 +6,6 @@ import { badge, esc, fmtAge, raw, table } from "./layout";
 
 const HOUR_MS = 3_600_000;
 
-/** Виды задач панели и их подписи (константы — в src/sync/engine.ts, notify.ts, reminders.ts). */
 export const SYNC_JOB_LABELS: Record<string, string> = {
   cal_sync: "плановый синк (сверка / опрос)",
   cal_push: "синк по push",
@@ -27,7 +24,6 @@ export interface SyncView {
   reminderUsers: number;
 }
 
-/** Упавшие за сутки задачи панели — для светофора (sync-health.ts: syncLevel). */
 export const failedDay = (jobs: KindStats[]) => jobs.reduce((a, j) => a + j.failed_day, 0);
 
 const hours = (ms: number) => `${Math.round(ms / HOUR_MS)} ч`;

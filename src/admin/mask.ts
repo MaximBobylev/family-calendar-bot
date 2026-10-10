@@ -1,25 +1,22 @@
-// Маскирование по умолчанию (docs/admin-console.md, «Маскирование»): чистые функции, без D1 и сети.
-//   - пользователь — псевдоним u-xxxxxx (HMAC id), не имя, не Telegram id;
-//   - текст фразы: фрагменты дат открыты (предмет отладки), остальное — ▒ по длине слова;
-//   - result_json: служебные поля (интент, ссылки) открыты, строки — тем же маскировщиком;
-//   - тексты ошибок: класс ошибки («telegram sendMessage») и короткие коды открыты, остальное — ▒.
+// Маскирование по умолчанию (docs/admin-console.md): вместо пользователя — псевдоним; фрагменты дат открыты (предмет
+// отладки), остальной текст — ▒ по длине слова.
 
 import { extractDateSpans } from "../dates/extract";
 
 export const MASK_CHAR = "▒";
 
-/** Ключ псевдонимов — производный от TOKEN_ENCRYPTION_KEY (отдельного секрета не нужно, по нему не восстановить id). */
+// Производный от TOKEN_ENCRYPTION_KEY: отдельный секрет не нужен, по нему не восстановить id.
 export async function pseudonymKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", new TextEncoder().encode(`admin-pseudonym:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
-/** Стабильный псевдоним: 6 hex — без коллизий на сотнях пользователей (4 hex дали бы их уже к бете). */
+// 6 hex — без коллизий на сотнях пользователей (4 hex дали бы их уже к бете).
 export async function pseudonym(key: CryptoKey, userId: string | null): Promise<string> {
   if (!userId) return "u-удалён";
   return `u-${await hmac6(key, userId)}`;
 }
 
-/** Групповой чат (id Telegram) — c-xxxxxx: другое пространство HMAC, с псевдонимами пользователей не совпадает. */
+// Другое пространство HMAC: с псевдонимами пользователей не совпадает.
 export async function chatPseudonym(key: CryptoKey, chatId: string): Promise<string> {
   return `c-${await hmac6(key, `chat:${chatId}`)}`;
 }
@@ -31,10 +28,9 @@ async function hmac6(key: CryptoKey, value: string): Promise<string> {
 
 const maskWord = (w: string) => w.replace(/[\p{L}\p{N}]/gu, MASK_CHAR);
 
-/** То же деление на слова, что в extractDateSpans: пробелы, без краевой пунктуации; пустые не считаются. */
+// То же деление на слова, что в extractDateSpans: пробелы, без краевой пунктуации; пустые не считаются.
 const stripEdges = (w: string) => w.replace(/^[«"(,.!?]+|[»"),.!?]+$/g, "");
 
-/** Индексы слов (в нумерации extractDateSpans), вошедших во фрагменты дат как момента, периода или длительности. */
 function dateWordIndexes(text: string, nowLocal: string, tz: string): Set<number> {
   const used = new Set<number>();
   for (const kind of ["point", "range"] as const) {
@@ -47,7 +43,6 @@ function dateWordIndexes(text: string, nowLocal: string, tz: string): Set<number
   return used;
 }
 
-/** «Созвон с Петей завтра в 15:30» → «▒▒▒▒▒▒ ▒ ▒▒▒▒▒ завтра в 15:30». Пробелы и пунктуация сохраняются. */
 export function maskText(text: string, nowLocal: string, tz: string): string {
   const open = dateWordIndexes(text, nowLocal, tz);
   let index = 0;
@@ -61,7 +56,7 @@ export function maskText(text: string, nowLocal: string, tz: string): string {
     .join("");
 }
 
-/** Поля result_json, которые не содержат текста пользователя: имя интента, перечисления, числа. */
+// Только поля без текста пользователя: имя интента, перечисления, числа.
 const OPEN_KEYS = new Set(["name", "reference", "listIndex", "scope", "allDay", "language"]);
 
 function maskValue(v: unknown, nowLocal: string, tz: string): unknown {
@@ -73,7 +68,6 @@ function maskValue(v: unknown, nowLocal: string, tz: string): unknown {
   return v;
 }
 
-/** result_json: объект — по полям; строка (текст ошибки вызова) — как ошибка. */
 export function maskResult(json: string | null, nowLocal: string, tz: string): string {
   if (!json) return "";
   let v: unknown;
@@ -86,7 +80,6 @@ export function maskResult(json: string | null, nowLocal: string, tz: string): s
   return JSON.stringify(maskValue(v, nowLocal, tz));
 }
 
-/** Интент из result_json — открыт всегда. */
 export function intentOf(json: string | null): string | null {
   if (!json) return null;
   try {

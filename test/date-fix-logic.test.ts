@@ -1,5 +1,3 @@
-// Метрика date_fix (tech-debt #26): что считается правкой даты сразу после карточки и какой.
-
 import { describe, expect, it } from "vitest";
 import { checkDisagreed, classifyDateFix, DATE_FIX_WINDOW_MS, type DateFixWatch, optionWhen } from "../src/bot/date-fix-logic";
 

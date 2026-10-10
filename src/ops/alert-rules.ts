@@ -1,49 +1,31 @@
-// Правила алертов владельцу (docs/admin-console.md, «Правила алертов»; tech-debt #7) — чистые функции:
-// счётчики → «горит / не горит» → что отправить с учётом alert_state. Пороги — общие с панелью «здоровье».
-// В текстах только счётчики и ключи: ни текстов пользователей, ни имён, ни id.
+// Пороги общие со светофором src/admin/views/health.ts. В текстах алертов — только счётчики и ключи: ни текстов
+// пользователей, ни имён, ни id.
 
 const MIN_MS = 60_000;
 const HOUR_MS = 60 * MIN_MS;
 
-// --- Пороги (их же использует светофор в src/admin/views/health.ts) ---------------------------------------
-
-/** Ошибка доставки webhook свежее этого — webhook нездоров. */
 export const WEBHOOK_ERROR_WINDOW_MS = 10 * MIN_MS;
-/** Telegram копит больше апдейтов — мы их не принимаем. */
 export const WEBHOOK_PENDING_MAX = 20;
-/** Апдейт в pending/processing дольше — завис. */
 export const INBOX_STUCK_MS = 2 * MIN_MS;
-/** Столько failed-апдейтов за час — алерт. */
 export const INBOX_FAILED_HOUR = 3;
-/** pending-задача с fire_at старше — cron/очередь не раздают. */
 export const JOBS_OVERDUE_MS = 5 * MIN_MS;
-/** Окно для ошибок LLM/STT. */
 export const AI_WINDOW_MS = 15 * MIN_MS;
-/** Ошибок цепочки провайдеров за окно — не меньше этого и не меньше AI_ERROR_RATE от всех вызовов. */
 export const AI_ERRORS_MIN = 3;
 export const AI_ERROR_RATE = 0.2;
-/** Пока горит — напоминание не чаще. */
 export const REMIND_MS = 3 * HOUR_MS;
-/** Оценка правил в cron — раз в 5 минут. */
 export const ALERT_EVERY_MIN = 5;
-
-// --- Входные данные ------------------------------------------------------------------------------------
 
 export interface AlertInputs {
   now: number;
   expectedWebhookUrl: string;
-  /** getWebhookInfo; null — не удалось получить (правило не оценивается: сбой Telegram API ≠ сбой webhook). */
+  // null — getWebhookInfo не ответил: правило не оцениваем, сбой Telegram API ≠ сбой webhook
   webhook: { url: string; pending_update_count: number; last_error_date?: number } | null;
   inbox: { oldestOpenAt: number | null; pending: number; processing: number; failedHour: number };
-  /** failedHour — failed за час, кроме дайджестов (у них своё правило). */
+  // failedHour — без дайджестов: у них своё правило
   jobs: { overdue: number; oldestOverdueAt: number | null; failedHour: number };
-  /** Дайджесты, упавшие (failed) за последние сутки. */
   digestFailedDay: number;
-  /** Вызовы цепочек LLM/STT за AI_WINDOW_MS: всего и с outcome = error. */
   ai: { calls: number; errors: number };
-  /** Календари с получателями, не синхронизированные дольше порога режима (sync-health.ts: isSyncStale). */
   sync: { stale: number; oldestStaleAt: number | null };
-  /** Квоты ниже порога (quota-rules.ts: lowQuotas) — «OpenRouter: 4 запр. из 50»; null — не удалось оценить. */
   quotaLow: string[] | null;
 }
 
@@ -63,9 +45,8 @@ export const ALERT_TITLES: Record<AlertKey, string> = {
 
 export interface RuleResult {
   key: AlertKey;
-  /** null — не удалось оценить: состояние не меняем. */
+  // null — не удалось оценить: состояние алерта не меняем
   firing: boolean | null;
-  /** Короткая сводка счётчиков для сообщения (без пользовательских данных). */
   detail: string;
 }
 
@@ -111,7 +92,6 @@ export function evaluateRules(i: AlertInputs): RuleResult[] {
     detail: `ошибок ${errors} из ${calls} за ${minutes(AI_WINDOW_MS)} мин`,
   });
 
-  // Пороги — в sync-health.ts (с push сверка раз в сутки, без — опрос); счётчик уже посчитан по ним
   const { stale, oldestStaleAt } = i.sync;
   out.push({
     key: "sync_stale",
@@ -119,29 +99,21 @@ export function evaluateRules(i: AlertInputs): RuleResult[] {
     detail: `устарели: ${stale}${oldestStaleAt === null ? "" : `, старейший синк ${duration(now - oldestStaleAt)} назад`}`,
   });
 
-  // Пороги — в quota-rules.ts: OpenRouter бесплатных < 10, DeepSeek < $1, Workers AI > 80% (оценка или GraphQL);
-  // Workers запросы, D1 строки, Queues операции > 80% суточного (Paid — месячного включённого)
   const q = i.quotaLow;
   out.push({ key: "quota_low", firing: q === null ? null : q.length > 0, detail: q === null ? "квоты не оценены" : q.join("; ") || "всё в норме" });
   return out;
 }
 
-// --- Дедупликация (alert_state) ------------------------------------------------------------------------
-
 export interface AlertState {
   key: string;
   status: "firing" | "ok";
-  /** Когда начался текущий статус. */
   since: number;
   last_sent_at: number | null;
 }
 
 export type AlertAction = "fire" | "remind" | "resolve";
 
-/**
- * Начал гореть → «fire»; горит дальше → «remind» не чаще REMIND_MS; погас → «resolve». Иначе ничего.
- * next — новое состояние; сохранять его только после успешной отправки (иначе повторим через 5 минут).
- */
+// next сохранять только после успешной отправки: не дошло — повторим на следующей оценке.
 export function decide(prev: AlertState | undefined, r: RuleResult, now: number): { action: AlertAction; next: AlertState } | null {
   if (r.firing === null) return null;
   const wasFiring = prev?.status === "firing";
@@ -158,7 +130,6 @@ function duration(ms: number): string {
   return m % 60 ? `${h} ч ${m % 60} мин` : `${h} ч`;
 }
 
-/** Текст алерта владельцу: заголовок, счётчики, ссылка на /admin. Без HTML. */
 export function alertText(action: AlertAction, r: RuleResult, prev: AlertState | undefined, now: number, adminUrl: string): string {
   const title = ALERT_TITLES[r.key];
   const head =
@@ -170,5 +141,4 @@ export function alertText(action: AlertAction, r: RuleResult, prev: AlertState |
   return `${head}\n${r.detail}\n${adminUrl}`;
 }
 
-/** Cron раз в минуту; правила — раз в ALERT_EVERY_MIN минут. */
 export const isAlertMinute = (now: number) => new Date(now).getUTCMinutes() % ALERT_EVERY_MIN === 0;

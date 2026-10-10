@@ -1,11 +1,10 @@
-// Клиент Google Calendar API. Базовый URL — из конфига (в тестах — фейк).
-// За интерфейсом CalendarProvider (ADR-0003): calendar/google-provider.ts.
+// Сырой HTTP к Google Calendar API; остальной код видит его только через calendar/google-provider.ts (ADR-0003).
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import { retryDelayMs } from "../net/retry";
 import { GoogleApiError } from "./errors";
 
-/** GET (чтение идемпотентно) с одним коротким повтором на 5xx/429 в пределах бюджета времени (tech-debt #13). */
+/** Повтор только для GET — чтение идемпотентно (tech-debt #13). */
 async function getWithRetry(url: URL, accessToken: string): Promise<Response> {
   const init = { headers: { authorization: `Bearer ${accessToken}` } };
   const started = performance.now();
@@ -56,14 +55,12 @@ export interface GoogleEvent {
   attendees?: { self?: boolean; responseStatus?: string }[];
   organizer?: { self?: boolean; email?: string; displayName?: string };
   recurringEventId?: string;
-  /** Есть у мастер-события серии (в ответе на запись в серию целиком). */
+  /** Только у мастер-события серии. */
   recurrence?: string[];
   etag?: string;
-  /** Ссылка «Открыть в календаре» (US-72). */
   htmlLink?: string;
 }
 
-/** События в интервале, повторяющиеся развёрнуты в экземпляры. */
 export async function listEvents(
   apiBase: string,
   accessToken: string,
@@ -137,7 +134,7 @@ export async function insertEvent(apiBase: string, accessToken: string, calendar
   try {
     return await writeEvent(new URL(`${apiBase}/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`), "POST", accessToken, body);
   } catch (e) {
-    // 409 с нашим id — событие уже создано прошлой попыткой: это успех
+    // 409 с нашим id — событие создала прошлая попытка: это успех
     if (e instanceof GoogleApiError && e.status === 409 && body.id) {
       const existing = await getEvent(apiBase, accessToken, calendarId, body.id, body.start?.timeZone ?? "UTC");
       if (existing) return existing as GoogleEvent & { htmlLink?: string };
@@ -159,7 +156,7 @@ export function patchEvent(
   return writeEvent(url, "PATCH", accessToken, body, opts.etag);
 }
 
-/** Удаление события. 404/410 — уже удалено: для пользователя это успех. */
+/** 404/410 — уже удалено: для пользователя это успех. */
 export async function deleteEvent(
   apiBase: string,
   accessToken: string,
@@ -182,21 +179,18 @@ export async function deleteEvent(
   return "deleted";
 }
 
-// --- Синхронизация и push (ADR-0005 §2, docs/research/google-push.md) ---------------------------------------
-
-/** syncToken больше не действует (410 Gone): нужна полная пересинхронизация. */
+/** 410 Gone на syncToken: нужна полная пересинхронизация. */
 export class SyncTokenExpired extends Error {}
 
 export interface SyncPage {
   items: GoogleEvent[];
-  /** Нет — Google не выдал токен: следующий синк снова полный (по окну). */
+  /** Нет — следующий синк снова полный (по окну). */
   nextSyncToken?: string;
 }
 
 /**
- * events.list для синхронизации: с syncToken — только изменения (удалённые — со status=cancelled), без него — полный
- * список окна timeMin…timeMax. Экземпляры серий развёрнуты (singleEvents — одинаково в полном и инкрементальном).
- * orderBy и timeMin/timeMax с syncToken Google не принимает. Токен — на последней странице.
+ * С syncToken удалённые приходят со status=cancelled; orderBy и timeMin/timeMax вместе с ним Google не принимает.
+ * singleEvents — одинаково в полном и инкрементальном синке. nextSyncToken — только на последней странице.
  */
 export async function syncEvents(
   apiBase: string,
@@ -231,7 +225,7 @@ export async function syncEvents(
   return { items, ...(nextSyncToken ? { nextSyncToken } : {}) };
 }
 
-/** events.watch: канал push-уведомлений на календарь. expiration — желаемый срок (мс); Google может дать меньше. */
+/** expiration — желаемый срок (мс); Google может дать меньше. */
 export async function watchEvents(
   apiBase: string,
   accessToken: string,
@@ -253,7 +247,7 @@ export async function watchEvents(
   return { resourceId: body.resourceId, ...(body.expiration !== undefined ? { expiration: Number(body.expiration) } : {}) };
 }
 
-/** channels.stop: остановить канал. 404 — канала уже нет (истёк): это успех. */
+/** 404 — канал уже истёк: это успех. */
 export async function stopChannel(apiBase: string, accessToken: string, channel: { id: string; resourceId: string }): Promise<void> {
   const res = await fetchWithTimeout(
     new URL(`${apiBase}/calendar/v3/channels/stop`),

@@ -1,4 +1,4 @@
-// Админка: маскирование журнала и заготовки «В тест» (src/admin/mask.ts, src/admin/yaml-snippet.ts) — чистые функции.
+// Маскирование журнала и заготовки «В тест»: src/admin/mask.ts, src/admin/yaml-snippet.ts.
 
 import { describe, expect, it } from "vitest";
 import { intentOf, maskError, maskResult, maskText, pseudonym, pseudonymKey } from "../src/admin/mask";

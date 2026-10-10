@@ -1,6 +1,4 @@
-// D1 для синхронизации календарей (ADR-0005 §2, миграция 0012): calendar_sync (подписка на календарь провайдера),
-// event_snapshots (последнее состояние событий), bot_writes (журнал записей бота), change_notices (outbox уведомлений US-72),
-// и связь «календарь → чаты», где он виден.
+// Синк календарей (ADR-0005 §2): calendar_sync, снимки событий, журнал записей бота, outbox уведомлений, «календарь → чаты».
 
 import { parseSettings, type UserSettings } from "./settings";
 import type { Snapshot } from "../sync/logic";
@@ -32,7 +30,6 @@ interface SyncDbRow {
   channel_token: string | null;
   channel_resource_id: string | null;
   channel_expires_at: number | null;
-  /** Здоровье синка для админки (миграция 0016): ok | unavailable | error, класс ошибки, пересинхронизация после 410. */
   last_outcome?: string | null;
   last_error_at?: number | null;
   last_error?: string | null;
@@ -62,7 +59,6 @@ export async function syncRowByChannel(db: D1Database, channelId: string): Promi
   return r ? toSyncRow(r) : null;
 }
 
-/** Строки calendar_sync для всех подключённых календарей (кроме подписных); вернуть id календарей провайдера. */
 export async function ensureSyncRows(db: D1Database, userId?: string): Promise<string[]> {
   const filter = userId ? "AND a.user_id = ?2" : "";
   const { results } = await db
@@ -80,7 +76,6 @@ export async function ensureSyncRows(db: D1Database, userId?: string): Promise<s
   return results.map((r) => r.pcid);
 }
 
-/** Чей календарь читает синк: прежний владелец, если он ещё подключён, иначе — строка с правом записи, иначе любая. */
 export async function pickOwner(db: D1Database, pcid: string, current: string | null): Promise<{ calendarId: string; userId: string } | null> {
   const r = await db
     .prepare(
@@ -96,7 +91,6 @@ export async function pickOwner(db: D1Database, pcid: string, current: string | 
   return r ? { calendarId: r.id, userId: r.user_id } : null;
 }
 
-/** Захватить календарь на синк (один синк за раз). false — уже идёт другой. */
 export async function acquireLease(db: D1Database, pcid: string, now: number, ttlMs: number): Promise<boolean> {
   const res = await db
     .prepare("UPDATE calendar_sync SET lease_until = ?1 WHERE provider_calendar_id = ?2 AND (lease_until IS NULL OR lease_until < ?3)")
@@ -116,7 +110,6 @@ export function updateSyncRow(db: D1Database, pcid: string, patch: Partial<Recor
     .bind(pcid, ...keys.map((k) => patch[k as keyof SyncDbRow] ?? null));
 }
 
-/** Календарь больше никем не подключён: убрать подписку, снимки, журнал, ожидающие напоминания. */
 export async function dropSync(db: D1Database, pcid: string): Promise<void> {
   await db.batch([
     db.prepare("DELETE FROM calendar_sync WHERE provider_calendar_id = ?").bind(pcid),
@@ -125,7 +118,6 @@ export async function dropSync(db: D1Database, pcid: string): Promise<void> {
   ]);
 }
 
-/** Подписки календарей, которых не осталось ни у кого (отключение, замена аккаунта). */
 export async function orphanSyncs(db: D1Database): Promise<string[]> {
   const { results } = await db
     .prepare(
@@ -135,7 +127,7 @@ export async function orphanSyncs(db: D1Database): Promise<string[]> {
   return results.map((r) => r.pcid);
 }
 
-/** Каналы push, открытые токеном этого пользователя (их может остановить только он — перед отключением, US-03). */
+/** Канал push Google может остановить только токен, которым он открыт, — поэтому до отключения аккаунта (US-03). */
 export async function channelsOwnedBy(db: D1Database, userId: string): Promise<SyncRow[]> {
   const { results } = await db
     .prepare(
@@ -149,8 +141,6 @@ export async function channelsOwnedBy(db: D1Database, userId: string): Promise<S
     .all<SyncDbRow>();
   return results.map(toSyncRow);
 }
-
-// --- Снимки событий -------------------------------------------------------------------------------------------------
 
 interface SnapshotDbRow {
   event_id: string;
@@ -197,7 +187,6 @@ export async function snapshotsByIds(db: D1Database, pcid: string, ids: string[]
   return new Map(results.map((r) => [r.event_id, toSnapshot(r)]));
 }
 
-/** Снимки с началом в [from, to) — окно полной синхронизации и горизонт напоминаний. */
 export async function snapshotsBetween(db: D1Database, pcid: string, from: number, to: number): Promise<Snapshot[]> {
   const { results } = await db
     .prepare("SELECT * FROM event_snapshots WHERE provider_calendar_id = ? AND start_ms >= ? AND start_ms < ?")
@@ -206,10 +195,7 @@ export async function snapshotsBetween(db: D1Database, pcid: string, from: numbe
   return results.map(toSnapshot);
 }
 
-/**
- * Записать снимки — одним запросом на сотню (json_each): на Workers Free у вызова лимит числа запросов к D1,
- * а полная синхронизация — это сотни событий.
- */
+/** Сотня снимков на запрос (json_each): на Workers Free лимит числа запросов к D1 на вызов, а полный синк — сотни событий. */
 export function upsertSnapshots(db: D1Database, pcid: string, snaps: Snapshot[], now: number): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [];
   for (let i = 0; i < snaps.length; i += 100) {
@@ -251,7 +237,7 @@ export function upsertSnapshots(db: D1Database, pcid: string, snaps: Snapshot[],
   return out;
 }
 
-/** etag снимков (null — снимка нет) — чтение внутри batch, до записи снимков: проиграли ли гонку (tech-debt #21). */
+/** Читать внутри того же batch до записи снимков — так видно, не проиграли ли гонку параллельному синку (tech-debt #21). */
 export const snapshotEtags = (db: D1Database, pcid: string, ids: string[]) =>
   db
     .prepare("SELECT event_id, etag FROM event_snapshots WHERE provider_calendar_id = ? AND event_id IN (SELECT value FROM json_each(?))")
@@ -260,15 +246,12 @@ export const snapshotEtags = (db: D1Database, pcid: string, ids: string[]) =>
 export const deleteSnapshots = (db: D1Database, pcid: string, ids: string[]) =>
   db.prepare("DELETE FROM event_snapshots WHERE provider_calendar_id = ? AND event_id IN (SELECT value FROM json_each(?))").bind(pcid, JSON.stringify(ids));
 
-/** Ретеншн: прошедшие события (2 дня после конца), журнал записей бота — 2 дня. */
 export function pruneStatements(db: D1Database, pcid: string, now: number): D1PreparedStatement[] {
   return [
     db.prepare("DELETE FROM event_snapshots WHERE provider_calendar_id = ? AND coalesce(end_ms, start_ms) < ?").bind(pcid, now - 2 * 86_400_000),
     db.prepare("DELETE FROM bot_writes WHERE provider_calendar_id = ? AND at < ?").bind(pcid, now - 2 * 86_400_000),
   ];
 }
-
-// --- Журнал записей бота ---------------------------------------------------------------------------------------------
 
 export interface BotWriteRow {
   eventId: string;
@@ -285,7 +268,6 @@ export function insertBotWrite(db: D1Database, pcid: string, w: Omit<BotWriteRow
     .bind(pcid, w.eventId, w.etag, w.chatId, w.authorUserId, w.authorName, w.at);
 }
 
-/** Записи бота по событиям (их id или id серии) с момента since — новые первыми. */
 export async function botWritesFor(db: D1Database, pcid: string, ids: string[], since: number): Promise<BotWriteRow[]> {
   if (ids.length === 0) return [];
   const { results } = await db
@@ -299,26 +281,20 @@ export async function botWritesFor(db: D1Database, pcid: string, ids: string[], 
   return results.map((r) => ({ eventId: r.event_id, etag: r.etag, chatId: r.chat_id, authorUserId: r.author_user_id, authorName: r.author_name, at: r.at }));
 }
 
-// --- Календарь → чаты ------------------------------------------------------------------------------------------------
-
-/** Чат, где виден календарь: личный чат пользователя или групповой чат дома. */
 export interface CalendarChat {
   chatId: string;
-  /** Чей это личный чат (для группового чата дома — нет). */
+  /** null — групповой чат дома. */
   userId: string | null;
   locale: string;
   tz: string;
   settings: UserSettings;
-  /** Календарь доступен в этом чате на запись — уведомления по умолчанию только о таких (US-72). */
   writable: boolean;
 }
 
 /**
- * «Календарь → чаты» (US-72, US-71): все чаты, где календарь виден, без повторов по чату:
- * 1) личные чаты пользователей, у которых подключён этот календарь провайдера (тот же provider_calendar_id в разных аккаунтах);
- * 2) личные чаты участников дома, у которых этого календаря нет в своём Google, если он — общий календарь их дома (видят
- *    его через Google владельца, ревью R1 блокер 1, QA-01/08);
- * 3) групповые чаты, привязанные к дому с этим общим календарём (US-94): язык и пояс — владельца дома, настройки — по умолчанию.
+ * Все чаты, где виден календарь, без повторов: 1) личные чаты тех, у кого он подключён (тот же provider_calendar_id
+ * бывает в разных аккаунтах); 2) участники дома без него в своём Google — видят общий календарь через Google владельца;
+ * 3) групповые чаты дома (US-94): язык и пояс владельца, настройки по умолчанию.
  */
 export async function chatsForCalendar(db: D1Database, pcid: string): Promise<CalendarChat[]> {
   const { results } = await db
@@ -365,10 +341,6 @@ export async function chatsForCalendar(db: D1Database, pcid: string): Promise<Ca
   }));
 }
 
-/**
- * Календари провайдера, которые видит пользователь (для напоминаний US-71): свои подключённые и общие календари его дома
- * (участник видит их через Google владельца, QA-02).
- */
 export async function userCalendarIds(db: D1Database, userId: string): Promise<string[]> {
   const { results } = await db
     .prepare(
@@ -387,11 +359,9 @@ export async function userCalendarIds(db: D1Database, userId: string): Promise<s
   return results.map((r) => r.pcid);
 }
 
-// --- Outbox уведомлений ------------------------------------------------------------------------------------------------
-
 /**
- * Снимок события, с которым сравнивали изменение: нет снимка (exists false) или снимок с этим etag. Уведомление пишется,
- * только если снимок всё ещё такой: запись бота и параллельный синк того же события не разошлют его дважды (tech-debt #21).
+ * Уведомление пишется, только если снимок всё ещё тот, с которым сравнивали (нет снимка или этот etag): запись бота
+ * и параллельный синк того же события не разошлют его дважды (tech-debt #21).
  */
 export interface SnapshotGuard {
   pcid: string;
@@ -408,10 +378,7 @@ export interface NoticeRow {
   guard?: SnapshotGuard;
 }
 
-/**
- * Строки outbox — одним запросом (json_each). С guard — только если снимок ещё не обновлён: запрос должен идти в batch
- * раньше записи снимков (batch D1 — одна транзакция, кто закоммитил первым, тот и уведомил).
- */
+/** Ставить в batch раньше записи снимков: batch D1 — одна транзакция, кто закоммитил первым, тот и уведомил. */
 export function insertNotices(db: D1Database, rows: NoticeRow[], now: number): D1PreparedStatement[] {
   if (rows.length === 0) return [];
   const data = rows.map((r) => ({
@@ -437,7 +404,6 @@ export function insertNotices(db: D1Database, rows: NoticeRow[], now: number): D
   ];
 }
 
-/** Забрать наступившие уведомления чата на отправку (queued → sending). */
 export async function claimDueNotices(db: D1Database, chatId: string, now: number): Promise<{ id: string; notice_json: string }[]> {
   const { results } = await db
     .prepare(
@@ -466,7 +432,7 @@ export async function finishNotices(db: D1Database, ids: string[], status: "sent
     .run();
 }
 
-/** Ретеншн outbox: отправленные — 2 дня; зависшие в sending (оборвалась отправка) — вернуть в queued через 10 минут. */
+/** Зависшие в sending — отправка оборвалась на полпути; через 10 минут вернуть в очередь. */
 export async function pruneNotices(db: D1Database, now: number): Promise<void> {
   await db.batch([
     db.prepare("DELETE FROM change_notices WHERE status = 'sent' AND sent_at < ?").bind(now - 2 * 86_400_000),

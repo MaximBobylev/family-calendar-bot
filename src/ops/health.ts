@@ -1,12 +1,11 @@
-// GET /health для внешнего монитора (docs/admin-console.md, «Внешний heartbeat»): один запрос к D1 и возраст
-// последнего прогона cron. 503, если D1 недоступна или cron молчит дольше CRON_SILENT_MS — монитор пришлёт письмо,
-// даже когда бот не может прислать алерт сам. Без секретов и пользовательских данных.
+// Для внешнего монитора: по 503 он пришлёт письмо, даже когда бот не может прислать алерт сам. Ответ публичный —
+// без секретов и пользовательских данных.
 
 import { resolveClock } from "../clock";
 import { OPS_LAST_TICK } from "../db/ops-state";
 import { errorClass, log } from "../log";
 
-/** Cron раз в минуту; 5 минут тишины — не случайная задержка (правило cron_silent). */
+// Cron раз в минуту: 5 минут тишины — уже не случайная задержка.
 export const CRON_SILENT_MS = 5 * 60_000;
 
 export async function healthCheck(env: Env): Promise<Response> {

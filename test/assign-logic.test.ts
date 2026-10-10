@@ -96,7 +96,7 @@ describe("assignOverride", () => {
         task: "Забрать детей из садика",
       }),
     ).toEqual({ name: "create_event", start: "сегодня в шесть вечера", title: "Забрать детей из садика" });
-    // Вопрос к семье — по-прежнему «кто-то должен» (решает LLM)
+    // Вопрос к семье — «кто-то должен», решает LLM
     expect(assignOverride("Кто отвезёт Ваню на плавание в субботу?", { name: "assign_task", someone: true, task: "отвезти Ваню на плавание" })).toEqual({
       name: "assign_task",
       someone: true,
@@ -197,8 +197,6 @@ describe("planAssignmentJobs", () => {
     expect(plan("2026-10-07T20:30:00Z", "2026-10-07T07:00:00Z").at(-1)).toEqual(["expire", "2026-10-07T22:30:00.000Z"]);
   });
 });
-
-// --- QA R1 NLU (docs/research/qa-r1-nlu.md): исправления 1–10 ----------------------------------------
 
 const home = [
   { name: "Иван", names: ["Иван"] },

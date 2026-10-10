@@ -1,5 +1,4 @@
-// Дома (US-90/94; docs/admin-console.md, итерация 3): список и карточка дома — только псевдонимы и счётчики.
-// Название дома, имена участников и детей, коды приглашений и id чатов сюда не попадают (их нет и в запросах).
+// Только псевдонимы и счётчики: название дома, имена, коды приглашений и id чатов сюда не попадают (их нет и в запросах).
 
 import type { HouseholdRow, InviteCounts } from "../queries";
 import { esc, fmtTime, raw, table } from "./layout";
@@ -44,10 +43,7 @@ export interface HouseholdDetailView {
   members: { user: string; role: string; hasGoogle: boolean; joinedAt: number }[];
   invites: InviteCounts;
   chats: string[];
-  /**
-   * Дополнительные секции карточки дома (готовый HTML). Место для поручений US-91/92/93: счётчики assignments
-   * по статусам — запрос в queries.ts, секция — сюда (без названий поручений: это текст пользователя).
-   */
+  // Место для поручений US-91/92/93: счётчики assignments по статусам, без названий — это текст пользователя.
   sections: { title: string; html: string }[];
 }
 

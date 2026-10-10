@@ -34,13 +34,11 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     const w = word(tok);
     const next = word(tokens[i + 1]);
 
-    // Частота словом
     if (w === "ежедневно" || w === "daily") { r.freq = "daily"; i++; continue; }
     if (w === "еженедельно" || w === "weekly") { r.freq = "weekly"; i++; continue; }
     if (w === "ежемесячно" || w === "monthly") { r.freq = "monthly"; i++; continue; }
     if (w === "ежегодно" || w === "yearly" || w === "annually") { r.freq = "yearly"; i++; continue; }
 
-    // «раз в две недели», «every 2 weeks»
     if (w === "раз" && word(tokens[i + 1]) === "в") {
       const n = tokens[i + 2]?.t === "num" ? (tokens[i + 2] as { v: number }).v : 1;
       const unitIdx = tokens[i + 2]?.t === "num" ? i + 3 : i + 2;
@@ -59,13 +57,11 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     }
 
     if (w && EVERY.has(w)) {
-      // «каждый день / каждую неделю / каждый месяц / каждый год»
       if (next && /^(день|day)$/.test(next)) { r.freq = "daily"; i += 2; continue; }
       if (next && DAILY_PARTS.has(next)) { r.freq = "daily"; partMer = DAILY_PARTS.get(next); i += 2; continue; }
       if (next && /^(неделю|week)$/.test(next)) { r.freq = "weekly"; i += 2; continue; }
       if (next && /^(месяц|month)$/.test(next)) { r.freq = "monthly"; i += 2; continue; }
       if (next && /^(год|year)$/.test(next)) { r.freq = "yearly"; i += 2; continue; }
-      // «каждые две недели», «every 3 days»
       const n = tokens[i + 1];
       const unit = word(tokens[i + 2]);
       if (n?.t === "num" && (n.form === "card" || n.form === "digit") && unit) {
@@ -76,9 +72,7 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
       continue;
     }
 
-    // «по будням», «по выходным», «по четвергам», «weekdays», «weekends»
     if (w === "будням" || w === "будни" || w === "weekday" || w === "weekdays") { addDays(WEEKDAYS_WORK); i++; continue; }
-    // «каждый будний день», «по будним дням»
     if ((w === "будний" || w === "будним" || w === "будние") && next && /^(день|дням|дни)$/.test(next)) { addDays(WEEKDAYS_WORK); i += 2; continue; }
     // «every other week», «каждую вторую неделю» — единица после «other»/«вторую»
     if (r.interval && !r.freq && w && /^(неделю|week)$/.test(w)) { r.freq = "weekly"; i++; continue; }
@@ -100,7 +94,6 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
         i += 2;
         continue;
       }
-      // «в последний день месяца»
       if (tok.v === -1 && word(tokens[i + 1]) === "день") {
         r.freq = "monthly";
         r.by_month_day = -1;
@@ -110,7 +103,6 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     }
     if (w === "месяца" || w === "month") { r.freq ??= "monthly"; i++; continue; }
 
-    // «каждое 15 число», «31 числа каждого месяца»
     if (tok.t === "num" && (word(tokens[i + 1]) === "число" || word(tokens[i + 1]) === "числа")) {
       r.freq = "monthly";
       r.by_month_day = tok.v;
@@ -119,7 +111,6 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
     }
     if (w === "каждого" && word(tokens[i + 1]) === "месяца") { r.freq = "monthly"; i += 2; continue; }
 
-    // «3 марта» в «каждый год 3 марта»
     if (tok.t === "num" && MONTHS.has(word(tokens[i + 1]) ?? "")) {
       r.by_month = MONTHS.get(word(tokens[i + 1])!)!;
       r.by_month_day = tok.v;
@@ -128,21 +119,18 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
       continue;
     }
 
-    // «10 раз», «10 times»
     if (tok.t === "num" && /^(раз|times)$/.test(word(tokens[i + 1]) ?? "")) {
       r.count = tok.v;
       i += 2;
       continue;
     }
 
-    // «до конца года», «до 1 декабря», «until Dec 1»
     if (w === "до" || w === "until") {
       if (word(tokens[i + 1]) === "конца" && word(tokens[i + 2]) === "года") {
         r.until = `${parts(today).year}-12-31`;
         i += 3;
         continue;
       }
-      // «до конца месяца» — последний день текущего месяца (корпус с разными «сейчас», tech-debt #26)
       if (word(tokens[i + 1]) === "конца" && word(tokens[i + 2]) === "месяца") {
         const { year, month } = parts(today);
         r.until = formatDate(makeDay(year, month, daysInMonth(year, month)));
@@ -159,7 +147,7 @@ export function parseRecurrence(tokens: Token[], today: Day): ParseResult {
       return { error: "unparseable" };
     }
 
-    // Время: «в 10», «at 9», «в 15:30», «в 3» → 15:00
+    // Время: «в 3» → 15:00
     if (w === "в" || w === "at" || w === "on") { i++; continue; }
     const time = readClockTime(tokens, i, true);
     if (time) {

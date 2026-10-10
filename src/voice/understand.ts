@@ -1,14 +1,5 @@
-// Мультимодальный разбор голоса (docs/tracks/multimodal-voice.md, вариант D — эскалация): аудио → дословный
-// транскрипт + вызов инструмента за один запрос. Не на каждое голосовое — только когда текстовый путь (Whisper →
-// LLM), скорее всего, ошибся: «не так», повтор той же фразы, «не понимаю» на голосовое.
-//
-// Спайк 2026-10-05 (синтетика, 12 голосовых): gemini-3.5-flash-lite напрямую — 12/12 верно, p50 1,4 с, имена
-// («Созвон с Петей», «отмени») слышит там, где Whisper ошибается; тишина и шум → no_speech.
-// qwen3.8-omni-flash выдумал команду из тишины — не берём.
-//
-//   kind "gemini"       — Gemini API, generateContent, inlineData audio/ogg (Opus из Telegram — как есть)
-//   kind "openai-audio" — OpenAI-совместимый chat/completions с input_audio format=ogg (OpenRouter)
-// Даты по-прежнему считаются из транскрипта детерминированно (ADR-0005): от модели — интент и поля.
+// Мультимодальный разбор голоса — эскалация, а не каждое голосовое: только когда текстовый путь (Whisper → LLM), скорее всего, ошибся.
+// Спайк: qwen3.8-omni-flash выдумал команду из тишины — не берём. Даты по-прежнему считает код по транскрипту (ADR-0005).
 
 import { fetchWithTimeout } from "../net/fetch";
 import { type Intent, intentFromCalls, SYSTEM_PROMPT, TOOLS } from "../nlu/intents";
@@ -20,7 +11,7 @@ export interface VoiceConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** Оценка цены, $ за 1M токенов (аудио считается как вход); нет — 0 (бесплатный тариф). */
+  /** $ за 1M токенов, аудио считается как вход; нет — 0 (бесплатный тариф). */
   inPerM?: number;
   outPerM?: number;
 }
@@ -40,7 +31,6 @@ Never translate: an English phrase is transcribed in English, a Russian one in R
 If a word is unclear, write how it sounds; never invent words, names or whole phrases.
 If speech is unintelligible or drowned in noise/background talk, or nothing was said, call no_speech instead of guessing.`;
 
-/** Наши tools + обязательный transcript + no_speech. */
 export const VOICE_TOOLS: ToolDefinition[] = [
   ...TOOLS.map((t) => {
     const p = t.function.parameters as { properties?: Record<string, unknown>; required?: string[] };
@@ -160,7 +150,6 @@ async function viaOpenAiAudio(cfg: VoiceConfig, data: string, calendars: string[
   return toResult(calls, j.usage?.prompt_tokens ?? 0, j.usage?.completion_tokens ?? 0);
 }
 
-/** Цепочка провайдеров: ошибка — следующий. Все упали — ошибка со списком причин. */
 export async function understandVoiceChain(
   chain: VoiceConfig[],
   audio: ArrayBuffer,

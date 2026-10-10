@@ -1,5 +1,4 @@
-// Состояние webhook Telegram для панели «здоровье»: getWebhookInfo при загрузке страницы, кеш 1 минуту в ops_state.
-// Сбой вызова показывается на странице, а не роняет её.
+// getWebhookInfo при загрузке страницы, кеш 1 минуту в ops_state; сбой вызова показывается на странице, а не роняет её.
 
 import type { AppContext } from "../bot/context";
 import { fetchWithTimeout } from "../net/fetch";

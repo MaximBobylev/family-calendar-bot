@@ -1,26 +1,23 @@
-// Настройки пользователя (US-04): users.settings_json, users.locale, users.home_tz, календарь по умолчанию
-// (calendars.is_default) и алиасы календарей (calendar_aliases, US-06).
+// Настройки пользователя (US-04) живут в нескольких местах: settings_json, locale, home_tz, calendars.is_default, calendar_aliases.
 
 import { localToUtc, parseLocal } from "../dates/calendar";
 
 export interface UserSettings {
-  /** Длительность новой встречи, минуты. Нет — 60. */
+  /** Нет — 60. */
   durationMin?: number;
-  /** Напоминания для обычных событий, минуты до начала. Нет — как в Google (useDefault); [] — без напоминаний. */
+  /** Минуты до начала. Нет — как в Google (useDefault); [] — без напоминаний. */
   reminders?: number[];
-  /** Для событий на весь день, минуты до полуночи дня события. Нет — без напоминаний (US-04). */
+  /** Минуты до полуночи дня события. Нет — без напоминаний. */
   allDayReminders?: number[];
-  /** Утренний дайджест «Сегодня» (US-70) выключен. По умолчанию — включён. */
   digestOff?: boolean;
-  /** Время дайджеста «ЧЧ:ММ» по поясу пользователя. Нет — 08:00. */
+  /** «ЧЧ:ММ» по поясу пользователя. Нет — 08:00. */
   digestTime?: string;
-  /** Вечерняя сводка «Завтра» в 21:00 (US-70, R1). По умолчанию — выключена. */
+  /** Сводка «Завтра» в 21:00. */
   tomorrowDigest?: boolean;
-  /** Сводка «Неделя»: вс 20:00 или пн 08:00 (US-70, R1). Нет — выключена. */
+  /** вс 20:00 или пн 08:00. Нет — выключена. */
   weekDigest?: "sun" | "mon";
-  /** Уведомления об изменениях в календарях выключены (US-72). По умолчанию — включены. */
   changeNotifyOff?: boolean;
-  /** Напоминать в Telegram за столько минут до встреч (US-71). Нет — не напоминать. */
+  /** Нет — не напоминать. */
   tgReminderMin?: number;
 }
 
@@ -41,7 +38,7 @@ export async function getSettings(db: D1Database, userId: string): Promise<UserS
   return parseSettings(row?.settings_json);
 }
 
-/** Обновить часть настроек; undefined в patch — убрать ключ (вернуть умолчание). */
+/** undefined в patch — убрать ключ (вернуть умолчание). */
 export async function updateSettings(db: D1Database, userId: string, patch: Partial<Record<keyof UserSettings, unknown>>): Promise<void> {
   const next: Record<string, unknown> = { ...(await getSettings(db, userId)), ...patch };
   for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
@@ -52,15 +49,13 @@ export async function setLocale(db: D1Database, userId: string, locale: "ru" | "
   await db.prepare("UPDATE users SET locale = ? WHERE id = ?").bind(locale, userId).run();
 }
 
-/** Домашний пояс (/settings, «я переехал», US-07): поездка снимается. */
 export async function setHomeTz(db: D1Database, userId: string, tz: string): Promise<void> {
   await db.prepare("UPDATE users SET home_tz = ?, trip_tz = NULL, trip_until = NULL WHERE id = ?").bind(tz, userId).run();
 }
 
-/** День окончания «YYYY-MM-DD» по поясу поездки → полночь в мс UTC (users.trip_until — INTEGER из 0001). */
+/** users.trip_until — INTEGER: полночь дня окончания по поясу поездки, мс UTC. */
 const untilMs = (until: string | null, tz: string) => (until ? localToUtc({ day: parseLocal(`${until}T00:00`).day, minutes: 0 }, tz) : null);
 
-/** Поездка (US-07): временный пояс поверх домашнего; until — день окончания по её поясу или null. */
 export async function setTrip(db: D1Database, userId: string, tz: string, until: string | null): Promise<void> {
   await db.prepare("UPDATE users SET trip_tz = ?, trip_until = ? WHERE id = ?").bind(tz, untilMs(until, tz), userId).run();
 }
@@ -73,7 +68,6 @@ export async function endTrip(db: D1Database, userId: string): Promise<void> {
   await db.prepare("UPDATE users SET trip_tz = NULL, trip_until = NULL WHERE id = ?").bind(userId).run();
 }
 
-/** Задача «Вернулись?» (US-07): одна на пользователя — прежние снимаются. */
 export const TRIP_CHECK_JOB = "trip_check";
 
 export function cancelTripChecks(db: D1Database, userId: string): D1PreparedStatement {
@@ -93,7 +87,6 @@ export async function scheduleTripCheck(db: D1Database, userId: string, fireAt: 
   ]);
 }
 
-/** Сделать календарь основным (только свой и доступный для записи). */
 export async function setDefaultCalendar(db: D1Database, userId: string, calendarId: string): Promise<boolean> {
   const own = await db
     .prepare(
@@ -120,7 +113,7 @@ export const normalizeAlias = (s: string) =>
     .replace(/^[«"']+|[»"']+$/g, "")
     .replace(/\s+/g, " ");
 
-/** Добавить алиасы календарю. Алиас уникален у пользователя — у другого календаря он снимается. */
+/** Алиас уникален у пользователя — у другого календаря он снимается. */
 export async function addAliases(db: D1Database, userId: string, calendarId: string, aliases: string[]): Promise<string[]> {
   const clean = [...new Set(aliases.map(normalizeAlias).filter((a) => a.length > 0 && a.length <= MAX_ALIAS_LEN))].slice(0, MAX_ALIASES);
   if (clean.length === 0) return [];

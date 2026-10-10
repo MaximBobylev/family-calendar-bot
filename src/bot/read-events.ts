@@ -1,4 +1,4 @@
-// US-20 / US-21: «Что у меня завтра?», «Покажи неделю», «Что в пятницу в семейном?»
+// Показанный порядок и день запоминаются: на них опираются «перенеси вторую» и «поставь на 12:30» (US-60).
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { DAY_PART_BOUNDS } from "../dates/lexicon";
@@ -15,7 +15,7 @@ interface Period {
   fromDay: Day;
   toDay: Day;
   from: Moment;
-  /** Исключительно. */
+  // Не включая
   to: Moment;
 }
 
@@ -47,7 +47,7 @@ function periodOf(v: ParseValue): Period | null {
   return null;
 }
 
-/** Календарь по имени или алиасу (US-06). LLM получает список календарей и должна вернуть точное имя. */
+// Без нечёткого поиска: LLM получает список календарей и должна вернуть точное имя
 async function findCalendar(ctx: AppContext, userId: string, calendars: CalendarInfo[], name: string): Promise<CalendarInfo | null> {
   const needle = name.trim().toLowerCase();
   const alias = await ctx.db
@@ -99,12 +99,11 @@ export async function readEvents(
 
   const list = await provider.listEvents(localToUtc(period.from, tz), localToUtc(period.to, tz), tz);
   const events = list.events.filter((e) => !only || e.ref.calendarId === only.id);
-  // Порядок как в выводе — для «перенеси вторую» (US-60)
   const ordered = orderForDisplay(
     events.filter((e) => e.endDay >= period.fromDay && Math.max(e.startDay, period.fromDay) <= period.toDay),
     period.fromDay,
   );
-  // День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 …» — только один день; период его сбрасывает
+  // Только один день; показ периода сбрасывает день разговора
   const lastDay = period.fromDay === period.toDay ? { day: formatDate(period.fromDay), at: ctx.clock.now() } : undefined;
   await mergeDialogState(
     ctx.db,
@@ -116,7 +115,7 @@ export async function readEvents(
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const family = await familyLabeler(ctx.db, args.userId, ordered, locale);
   const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId, family);
-  // Календарь не загрузился (удалён, нет доступа) — показываем остальное и честно говорим, чего нет (tech-debt #12)
+  // Календарь не загрузился (удалён, нет доступа) — показываем остальное и говорим, чего нет
   appendFailedNote(
     messages,
     list.failed.filter((f) => !only || f.id === only.id),

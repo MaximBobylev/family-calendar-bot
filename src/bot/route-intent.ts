@@ -1,5 +1,5 @@
-// Интент → обработчик фичи (создание, изменение, удаление, поиск, список). Общий путь для текста, голоса,
-// переслушанного голосового и пересланного после «Выполнить». Даты и «что менять» — из текста детерминированно.
+// Общий путь для текста, голоса и пересланного после «Выполнить». Даты и «что менять» — из текста детерминированно,
+// от LLM — интент и второе мнение (ADR-0005).
 
 import { parseDateFragment } from "../dates";
 import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
@@ -28,15 +28,11 @@ import { readEvents } from "./read-events";
 import { handleTimezoneIntent } from "./timezone";
 import { withCalendar } from "./with-calendar";
 
-/** Интент → действие. Общий путь для текста, голоса и переслушанного голосового. */
 export async function routeIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, parsedIntent: Intent): Promise<void> {
-  // Сильные слова в тексте важнее выбора LLM: глаголы изменения/удаления, «когда …?» (замер Qwen3, 2026-10-04)
-  // Поручения (US-91): «напомни мужу …», «пусть Аня …», «кто-то должен …», «мои дела» — по тексту, до остальных поправок
+  // Слова в тексте важнее выбора LLM (замер Qwen3): глаголы изменения/удаления, «когда …?»; поручения — до остальных поправок
   const assign = assignOverride(text, parsedIntent);
   let intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
-  // Даты — из исходного текста детерминированно; фрагменты от LLM — запасной вариант (ADR-0005 п.3)
   const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
-  // Запланированная поездка с датами в будущем («Поездка в Казань с 5 по 8 декабря») — событие, а не смена пояса (US-07)
   if (intent.name === "set_timezone" && intent.action === "trip") {
     const planned = plannedTripStart(text, localNow, user.tz);
     if (planned) intent = { name: "create_event", start: planned, ...(cleanTitle(text, [planned]) ? { title: cleanTitle(text, [planned])! } : {}) };
@@ -59,20 +55,17 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       else await listAssignments(ctx, user, chatId, text);
       return;
     case "create_event": {
-      // Ответственный и «для кого» (US-92): «…, отводит папа» — не часть названия и не дата
+      // «…, отводит папа» — не часть названия и не дата
       const fam = await familyHints(ctx, user.id, text);
       const famText = fam.remove.reduce((s, r) => s.replace(r, " "), text);
-      // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
       const rec = extractRecurrenceSpan(famText, localNow, user.tz);
       const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.tz, "point");
-      // День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 врача» = 12 октября; LLM этого контекста
-      // не видит — её второе мнение тогда не спрашиваем
+      // День разговора (US-60) LLM не видит — её второе мнение тогда не спрашиваем
       const state = !rec && spans.point ? await getDialogState(ctx.db, conversationId, user.id) : undefined;
       const fresh = state?.lastDay && ctx.clock.now() - state.lastDay.at < CONTEXT_TTL_MS ? state.lastDay.day : undefined;
       const inContext = spans.point ? withConversationDay(spans.point, fresh, parseLocal(localNow).day) : undefined;
       const point = inContext ?? spans.point;
-      // Сверка с LLM (ревью 2026-10-08): структура `when` (или `start`) — второе мнение; разные даты — варианты кнопками
-      // Незнакомый пояс («в 15 по Варне»): LLM его тоже не пересчитает — спрашиваем время по своему поясу
+      // Незнакомый пояс («в 15 по Варне») LLM тоже не пересчитает — спрашиваем время по своему поясу
       const llm = spans.unknownZone || inContext ? {} : { start: intent.start, ...(intent.when ? { when: intent.when } : {}) };
       const check = rec ? undefined : llmDateCheck(famText, point, llm, parseLocal(localNow), user.tz);
       if (check) {
@@ -125,11 +118,10 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
         await ctx.telegram.sendMessage(chatId, t("massDeleteUnsupported", user.locale));
         return;
       }
-      // От LLM — только сам интент; что и как менять, определяем по тексту детерминированно:
-      // Qwen3 не заполняет «event» и выдумывает reference/scope (замер 2026-10-04)
+      // От LLM — только сам интент: Qwen3 не заполняет «event» и выдумывает reference/scope (замер)
       const isModify = intent.name === "modify_event";
       const llmModify = intent.name === "modify_event" ? intent : undefined;
-      // Место, описание, напоминания (US-41, US-42): вырезаем из фразы — остаток описывает само событие
+      // Детали вырезаем из фразы — остаток описывает само событие
       const details = isModify ? detailHints(text) : { rest: text };
       if (details.reminders && "error" in details.reminders) {
         await ctx.telegram.sendMessage(chatId, t(details.reminders.error === "tooMany" ? "remindersTooMany" : "remindersTooFar", user.locale));
@@ -139,7 +131,7 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       const hints = modifyHints(eventText);
       const spans = extractModifySpans(eventText, localNow, user.tz);
       const newTitle = isModify ? (hints.newTitle ?? llmModify?.newTitle) : undefined;
-      // Место: явное («место: …») — из текста; иначе — от LLM; «будет в офисе» — догадка, если LLM промолчала
+      // Явное «место: …» — из текста; иначе — от LLM; «будет в офисе» — догадка, если LLM промолчала
       const newLocation = details.location ?? llmModify?.newLocation ?? details.locationGuess;
       const fragments = [spans.reference, spans.target, spans.shift, spans.duration].filter((x): x is string => !!x);
       const llmLocationInText =
@@ -177,7 +169,7 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       return;
     }
     case "list_events": {
-      // Список показан — повтор того же вопроса голосом не сигнал «не понял» (multimodal-voice, D)
+      // Повтор того же вопроса голосом после списка — уже не сигнал «не понял»
       await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: undefined }, ctx.clock.now());
       const listed = await withCalendar(ctx, user, chatId, (provider) =>
         readEvents(ctx, provider, {
@@ -200,7 +192,7 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Дата во фразе «поездки» начинается после сегодняшнего дня — это планы (событие), а не «я сейчас там». */
+// «Поездка в Казань с 5 по 8 декабря» — планы (событие), а не «я сейчас там»
 function plannedTripStart(text: string, localNow: string, tz: string): string | undefined {
   const point = extractDateSpans(text, localNow, tz, "point").point;
   if (!point) return undefined;

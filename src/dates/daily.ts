@@ -1,4 +1,4 @@
-// Ежедневные события по местному времени пользователя (дайджест US-70): ближайший момент «ЧЧ:ММ» после `nowUtc`.
+// Ближайший момент «ЧЧ:ММ» по местному времени пользователя; всегда строго позже `nowUtc`.
 
 import { localToUtc, utcToLocal, weekday } from "./calendar";
 
@@ -10,7 +10,6 @@ export const parseHhmm = (s: string): number | undefined => {
   return h < 24 && min < 60 ? h * 60 + min : undefined;
 };
 
-/** Ближайший момент UTC, когда в поясе `tz` будет `minutes` минут от полуночи; строго позже `nowUtc`. */
 export function nextDailyAt(nowUtc: number, tz: string, minutes: number): number {
   const local = utcToLocal(nowUtc, tz);
   for (let d = 0; d < 3; d++) {
@@ -20,7 +19,7 @@ export function nextDailyAt(nowUtc: number, tz: string, minutes: number): number
   throw new Error("unreachable");
 }
 
-/** Ближайший момент UTC, когда в поясе `tz` наступит день недели `weekday` (0 — пн … 6 — вс) в `minutes`; строго позже `nowUtc`. */
+/** weekdayIndex: 0 — пн … 6 — вс. */
 export function nextWeeklyAt(nowUtc: number, tz: string, weekdayIndex: number, minutes: number): number {
   let at = nextDailyAt(nowUtc, tz, minutes);
   for (let i = 0; i < 8; i++) {

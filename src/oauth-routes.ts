@@ -1,17 +1,5 @@
-// HTTP-маршруты привязки Google (US-02):
-//   GET  /oauth/google/start?state=…  → страница «подключаете к Telegram-аккаунту …» с кнопкой (tech-debt #1)
-//   POST /oauth/google/start          → (state + CSRF из cookie) PKCE + cookie привязки → редирект на экран согласия Google
-//   GET  /oauth/google/callback?code|error&state → проверка cookie привязки, обмен кода (+ code_verifier),
-//                                                  сохранение, сообщение в Telegram
-//
-// Промежуточная страница — минимальная защита от привязки чужого Google по пересланной ссылке: открывший видит,
-// к чьему Telegram подключается календарь. POST только со своей страницы: cookie SameSite=Strict + то же значение
-// в форме, поэтому чужой сайт не может отправить жертву сразу на экран согласия. Полное решение — в tech-debt #1.
-//
-// Привязка к браузеру и PKCE (tracks/telegram-login.md, этап 1): при переходе к Google браузер получает cookie
-// oauth_bind (в state — её SHA-256), callback принимается только с ней — чужой callback?code&state, подсунутый
-// жертве (login CSRF, A4), не привяжет к её Telegram чужой Google. Код обменивается только с code_verifier,
-// который знает лишь сервер (A5). SameSite=Lax, а не Strict: возврат с Google — межсайтовая GET-навигация.
+// Привязка Google (US-02). Промежуточная страница показывает, к чьему Telegram подключается календарь (пересланная ссылка, tech-debt #1);
+// callback принимается только в браузере с cookie oauth_bind и с PKCE — против login CSRF (tracks/telegram-login.md).
 
 import { rescheduleDigest } from "./jobs/digest";
 import type { AppContext } from "./bot/context";
@@ -34,7 +22,9 @@ ${bodyHtml}</body></html>`;
 
 const page = (text: string, status = 200, headers: Record<string, string> = {}) => htmlPage(`<p>${escapeHtml(text)}</p>`, status, headers);
 
+// SameSite=Strict + то же значение в форме: чужой сайт не отправит жертву сразу на экран согласия.
 const CSRF_COOKIE = "oauth_csrf";
+// SameSite=Lax, а не Strict: возврат с Google — межсайтовая GET-навигация.
 const BIND_COOKIE = "oauth_bind";
 const BIND_PATH = "/oauth/google";
 
@@ -48,7 +38,6 @@ function cookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
-/** Страница перед экраном согласия: к чьему Telegram подключается календарь (tech-debt #1). */
 async function startPage(ctx: AppContext, state: string): Promise<Response> {
   const link = await peekOAuthState(ctx.db, state, ctx.clock.now());
   if (!link) return page(t("oauthBadLinkPage", "ru"), 400);
@@ -75,9 +64,7 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
     const form = await request.formData().catch(() => null);
     const state = String(form?.get("state") ?? "");
     const csrf = String(form?.get("csrf") ?? "");
-    // Форма не с нашей страницы (нет cookie или не совпала) — не пускаем
     if (!csrf || cookie(request, CSRF_COOKIE) !== csrf) return page(t("oauthBadLinkPage", "ru"), 403);
-    // PKCE verifier (зашифрован) и хеш cookie браузера — к state; ссылка не действует — не пускаем
     const verifier = pkceVerifier();
     const bind = randomToken(32);
     const bound = await bindOAuthState(ctx.db, state, ctx.clock.now(), {
@@ -103,20 +90,18 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
     const { userId, tgName } = consumed;
     const locale = await userLocale(ctx.db, userId);
 
-    // Привязка к браузеру (A4) — до всего остального, включая отказ на экране согласия: чужой браузер не узнаёт
-    // ничего и не вызывает сообщений в бот. State при этом уже погашен — сознательно: он одноразовый, а повтор
-    // с подобранной cookie невозможен; законному пользователю (например, без cookie) — начать заново из бота.
-    // Нет browser_binding — state не прошёл через POST /start (или выдан до миграции 0005): тоже отказ.
+    // Привязка к браузеру — до всего остального, включая отказ на экране согласия: чужой браузер ничего не узнаёт
+    // и не вызывает сообщений в бот. State при этом уже погашен — сознательно: повтор с подобранной cookie невозможен,
+    // законному пользователю — начать заново из бота. Нет browser_binding — state не прошёл через POST /start.
     const bind = cookie(request, BIND_COOKIE);
     if (!bind || !consumed.browserBinding || !consumed.codeVerifierEnc || !timingSafeEqual(await sha256Hex(bind), consumed.browserBinding)) {
       console.warn("oauth callback: browser binding mismatch", { hasCookie: !!bind, hasBinding: !!consumed.browserBinding });
       return page(t("oauthBindFailedPage", locale), 403);
     }
-    // Тот же браузер: cookie больше не нужна — стираем при любом исходе
+    // Стираем cookie при любом исходе ниже
     const clearBind = { "set-cookie": `${BIND_COOKIE}=; Path=${BIND_PATH}; Max-Age=0; HttpOnly; SameSite=Lax${secureAttr(ctx)}` };
     const chatId = await telegramChatOf(ctx.db, userId);
 
-    // Отказ на экране согласия (US-02): сообщить и предложить повторить
     const error = url.searchParams.get("error");
     const code = url.searchParams.get("code");
     if (error || !code) {
@@ -142,11 +127,11 @@ export async function handleOAuthRoute(ctx: AppContext, request: Request, url: U
         calendars,
         now: ctx.clock.now(),
       });
-      // Заменили другой аккаунт — отозвать его токен (US-03), если он не подключён у кого-то ещё; не вышло — не страшно
+      // Отзыв не вышел — не страшно
       if (linked.replaced && !(await linkedElsewhere(ctx.db, linked.replaced.emailHash, userId))) {
         await revokeStoredToken(ctx.config, linked.replaced);
       }
-      // Утренний дайджест — по поясу из Google (US-70)
+      // Пояс мог прийти из Google — время дайджеста пересчитать
       await rescheduleDigest(ctx.db, userId, ctx.clock.now());
       if (chatId) await ctx.telegram.sendMessage(chatId, t("connected", locale, { email: linked.email, tz: linked.timeZone }));
       return page(t("oauthDonePage", locale), 200, clearBind);

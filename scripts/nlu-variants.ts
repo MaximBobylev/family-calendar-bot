@@ -1,5 +1,4 @@
-// Варианты промпта/схем для замера разбора интентов (scripts/eval-intents.ts, docs/research/llm-intents-eval.md).
-// A — промпт до замера 2026-10-05 (копия); E — победитель, он же теперь SYSTEM_PROMPT в src/nlu/intents.ts.
+// Варианты промпта для scripts/eval-intents.ts. Промпты A–D заморожены; E, F, W — живой прод-промпт из src/nlu/intents.ts.
 
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_NO_WHEN, TOOLS, TOOLS_NO_WHEN } from "../src/nlu/intents";
 import type { ToolDefinition } from "../src/nlu/llm";
@@ -9,13 +8,12 @@ export interface Variant {
   label: string;
   systemPrompt: string;
   tools: ToolDefinition[];
-  /** Фразы, которые сами стоят в примерах промпта — для отчёта «на отложенных» (без утечки). */
+  // Фразы из примеров самого промпта — чтобы отчёт на отложенных фразах был без утечки
   examples: string[];
 }
 
 const str = (description: string) => ({ type: "string", description });
 
-/** Фразы-примеры из промпта: всё в кавычках "…" перед «→». */
 const examplesOf = (prompt: string) => [...prompt.matchAll(/^"(.+?)" →/gm)].map((m) => m[1]!);
 
 const A_PROMPT = `You route a user's message (Russian or English) to exactly one calendar tool.
@@ -35,7 +33,6 @@ Examples:
 "Сделай планёрку на полтора часа" → modify_event {"event":"планёрку"}   (changing an existing event, not creating)
 "Отмени встречу с Петей в пятницу" → delete_event {"event":"встречу с Петей"}`;
 
-// --- B: структурированные правила в стиле критики, ужато ------------------------------------------
 const B_PROMPT = `You are the intent router of a calendar assistant. Call a tool for the user's message (Russian or English, often a voice transcript).
 
 GENERAL
@@ -68,7 +65,6 @@ Examples:
 "Что у меня завтра и поставь созвон на 15" → list_events {"range":"завтра"} + create_event {"start":"на 15","title":"Созвон"}
 "Какая погода завтра?" → unsupported`;
 
-// --- C: короткие правила + контрастные примеры -----------------------------------------------------
 const C_PROMPT = `You turn one user message (Russian or English, often a voice transcript with typos) into a calendar tool call.
 - Copy date/time words verbatim; never compute or translate dates.
 - title: what the event is, without date/time/duration words and without command verbs («поставь», «запиши»). A bare «встреча»/«событие»/«meeting» is not a title — omit it.
@@ -94,7 +90,6 @@ Examples:
 "Что у меня завтра и поставь созвон на 15" → list_events {"range":"завтра"} + create_event {"start":"на 15","title":"Созвон"}
 "Какая погода завтра?" → unsupported`;
 
-// --- D: C + описания полей схемы (calendar из критики, start необязателен, all_day с отрицанием) ----
 const D_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
   if (t.function.name === "create_event") {
     return {
@@ -166,10 +161,9 @@ const D_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
   return t;
 });
 
-// --- E: A + точечные контрастные примеры по ошибкам A (короткое название, календарь до названия, два запроса) ---
 const E_PROMPT = SYSTEM_PROMPT;
 
-// --- F: E + в схеме create_event поле calendar первым (Qwen обрывает JSON после title) ------------
+// Qwen обрывает JSON после title — поэтому calendar первым
 const F_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
   if (t.function.name !== "create_event") return t;
   const params = t.function.parameters as { properties: Record<string, unknown>; required: string[] };
@@ -183,7 +177,6 @@ export const VARIANTS: Record<string, Variant> = {
   C: { id: "C", label: "краткие правила + 16 контрастных примеров", systemPrompt: C_PROMPT, tools: TOOLS, examples: examplesOf(C_PROMPT) },
   E: { id: "E", label: "A + точечные контрастные примеры", systemPrompt: E_PROMPT, tools: TOOLS, examples: examplesOf(E_PROMPT) },
   F: { id: "F", label: "E + calendar первым в схеме", systemPrompt: E_PROMPT, tools: F_TOOLS, examples: examplesOf(E_PROMPT) },
-  /** Прод для звена с dateStructure: false (запасной Workers AI, tech-debt #27а): E без структуры даты `when`. */
   W: { id: "W", label: "E без when (прод Workers AI)", systemPrompt: SYSTEM_PROMPT_NO_WHEN, tools: TOOLS_NO_WHEN, examples: examplesOf(SYSTEM_PROMPT_NO_WHEN) },
   D: { id: "D", label: "C + улучшенные описания полей, start необязателен", systemPrompt: C_PROMPT, tools: D_TOOLS, examples: examplesOf(C_PROMPT) },
 };

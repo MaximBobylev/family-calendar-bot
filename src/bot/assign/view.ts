@@ -1,6 +1,5 @@
-// Вид поручений (US-91): подписи срока, тело карточки и сообщений, кнопки «Беру / Не могу / Сделано».
-// callback_data поручений — «as:<id>:<действие>[:<аргумент>]»: не карточка pending_actions — нажимает исполнитель (или
-// любой взрослый дома в группе), а не автор команды.
+// callback_data поручений — «as:<id>:<действие>[:<аргумент>]», а не карточка pending_actions: нажимает исполнитель
+// (или любой взрослый дома в группе), а не автор команды.
 
 import type { Assignment } from "../../db/assignments";
 import { utcToLocal } from "../../dates/calendar";
@@ -22,7 +21,6 @@ export function parseAssignCallback(data: string | undefined): { id: string; act
 
 export const isAssignCallback = (data: string | undefined) => !!data?.startsWith("as:");
 
-/** «сегодня в 17:00», «завтра», «сб, 10 октября в 10:00», «без срока». */
 export function dueLabel(dueAt: number | null, hasTime: boolean, now: number, tz: string, locale: string): string {
   if (dueAt === null) return t("assignNoDue", locale);
   const local = utcToLocal(dueAt, tz);
@@ -32,13 +30,10 @@ export function dueLabel(dueAt: number | null, hasTime: boolean, now: number, tz
   return hasTime ? t("assignAt", locale, { day, time: hhmm(local.minutes) }) : day;
 }
 
-/** Поля поручения, нужные для показа (и черновик карточки, и строка assignments). */
 export type AssignView = Pick<Assignment, "title" | "assigneeUserId" | "createdBy" | "dueAt" | "dueHasTime" | "forDependentId" | "eventLabel" | "eventStartAt">;
 
 export const whenOfAssignment = (a: AssignView, now: number, tz: string, locale: string) => dueLabel(a.dueAt, a.dueHasTime, now, tz, locale);
 
-/** Строки деталей: кому, для кого, событие, автор (в деталях, не в заголовке — US-91 общие правила). */
-/** Как показывать: кому, от кого; now и tz — пояс получателя для времени связанного события. */
 export interface DetailOpts {
   to?: boolean;
   from?: boolean;
@@ -46,7 +41,6 @@ export interface DetailOpts {
   tz: string;
 }
 
-/** «Плавание Вани, сб, 10 октября 12:00» — в поясе получателя, по текущему времени события (QA-03/04/05). */
 function eventLine(a: AssignView, now: number, tz: string, locale: string): string | null {
   if (!a.eventLabel) return null;
   if (a.eventStartAt === null) return a.eventLabel;
@@ -76,7 +70,6 @@ export function detailLines(a: AssignView, home: Home, locale: string, o: Detail
   return lines;
 }
 
-/** «🔔 Напомню: за день, за 3 ч (если нет ответа), за час; если ответа так и не будет — скажу вам». */
 export function remindersLine(a: AssignView, now: number, tz: string, locale: string): string | null {
   if (a.dueAt === null) return null;
   const plan = planAssignmentJobs({ dueAt: a.dueAt, hasTime: a.dueHasTime, now, tz, named: a.assigneeUserId !== null });
@@ -96,7 +89,6 @@ export function remindersLine(a: AssignView, now: number, tz: string, locale: st
   return t("assignReminders", locale, { list: [labels.join(", "), escalates ? t("assignEscalateNote", locale) : ""].filter(Boolean).join("; ") });
 }
 
-/** Тело: «📌 Забрать Машу из школы — сегодня в 17:00» + детали. */
 export function assignmentText(header: string, a: AssignView, home: Home, locale: string, o: DetailOpts): string {
   return [header, ...detailLines(a, home, locale, o)].join("\n");
 }

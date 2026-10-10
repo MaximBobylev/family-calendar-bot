@@ -1,12 +1,9 @@
-// Замер: может ли DeepSeek разрешать даты без нашей грамматики (ревью парсера дат, шаг 4).
-// A «LLM разрешает» — модель сама отдаёт итог в формате корпуса; B «LLM структурирует, резолвит наш код» — модель отдаёт
-// структуру (src/nlu/date-structure.ts), итог считает наш код (src/dates/structured.ts); C — то же поле `when` внутри настоящего
-// вызова разбора команды (SYSTEM_PROMPT + TOOLS бота, «Поставь встречу <фрагмент>», только point). Итоги — docs/research/llm-date-resolution-eval.md.
-//
-// Запуск (ключ DEEPSEEK_API_KEY есть только в сервисе deploy; платная модель — только с разрешения владельца):
+// Может ли DeepSeek разрешать даты без нашей грамматики. Режимы: A — модель отдаёт итог в формате корпуса; B — структуру,
+// итог считает src/dates/structured.ts; C — поле `when` в настоящем вызове разбора команды (только point).
+// Модель платная — только с разрешения владельца, сначала --dry-run. Итоги — docs/research/llm-date-resolution-eval.md.
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-llm-dates.ts --modes A,B --sample 300 --out reports/llm-dates/sample.json
 //   … --full [--kinds point,range]        — весь корпус;  --holdout — testdata/dates/holdout-*.yaml;  --ids a,b — выборочно
-//   … --modes C --kinds point               — структура в вызове интента, как в проде (раунд 2)
+//   … --modes C --kinds point               — структура в вызове интента, как в проде
 //   … --dry-run                            — только список кейсов и число вызовов (без ключа, можно в сервисе test)
 //   … --report reports/llm-dates/a.json[,b.json] [--failures 20] — сводка по сохранённым прогонам, без вызовов
 //   --model deepseek-flash (по умолчанию), --concurrency 3, --seed 7
@@ -36,11 +33,9 @@ const list = (s: string | undefined) =>
     : [];
 
 const MODEL = arg("model") ?? "deepseek-flash";
-// Цены deepseek-flash, $ за 1M токенов (llm-intents-eval.md): [низкая, высокая]
+// $ за 1M токенов: [низкая, высокая]
 const PRICE = { miss: [0.15, 0.3], hit: [0.003, 0.006], out: [0.6, 1.2] } as const;
 const WD_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-
-// --- Промпты --------------------------------------------------------------------------------------
 
 const INPUT_DOC = `Input: the fragment (Russian or English), kind — point (start of an event to create), range (a period to read/show), shift (move an event), duration, recurrence; now — the user's local date/time with weekday; tz — the user's IANA zone.`;
 
@@ -69,7 +64,7 @@ TIME ZONES: an explicit zone («в 15:00 по Киеву», «по МСК», «�
 UNPARSEABLE: vague («на днях», «скоро», «когда-нибудь», «в середине недели», «после работы»), deadlines («до пятницы», «к обеду», «к утру», «к концу недели/дня», «к следующей неделе», «by end of day», «EOD»), unknown words. Typos only from a closed list («завтро», «пятнцу», «tommorow»); real different words («пятно», «завтрак») → unparseable. Latin look-alike letters inside Russian words are fine. «пара» = 2; «через недельку/часик» = неделю/час; «после завтра» = послезавтра; «будущая/след. неделя» = следующая.
 SHIFT/DURATION/RECURRENCE: «на час позже» +PT1H, «на полчаса раньше» -PT30M, «на неделю вперёд» +P7D, no direction → later; «на сутки позже» +PT24H. «часа на три» PT3H, «на весь день» all_day. «каждую вторую среду» → weekly, interval 2, by_day [WE]; «каждую вторую среду месяца» → monthly, by_day [WE], by_set_pos 2; time by the hour rules («каждый понедельник в 3» → "15:00"); «31 числа каждого месяца» → warning skips_short_months; «каждое утро в 8» → daily 08:00.`;
 
-// Режим B — те же правила и схема, что у поля `when` в create_event (src/nlu/date-structure.ts): замер мерит прод
+// Те же правила и схема, что у поля `when` в create_event: замер мерит прод
 const SYSTEM_B = `You convert a date/time fragment for a calendar bot into a STRUCTURE. Call the tool "structure" once.
 ${INPUT_DOC}
 ${DATE_STRUCTURE_RULES}`;
@@ -133,8 +128,6 @@ const TOOL_B = {
   function: { name: "structure", description: "Structure of the date/time fragment.", parameters: DATE_STRUCTURE_SCHEMA },
 };
 
-// --- Вызов DeepSeek -------------------------------------------------------------------------------
-
 interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -156,7 +149,6 @@ const userMessage = (c: CorpusCase) => {
 type Mode = "A" | "B" | "C";
 const MODES: Mode[] = ["A", "B", "C"];
 
-/** Режим C: фраза создания события целиком — как команда пользователя боту. */
 const commandOf = (text: string) => (/[а-яё]/i.test(text) || !text.trim() ? `Поставь встречу ${text}` : `Schedule a meeting ${text}`);
 
 async function callModel(mode: Mode, c: CorpusCase): Promise<Call> {
@@ -203,7 +195,6 @@ async function callModel(mode: Mode, c: CorpusCase): Promise<Call> {
   }
 }
 
-/** Режим C: настоящий вызов разбора команды (SYSTEM_PROMPT + TOOLS бота, как parseIntent) — поле `when` у create_event. */
 async function callIntent(c: CorpusCase): Promise<Call> {
   const t0 = Date.now();
   const cfg = { baseUrl: "https://api.deepseek.com", apiKey: process.env.DEEPSEEK_API_KEY ?? "", model: MODEL, extraBody: { thinking: { type: "disabled" } } };
@@ -221,12 +212,9 @@ async function callIntent(c: CorpusCase): Promise<Call> {
   }
 }
 
-// --- Ответ → ParseResult --------------------------------------------------------------------------
-
 type Obj = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
 
-/** Режим A: значения модели → формат корпуса (лишние поля отбрасываются). */
 function fromA(a: Obj): ParseResult {
   if (a.result_type === "error") return { error: (str(a.error) ?? "unparseable") as "unparseable" };
   const values = (Array.isArray(a.values) ? (a.values as Obj[]) : []).map((v): ParseValue | null => {
@@ -257,7 +245,7 @@ function fromA(a: Obj): ParseResult {
   return ok.length === 1 ? ok[0]! : { ambiguous: ok };
 }
 
-/** Режим C: не create_event или нет/испорчена структура — бот переспросит (для замера — «не разобрал»). */
+// Не create_event или нет/испорчена структура — бот переспросит; для замера это «не разобрал»
 function fromC(a: Obj, c: CorpusCase): ParseResult | "unsupported" {
   if (c.input.kind !== "point") return "unsupported";
   if (a.intent !== "create_event") return { error: "unparseable" };
@@ -270,8 +258,6 @@ function fromB(s: Obj, c: CorpusCase): ParseResult | "unsupported" {
   // Испорченная структура в боте отбрасывается (второго мнения нет) — для замера это «не разобрал»
   return resolveRawStructure(s, kind, c.input.now, c.input.tz) ?? { error: "unparseable" };
 }
-
-// --- Оценка ---------------------------------------------------------------------------------------
 
 interface Row {
   id: string;
@@ -292,7 +278,7 @@ interface Row {
 const primary = (r: ParseResult): string | undefined => ("error" in r ? undefined : canonical("ambiguous" in r ? r.ambiguous[0] : r));
 const options = (r: ParseResult): string[] => ("ambiguous" in r ? r.ambiguous.map((v) => canonical(v)) : "error" in r ? [] : [canonical(r)]);
 
-/** exact — точно; first — первый вариант модели = ожидаемому первому; any — первый вариант модели среди ожидаемых. */
+// exact — точно; first — первый вариант модели = ожидаемому первому; any — первый вариант модели среди ожидаемых
 function score(expect: ParseResult, got: ParseResult | "unsupported" | undefined) {
   if (!got || got === "unsupported") return { exact: false, first: false, any: false };
   const exact = canonical(got) === canonical(expect);
@@ -372,7 +358,7 @@ function report(rows: Row[], failures: number) {
   table(rows, (r) => r.kind, "По виду");
   table(rows, nowGroup, "По «сейчас»");
   table(rows, (r) => expGroup(r.expect), "По виду ожидания");
-  // Ошибки ожидания: модель вернула ту же ошибку? И ложные ошибки — модель отказалась там, где есть значение
+  // Ложные ошибки — модель отказалась там, где есть значение
   for (const mode of MODES) {
     const m = rows.filter((r) => r.mode === mode && r.got && r.got !== "unsupported");
     const falseErr = m.filter((r) => !("error" in r.expect) && "error" in (r.got as ParseResult)).length;
@@ -397,8 +383,6 @@ function report(rows: Row[], failures: number) {
   }
 }
 
-// --- Выборка --------------------------------------------------------------------------------------
-
 function rng(seed: number) {
   let a = seed;
   return () => {
@@ -409,7 +393,7 @@ function rng(seed: number) {
   };
 }
 
-/** 300 = 90 из 16-now-variety (point/range) + 190 point/range из 01–15 пропорционально + 20 shift/duration/recurrence. */
+// 300 = 90 из 16-now-variety (point/range) + 190 point/range из 01–15 пропорционально + 20 shift/duration/recurrence
 function stratified(all: CorpusCase[], total: number, seed: number): CorpusCase[] {
   const rand = rng(seed);
   const shuffle = <T>(xs: T[]) => {
@@ -445,8 +429,6 @@ function stratified(all: CorpusCase[], total: number, seed: number): CorpusCase[
   return out;
 }
 
-// --- Основной поток -------------------------------------------------------------------------------
-
 async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<void>) {
   let next = 0;
   await Promise.all(
@@ -459,7 +441,6 @@ async function pool<T>(items: T[], n: number, fn: (x: T, i: number) => Promise<v
   );
 }
 
-/** Наш парсер на тех же кейсах: фрагмент целиком и путь извлечения (unsure → бот спрашивает). */
 function ours(cases: CorpusCase[]) {
   console.log("\n## Наш парсер\n\n| id | фрагмент | ждали | parseDateFragment | извлечение |\n|---|---|---|---|---|");
   let ok = 0;

@@ -1,6 +1,5 @@
-// CalendarProvider для Google: календари из D1, события из Google Calendar API.
-// Экземпляр живёт одно действие (один апдейт): календари читаются из D1 один раз; access token — из кеша в D1
-// до ~5 мин до срока, 401 — обновить один раз и повторить запрос (tech-debt #13).
+// Экземпляр живёт одно действие (апдейт): календари читаются из D1 один раз, access token — из кеша в D1,
+// на 401 — одно обновление и повтор (tech-debt #13).
 
 import type { Clock } from "../clock";
 import type { Config } from "../config";
@@ -36,21 +35,17 @@ import {
   type NewEvent,
 } from "./model";
 
-/**
- * Запись бота в календарь (US-72): после неё синхронизация обновляет снимок события (эхо push не даёт изменений),
- * рассылает уведомление в другие чаты календаря и переставляет напоминания (US-71). event — ответ Google (null — удалено).
- */
+/** Синк по ней обновляет снимок сразу, чтобы эхо push от нашей же записи не дало «изменения» (US-72). event null — удалено. */
 export interface BotWrite {
   calendar: CalendarInfo;
   op: "create" | "update" | "delete";
   eventId: string;
   event: GoogleEvent | null;
-  /** Менялось время — подсказка «перенесено», если прежнего снимка нет. */
+  /** Нужно для «перенесено», когда прежнего снимка нет. */
   timeChanged: boolean;
 }
 export type WriteListener = (w: BotWrite) => Promise<void>;
 
-/** Типы событий, которые не показываем (US-20). */
 const HIDDEN_EVENT_TYPES = new Set(["workingLocation", "focusTime"]);
 
 function dayOf(date: string) {
@@ -60,7 +55,6 @@ function dayOf(date: string) {
 
 export function toDomainEvent(e: GoogleEvent, cal: CalendarInfo, tz: string): CalendarEvent | null {
   if (e.status === "cancelled" || HIDDEN_EVENT_TYPES.has(e.eventType ?? "")) return null;
-  // Отклонённые приглашения скрываем (US-20)
   if (e.attendees?.some((a) => a.self && a.responseStatus === "declined")) return null;
 
   const base = {
@@ -89,7 +83,6 @@ export function toDomainEvent(e: GoogleEvent, cal: CalendarInfo, tz: string): Ca
   return { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day };
 }
 
-/** Вызов Google: его ошибки — в ошибки календаря (tech-debt #12). */
 async function google<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -99,9 +92,9 @@ async function google<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export class GoogleCalendarProvider implements CalendarProvider {
-  /** Access token этого экземпляра (промис — параллельные запросы не обновляют его дважды). */
+  /** Промис, а не строка: параллельные запросы не обновляют токен дважды. */
   private tokenP?: Promise<string>;
-  /** Токен, на который Google ответил 401, — по нему уже запущено обновление. */
+  /** По этому токену уже запущено обновление после 401. */
   private rejectedToken?: string;
   private calendarsP?: Promise<CalendarInfo[]>;
 
@@ -110,11 +103,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
     private readonly db: D1Database,
     private readonly userId: string,
     private readonly clock: Clock,
-    /** Только эти календари (общие календари дома, US-90); не задано — все календари пользователя. */
+    /** Общие календари дома (US-90); не задано — все календари пользователя. */
     private readonly onlyCalendarIds?: readonly string[],
-    /** Слушатель записей (src/sync/bot-writes.ts); его ошибки не ломают действие пользователя. */
     private readonly onWrite?: WriteListener,
-    /** Календарь по умолчанию вместо основного календаря владельца — основной общий календарь дома (ревью R1, блокер 2). */
+    /** Основной общий календарь дома — вместо основного календаря владельца. */
     private readonly defaultOverride?: string,
   ) {}
 
@@ -127,7 +119,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     }
   }
 
-  /** Календари пользователя из D1 — один запрос на экземпляр (tech-debt #13). Ошибка не запоминается. */
   calendars(): Promise<CalendarInfo[]> {
     this.calendarsP ??= this.loadCalendars().catch((e) => {
       this.calendarsP = undefined;
@@ -180,13 +171,12 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return this.tokenP;
   }
 
-  /** Access token: из кеша в D1, если до срока больше 5 мин (и не force), иначе — обновить по refresh token. */
   private async loadToken(force: boolean): Promise<string> {
     const row = await googleTokens(this.db, this.userId);
-    // Аккаунта уже нет (отключили в параллельном апдейте) — как отозванный доступ: предложить подключить
+    // Аккаунт отключили в параллельном апдейте — для пользователя это как отозванный доступ
     if (!row) throw new AuthRevoked("no google account");
     if (!force && row.accessTokenEnc && accessTokenUsable(row.accessExpiresAt, this.clock.now())) {
-      // Не расшифровался (сменили ключ) — не беда: обновим
+      // Не расшифровался (сменили ключ) — просто обновим
       const cached = await decryptSecret(row.accessTokenEnc, this.config.tokenKeys, aadFor.access(row.accountId)).catch(() => null);
       if (cached) return cached;
     }
@@ -194,7 +184,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
   }
 
   private async refresh(row: GoogleTokens): Promise<string> {
-    // Не расшифровался (сменили ключ) — для пользователя это как отозванный доступ: переподключить
+    // Не расшифровался (сменили ключ) — для пользователя это как отозванный доступ
     const refresh = await decryptSecret(row.credentialsEnc, this.config.tokenKeys, aadFor.account(row.accountId)).catch(() => {
       throw new AuthRevoked("refresh token cannot be decrypted");
     });
@@ -210,9 +200,8 @@ export class GoogleCalendarProvider implements CalendarProvider {
   }
 
   /**
-   * Вызов Google с access token. 401 — токен из кеша отозван или истёк раньше срока: один раз обновить и повторить
-   * (параллельные 401 на тот же токен обновляют его один раз). Отозванный доступ — invalid_grant при обновлении →
-   * AuthRevoked → «переподключите» (US-02). Ошибки Google — в ошибки календаря (tech-debt #12).
+   * 401 — токен из кеша отозван или истёк раньше срока: обновить один раз и повторить (параллельные 401 на тот же токен
+   * обновляют его один раз). Если доступ отозван, обновление даст invalid_grant → AuthRevoked (US-02).
    */
   private api<T>(call: (token: string) => Promise<T>): Promise<T> {
     return google(async () => {
@@ -234,7 +223,6 @@ export class GoogleCalendarProvider implements CalendarProvider {
     return this.tokenP!;
   }
 
-  /** Календари читаются независимо: удалённый или недоступный календарь не роняет всё чтение (tech-debt #12). */
   async listEvents(fromUtcMs: number, toUtcMs: number, tz: string): Promise<EventList> {
     const calendars = await this.calendars();
     const settled = await Promise.allSettled(
@@ -262,14 +250,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
   private async calendar(id: string): Promise<CalendarInfo> {
     const cal = (await this.calendars()).find((c) => c.id === id);
-    // Календаря больше нет (переподключение без него, tech-debt #19)
+    // Календарь пропал после переподключения без него (tech-debt #19)
     if (!cal) throw new EventGone(`unknown calendar ${id}`);
     return cal;
   }
 
   async createEvent(e: NewEvent): Promise<CreatedEvent> {
     const cal = await this.calendar(e.calendarId);
-    // Собственный id (base32hex) — повтор той же вставки даёт 409, а не дубль события (ревью 2026-10-05)
+    // Свой id (Google принимает только base32hex): повтор той же вставки даёт 409, а не дубль события
     const id = e.idempotencyKey ? `cab${e.idempotencyKey.toLowerCase().replace(/[^0-9a-v]/g, "")}` : undefined;
     const time = e.allDay
       ? { start: { date: formatDate(e.startDay) }, end: { date: formatDate(e.endDay + 1) } } // end.date — исключающая
@@ -349,9 +337,9 @@ export class GoogleCalendarProvider implements CalendarProvider {
     await this.written({ calendar: cal, op: "update", eventId: ref.providerEventId, event: updated, timeChanged: false });
   }
 
-  // --- Синхронизация (ADR-0005 §2): только Google, вне интерфейса CalendarProvider -----------------------------
+  // Синк (ADR-0005 §2) есть только у Google — поэтому вне интерфейса CalendarProvider.
 
-  /** Изменения календаря по syncToken или полный список окна. Истёкший токен — SyncTokenExpired (не ошибка календаря). */
+  /** Истёкший syncToken — SyncTokenExpired, а не ошибка календаря. */
   syncEvents(providerCalendarId: string, opts: { syncToken?: string; timeMin?: string; timeMax?: string }): Promise<SyncPage> {
     return this.api((token) => syncEvents(this.config.googleApiBase, token, providerCalendarId, opts));
   }

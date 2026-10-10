@@ -1,18 +1,16 @@
-// Замер разбора интентов на живой LLM (Workers AI): варианты промпта × модели × N повторов.
-// Оценивается то, что бот реально использует после детерминированной обработки (как в src/bot/route-intent.ts).
-// Набор — testdata/nlu/intents.yaml; итоги — docs/research/llm-intents-eval.md.
-//
-// Запуск (секреты есть только в сервисе deploy):
+// Замер разбора интентов на живой LLM: варианты промпта × модели × N повторов; оценивается итог после детерминированных
+// поправок, как в боте. Тратит квоты прода — только с разрешения владельца, сначала --dry-run. Итоги — docs/research/llm-intents-eval.md.
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-intents.ts \
 //     --variants A,C --models @cf/qwen/qwen3-30b-a3b-fp8,or:google/gemma-4-26b-a4b-it --n 3 [--ids c01,g01] [--limit 10] [--cats list,modify] \
 //     [--concurrency 4] [--delay-ms 8000] [--out reports/nlu-eval/run.json] [--failures]
 //   --report reports/nlu-eval/a.json,reports/nlu-eval/b.json — только сводка по сохранённым прогонам, без вызовов.
-//   --set testdata/nlu/intents-r1.yaml — другой набор (R1: дом с участниками и детьми — поручения, «для кого», поиск).
+//   --set testdata/nlu/intents-r1.yaml — другой набор (по умолчанию testdata/nlu/intents.yaml).
 //   --models none — без LLM: только детерминированные поправки (можно в сервисе test, без секретов).
-//   --dry-run — только посчитать вызовы и расход квоты Workers AI, ничего не вызывая (можно в сервисе test).
-//   --max-fail-streak 5 — после стольких сбоев подряд модель пропускается (бесплатные тарифы); OR_EXTRA='{"reasoning":{...}}'
+//   --dry-run — только посчитать вызовы и расход квоты, ничего не вызывая (можно в сервисе test).
+//   --max-fail-streak 5 — после стольких сбоев подряд модель пропускается; --live файл — журнал каждого вызова сразу.
+//   Модели: or:<id> — OpenRouter, gg:<id> — Gemini API, ds:<id> — DeepSeek, иначе Workers AI. OR_EXTRA='{"reasoning":{...}}'
 //   и OR_MAX_TOKENS — свои параметры для or:-моделей с рассуждением (по умолчанию reasoning off, 300 токенов).
-//   --spend-quota — разрешить больше WORKERS_AI_SAFE_CALLS вызовов Workers AI (квота общая с ботом в проде!).
+//   --spend-quota — разрешить больше WORKERS_AI_SAFE_CALLS вызовов Workers AI (квота общая с ботом в проде).
 
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,8 +28,6 @@ import { detailHints } from "../src/nlu/detail-hints";
 import { effectiveIntent, lookupQuery, NEXT_WORD } from "../src/nlu/intent-overrides";
 import { VARIANTS } from "./nlu-variants";
 
-// --- Набор ----------------------------------------------------------------------------------------
-
 interface Calendar {
   title: string;
   aliases: string[];
@@ -45,7 +41,6 @@ interface Case {
   title?: Expect;
   calendar?: Expect;
   all_day?: boolean;
-  // R1 (testdata/nlu/intents-r1.yaml): поручения, «для кого / ответственный», поиск, напоминания, срок/начало
   assignee?: Expect;
   task?: Expect;
   due?: Expect;
@@ -56,12 +51,11 @@ interface Case {
   next?: boolean;
   reminders?: number[];
 }
-/** Состав дома для поручений и US-92 (как loadHome): участники с другими именами, дети; owner — автор фраз. */
+// owner — автор фраз набора
 interface Household {
   members: { name: string; aliases?: string[]; owner?: boolean }[];
   dependents: { name: string; aliases?: string[] }[];
 }
-// --set testdata/nlu/intents-r1.yaml — другой набор (по умолчанию intents.yaml)
 const SET_PATH = (() => {
   const i = process.argv.indexOf("--set");
   return i >= 0 ? process.argv[i + 1]! : join(import.meta.dirname, "..", "testdata", "nlu", "intents.yaml");
@@ -79,9 +73,9 @@ const HOME = SET.defaults.household
   : undefined;
 const calendarNames = calendars.flatMap((c) => [c.title, ...c.aliases]);
 
-// --- Цены Workers AI, $ за 1M токенов (developers.cloudflare.com/workers-ai/platform/pricing, 2026-10-05) ---
+// $ за 1M токенов [вход, выход], прайс Workers AI на 2026-10-05
 const PRICES: Record<string, [number, number]> = {
-  "@cf/qwen/qwen3-30b-a3b-fp8": [0.051, 0.335], // = COST_ESTIMATES в src/config.ts (config.ts тянет типы Worker — не импортируем)
+  "@cf/qwen/qwen3-30b-a3b-fp8": [0.051, 0.335], // = COST_ESTIMATES в src/config.ts; не импортируем: тянет типы Worker
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": [0.293, 2.253],
   "@cf/meta/llama-4-scout-17b-16e-instruct": [0.27, 0.85],
   "@cf/mistralai/mistral-small-3.1-24b-instruct": [0.351, 0.555],
@@ -101,11 +95,8 @@ const PRICES: Record<string, [number, number]> = {
   "@cf/qwen/qwq-32b": [0.66, 1.0],
 };
 
-/**
- * Особые параметры запроса: модели с рассуждением без отключения думают секунды и обрываются до tool call.
- * enable_thinking=false через chat_template_kwargs — проверено 2026-10-05 (gemma-4, glm-4.7-flash, nemotron, qwen3.8);
- * gpt-oss-20b при tool_choice=required не возвращает вызовов, при auto — возвращает.
- */
+// Модели с рассуждением без отключения думают секунды и обрываются до tool call; enable_thinking=false проверен на этих.
+// gpt-oss-20b при tool_choice=required не возвращает вызовов, при auto — возвращает.
 const NO_THINK = { chat_template_kwargs: { enable_thinking: false } };
 const MODEL_OPTS: Record<string, { maxTokens?: number; extraBody?: Record<string, unknown> }> = {
   "@cf/openai/gpt-oss-20b": { maxTokens: 1500, extraBody: { reasoning_effort: "low", tool_choice: "auto" } },
@@ -116,12 +107,10 @@ const MODEL_OPTS: Record<string, { maxTokens?: number; extraBody?: Record<string
   "@cf/nvidia/nemotron-3-120b-a12b": { extraBody: NO_THINK },
 };
 
-// --- Аргументы ------------------------------------------------------------------------------------
-
-/** Оценка расхода Workers AI: Qwen3 с промптом E ≈ 10 neurons за вызов, Gemma-4 ≈ 16 (llm-intents-eval.md). */
+// С запасом: Qwen3 с промптом E ≈ 10 neurons за вызов, Gemma-4 ≈ 16
 const NEURONS_PER_CALL = 16;
 const WORKERS_AI_FREE_NEURONS = 10_000;
-/** Порог без --spend-quota: ≈ 30 % дневной квоты — бот в проде продолжает работать. */
+// ≈ 30 % дневной квоты — бот в проде продолжает работать
 const WORKERS_AI_SAFE_CALLS = 200;
 
 const arg = (name: string) => {
@@ -136,21 +125,17 @@ const list = (s: string | undefined) =>
         .filter(Boolean)
     : [];
 
-// --- Оценка ---------------------------------------------------------------------------------------
-
 interface Outcome {
-  intent: string; // после детерминированных поправок (effectiveIntent)
+  intent: string; // после детерминированных поправок, в отличие от rawIntent
   rawIntent: string;
   title?: string;
   calendar?: string;
   allDay?: boolean;
-  /** start от LLM содержит всё, что нашёл extract.ts (справочно: даты всё равно берутся из текста). */
+  // Справочно: даты бот всё равно берёт из текста
   startFull?: boolean;
-  // R1: итог как в карточке бота
-  /** Поручение: имя участника; null — «кто-то»; "?<как сказано>" — не нашёлся; "self" — себе; "ambiguous". */
+  // имя участника; null — «кто-то»; "?<как сказано>" — не нашёлся; "self" — себе; "ambiguous"
   assignee?: string | null;
   task?: string | null;
-  /** Срок поручения / начало события: "2026-10-09T16:00" или "2026-10-09"; null — нет. */
   due?: string | null;
   start?: string | null;
   recurrence?: boolean;
@@ -161,7 +146,7 @@ interface Outcome {
   reminders?: number[] | string;
 }
 
-/** Фрагмент даты → «2026-10-09T16:00» / «2026-10-09» (как resolveDue в bot/assign/start.ts); нет/ошибка — null. */
+// Как resolveDue в bot/assign/start.ts
 function resolvePoint(text: string | undefined): string | null {
   if (!text) return null;
   return firstValue(parseDateFragment({ text, kind: "point", now, tz }));
@@ -177,7 +162,7 @@ function firstValue(parsed: ReturnType<typeof parseDateFragment>): string | null
   return null;
 }
 
-/** Как startAssign: кому (по тексту, иначе от LLM), срок из текста после исполнителя, название, ребёнок. */
+// Как startAssign в боте
 function assignOutcome(text: string, intent: Extract<Intent, { name: "assign_task" }>, out: Outcome): void {
   const phrase = parseAssignPhrase(text);
   const llmWho = intent.someone ? undefined : intent.assignee;
@@ -196,7 +181,7 @@ function assignOutcome(text: string, intent: Extract<Intent, { name: "assign_tas
   out.forWhom = (out.task && HOME && findMentioned(out.task, HOME.dependents)?.name) || null;
 }
 
-/** Как routeIntent: поручение по тексту — только если LLM сама сказала assign_task или в доме есть такой участник. */
+// Как routeIntent: поручение по тексту — только если LLM сама сказала assign_task или в доме есть такой участник
 function applyAssign(text: string, intent: Intent): Intent | null {
   const a = assignOverride(text, intent);
   if (a?.name !== "assign_task" || intent.name === "assign_task") return a;
@@ -205,8 +190,7 @@ function applyAssign(text: string, intent: Intent): Intent | null {
 }
 
 function downstream(c: Case, intent: Intent): Outcome {
-  // Те же поправки, что в боте (routeIntent): глаголы, «когда …?», «следующая встреча»
-  // Как в routeIntent: поручения (US-91) — по тексту раньше остальных поправок
+  // Как routeIntent: поручения по тексту — раньше остальных поправок
   const eff: Intent = applyAssign(c.text, intent) ?? effectiveIntent(c.text, intent);
   const out: Outcome = { intent: eff.name, rawIntent: intent.name };
   if (eff.name === "assign_task") assignOutcome(c.text, eff, out);
@@ -219,8 +203,7 @@ function downstream(c: Case, intent: Intent): Outcome {
     if (d.reminders) out.reminders = "error" in d.reminders ? d.reminders.error : d.reminders.overrides.map((r) => r.minutes);
   }
   if (eff.name === "create_event") {
-    // US-92: «…, отводит папа» — ответственный; ребёнок в тексте — «для кого» (как familyHints)
-    // Не в доме — familyHints ничего не делает (как в боте)
+    // Как familyHints в боте: вне дома ничего не делает
     const resp = HOME ? householdResponsible(c.text, HOME.members, HOME.dependents) : null;
     const famRemove = resp?.remove ?? [];
     const famText = famRemove.reduce((s, r) => s.replace(r, " "), c.text);
@@ -230,7 +213,7 @@ function downstream(c: Case, intent: Intent): Outcome {
     }
     const rec = extractRecurrenceSpan(famText, now, tz);
     const spans = extractDateSpans(rec ? rec.rest : famText, now, tz, "point");
-    // Как route-intent.ts: наш кусок, структура `when` (или `start`) от LLM — второе мнение (llmDateCheck)
+    // Как route-intent.ts: `when` (или `start`) от LLM — второе мнение к нашему куску
     const llm = { start: eff.start, ...(eff.when ? { when: eff.when } : {}) };
     const pick = rec ? {} : llmDateCheck(famText, spans.point, llm, parseLocal(now), tz).pick;
     const startText = pick.startText;
@@ -245,7 +228,7 @@ function downstream(c: Case, intent: Intent): Outcome {
         (x): x is string => !!x,
       ),
     );
-    // create-logic.ts: диапазон дат без времени («с 5 по 8 декабря») — всегда на весь день, флаг не нужен
+    // Как create-logic.ts: диапазон дат без времени — всегда весь день, без флага от LLM
     const parsed = startText ? parseDateFragment({ text: startText, kind: "point", now, tz }) : undefined;
     const values = !parsed || "error" in parsed ? [] : "ambiguous" in parsed ? parsed.ambiguous : [parsed];
     const dateRange = values.some((v) => "range" in v && !v.range.from.includes("T"));
@@ -255,7 +238,7 @@ function downstream(c: Case, intent: Intent): Outcome {
     if (want) out.startFull = norm(eff.start).includes(norm(want));
   }
   if (eff.name === "list_events" && eff.calendar) {
-    // read-events.ts: точное имя или алиас, без падежей
+    // Как read-events.ts: точное имя или алиас, без падежей
     const needle = eff.calendar.trim().toLowerCase();
     const cal = calendars.find((k) => k.aliases.some((a) => a.toLowerCase() === needle) || k.title.toLowerCase() === needle);
     out.calendar = cal?.title ?? `?${eff.calendar}`;
@@ -296,7 +279,7 @@ function check(c: Case, o: Outcome): Check {
   if (fieldsApply && c.calendar !== undefined)
     r.calendar = asList(c.calendar).some((k) => (k === "?" ? !!o.calendar?.startsWith("?") : (k ?? undefined) === o.calendar));
   if (fieldsApply && c.all_day !== undefined && o.intent === "create_event") r.allDay = c.all_day === o.allDay;
-  // R1-поля: только при верном интенте, у которого такое поле есть; "?" — «не нашёлся» (любое значение с «?»)
+  // Остальные — только при верном интенте с таким полем; "?" — «не нашёлся» (любое значение с «?»)
   const same = (exp: Expect, got: string | null | undefined, text = false) =>
     asList(exp).some((k) => (k === "?" ? !!got?.startsWith("?") : k === null ? got == null : text ? norm(k) === norm(got) : k === got));
   const has = (k: keyof Outcome) => intentOk && k in o;
@@ -313,8 +296,6 @@ function check(c: Case, o: Outcome): Check {
 }
 const passed = (k: Check) => Object.values(k).every((x) => x !== false);
 
-// --- Прогон ---------------------------------------------------------------------------------------
-
 interface Run {
   variant: string;
   model: string;
@@ -330,7 +311,6 @@ interface Run {
   check?: Check;
 }
 
-// --- Живой журнал (--live файл): каждый вызов дописывается сразу, с заголовками лимитов провайдера ---
 const LIVE = arg("live");
 let liveDone = 0;
 let liveOk = 0;
@@ -353,7 +333,7 @@ async function withRetry<T>(f: () => Promise<T>, label: string): Promise<T> {
     } catch (e) {
       const msg = String(e);
       const retry = attempt < 3 && /llm (429|5\d\d)|timeout|aborted|fetch failed/i.test(msg);
-      // Квота (429) — ждём минуту: короткие повторы только сжигают лимит (урок 2026-10-05)
+      // 429 — ждём минуту: короткие повторы только сжигают лимит
       const waitMs = /llm 429/.test(msg) ? 60_000 : 2000 * (attempt + 1);
       live(
         `ERR  ${label} попытка ${attempt + 1}: ${msg.replace(/\s+/g, " ").slice(0, 220)}${headersText(e instanceof LlmHttpError ? e.rateHeaders : undefined)}${retry ? ` → ждём ${waitMs / 1000} с` : " → сдаёмся"}`,
@@ -367,9 +347,8 @@ async function withRetry<T>(f: () => Promise<T>, label: string): Promise<T> {
   }
 }
 
-// OpenRouter иногда отвечает 200 с {"error":{…}} вместо choices (2026-10-08, Nemotron Nano free: «ResourceExhausted …
-// provider_unavailable»). callTools видит в этом «нет вызова», и замер засчитал бы сбой провайдера как ответ модели —
-// в замере превращаем такой ответ в HTTP-ошибку с кодом из тела (502 → повтор в withRetry).
+// OpenRouter иногда отвечает 200 с {"error":{…}} вместо choices; callTools увидит «нет вызова», и замер засчитал бы
+// сбой провайдера как ответ модели. Поэтому превращаем такой ответ в HTTP-ошибку с кодом из тела (502 → повтор).
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const res = await realFetch(input, init);
@@ -385,12 +364,10 @@ globalThis.fetch = async (input, init) => {
   return new Response(body, { status: err ? (Number(err.code) >= 400 && Number(err.code) < 600 ? Number(err.code) : 502) : res.status, headers: res.headers });
 };
 
-/** Пауза между вызовами (--delay-ms) — под поминутные лимиты бесплатных тарифов. */
+// Под поминутные лимиты бесплатных тарифов
 const DELAY_MS = Number(arg("delay-ms") ?? 0);
-/** Модель, у которой столько фраз подряд кончились ошибкой (после повторов), дальше не вызываем — бережём квоту. */
 const MAX_FAIL_STREAK = Number(arg("max-fail-streak") ?? 5);
 const failStreak = new Map<string, number>();
-/** OR_MAX_TOKENS — больше токенов ответа для OpenRouter-модели с включённым рассуждением (по умолчанию 300). */
 const modelOpts = (model: string) =>
   model.startsWith("or:") && process.env.OR_MAX_TOKENS ? { ...MODEL_OPTS[model], maxTokens: Number(process.env.OR_MAX_TOKENS) } : MODEL_OPTS[model];
 
@@ -399,9 +376,7 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
     return { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0, error: `пропущено: ${MAX_FAIL_STREAK} сбоев подряд` };
   if (DELAY_MS) await new Promise((r) => setTimeout(r, DELAY_MS));
   const v = VARIANTS[variant]!;
-  // «or:<модель>» — OpenRouter (без «размышления», как в проде); «gg:<модель>» — Google AI Studio (OpenAI-совместимый
-  // эндпоинт Gemini API); иначе — Workers AI
-  // «ds:<модель>» — DeepSeek (OpenAI-совместимый, «размышление» выключено: по умолчанию включено и медленно)
+  // DeepSeek по умолчанию «размышляет» — медленно, выключаем
   const cfg = model.startsWith("ds:")
     ? {
         baseUrl: "https://api.deepseek.com",
@@ -421,7 +396,6 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
             baseUrl: "https://openrouter.ai/api/v1",
             apiKey: process.env.OPENROUTER_API_KEY ?? "",
             model: model.slice(3),
-            // OR_EXTRA — свои поля запроса вместо reasoning off (модель с рассуждением, которая его не выключает)
             extraBody: {
               ...(process.env.OR_EXTRA ? JSON.parse(process.env.OR_EXTRA) : { reasoning: { enabled: false } }),
               ...(process.env.OR_SORT ? { provider: { sort: process.env.OR_SORT } } : {}),
@@ -429,7 +403,6 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
           }
         : { baseUrl: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1`, apiKey: process.env.LLM_API_KEY ?? "", model };
   const base: Run = { variant, model, caseId: c.id, rep, ms: 0, tokensIn: 0, tokensOut: 0 };
-  // «none» — без LLM (модель не ответила tool call): что дают одни детерминированные поправки
   if (model === "none") return grade({ ...base, calls: [] });
   let ms = 0;
   let lastHeaders: Record<string, string> | undefined;
@@ -470,7 +443,6 @@ async function runOne(variant: string, model: string, c: Case, rep: number): Pro
   }
 }
 
-/** Оценка по сохранённым вызовам — тот же путь, что в проде (intentFromCalls → downstream). */
 function grade(r: Run): Run {
   if (r.error) return r;
   const c = SET.cases.find((k) => k.id === r.caseId)!;
@@ -494,8 +466,6 @@ async function pool<T>(items: (() => Promise<T>)[], n: number, onDone: (done: nu
   );
   return out;
 }
-
-// --- Сводка ---------------------------------------------------------------------------------------
 
 const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(1)}%` : "—");
 const quantile = (xs: number[], q: number) => {
@@ -557,7 +527,6 @@ function summarize(runs: Run[], showFailures: boolean): string {
       }
     }
   }
-  // По категориям: доля фраз со всеми верными полями (R1-набор считается по областям)
   const cats = [...new Set(SET.cases.map((c) => c.cat))].filter((cat) => runs.some((r) => cases.get(r.caseId)?.cat === cat));
   const keys = [...byKey.keys()];
   const byCat = [`| Категория | ${keys.map((k) => k.split("|")[1]!.replace("@cf/", "")).join(" | ")} |`, `|---|${keys.map(() => "---").join("|")}|`];
@@ -570,8 +539,6 @@ function summarize(runs: Run[], showFailures: boolean): string {
   }
   return `${lines.join("\n")}\n\n${byCat.join("\n")}${failures.length ? `\n\n## Ошибки по фразам\n${failures.join("\n")}` : ""}`;
 }
-
-// --- main -----------------------------------------------------------------------------------------
 
 const reportFiles = list(arg("report"));
 if (reportFiles.length) {
@@ -594,8 +561,7 @@ if (reportFiles.length) {
   const jobs: (() => Promise<Run>)[] = [];
   for (const model of models) for (const v of variants) for (let rep = 0; rep < n; rep++) for (const c of selected) jobs.push(() => runOne(v, model, c, rep));
   console.error(`${jobs.length} вызовов: ${variants.join(",")} × ${models.length} моделей × ${selected.length} фраз × ${n}`);
-  // Квота Workers AI Free — 10 000 neurons/сутки на весь аккаунт, общая с ботом в проде (docs/research/llm-intents-eval.md):
-  // замер 2026-10-05 выбрал её целиком, и бот до сброса не разбирал команды. Большой прогон — только осознанно.
+  // Квота Workers AI Free общая с ботом в проде: замер 2026-10-05 выбрал её целиком, и бот до сброса не разбирал команды
   const workersAiCalls = models.filter((m) => !m.startsWith("or:") && !m.startsWith("gg:") && m !== "none").length * variants.length * n * selected.length;
   if (workersAiCalls)
     console.error(`  из них Workers AI: ${workersAiCalls} ≈ ${workersAiCalls * NEURONS_PER_CALL} neurons из ${WORKERS_AI_FREE_NEURONS}/сутки`);

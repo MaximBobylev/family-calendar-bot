@@ -1,4 +1,4 @@
-// Часовой пояс из ввода пользователя (/settings → «Другой…», US-07): IANA, UTC±N или город из списка.
+// Часовой пояс из ввода пользователя: IANA, UTC±N или город из списка.
 
 export const TZ_PRESETS: { ru: string; en: string; tz: string }[] = [
   { ru: "Москва", en: "Moscow", tz: "Europe/Moscow" },
@@ -13,7 +13,6 @@ export const TZ_PRESETS: { ru: string; en: string; tz: string }[] = [
   { ru: "Сан-Паулу", en: "São Paulo", tz: "America/Sao_Paulo" },
 ];
 
-/** «Europe/Berlin», «UTC+4», «GMT-3», «Тбилиси» → IANA-пояс или undefined. */
 export function parseTimeZone(input: string): string | undefined {
   const s = input.trim();
   const preset = TZ_PRESETS.find((p) => [p.ru, p.en].some((n) => n.toLowerCase() === s.toLowerCase()));

@@ -6,11 +6,9 @@ export type Token =
   | { t: "word"; w: string }
   /** Число; `form` — для числительных словами, у цифр — "digit". */
   | { t: "num"; v: number; form: NumberForm | "digit" }
-  /** «15:30», «9:30am». */
   | { t: "clock"; h: number; m: number }
   /** «14.10», «15.30», «5.11.26», «14/10» — дата или время решает грамматика по контексту. */
   | { t: "dm"; a: number; b: number; y?: number }
-  /** «2026-11-05». */
   | { t: "iso"; y: number; m: number; d: number }
   /** «23-го», «14-е», «1st». */
   | { t: "dayord"; v: number }
@@ -19,7 +17,6 @@ export type Token =
 /** Латинские буквы, похожие на кириллические: «cреду» с латинской «c». */
 const LOOKALIKES: Record<string, string> = { a: "а", c: "с", e: "е", o: "о", p: "р", x: "х", y: "у", k: "к", m: "м", t: "т", h: "н", b: "в" };
 
-/** В слове, где есть кириллица, латинские двойники заменяются кириллицей. Чисто латинские слова не трогаем. */
 function fixLookalikes(w: string): string {
   return /[а-я]/.test(w) && /[a-z]/.test(w) ? w.replace(/[acepoxykmthb]/g, (ch) => LOOKALIKES[ch]!) : w;
 }
@@ -32,7 +29,6 @@ export function normalize(text: string): string {
     .replace(/[–—]/g, "-")
     .replace(/[,;!?«»"()…]/g, " ")
     .replace(/\.+(\s|$)/g, " ")
-    // «пол-третьего» = «полтретьего»
     .replace(/(^|\s)пол-(?=[а-я])/g, "$1пол")
     .replace(/\S+/g, fixLookalikes)
     .trim();
@@ -62,7 +58,6 @@ function classify(word: string): Token[] {
     if (m[3]) out.push({ t: "mer", v: m[3] as Meridiem });
     return out;
   }
-  // «9.30pm»
   if ((m = /^(\d{1,2})\.(\d{2})(am|pm)$/.exec(raw))) return [{ t: "clock", h: +m[1]!, m: +m[2]! }, { t: "mer", v: m[3] as Meridiem }];
   if ((m = /^(\d{1,2})(am|pm)$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }, { t: "mer", v: m[2] as Meridiem }];
   if ((m = /^(\d{1,2})-?(го|е|ое|ого|st|nd|rd|th)$/.exec(raw))) return [{ t: "dayord", v: +m[1]! }];
@@ -73,12 +68,11 @@ function classify(word: string): Token[] {
     if (m[2]!.startsWith("0") || b > 24) return [{ t: "clock", h: a, m: b }];
     return [{ t: "num", v: a, form: "digit" }, { t: "word", w: "-" }, { t: "num", v: b, form: "digit" }];
   }
-  // «в 15ч», «at 3ish» (приблизительное время = точное)
+  // «at 3ish» — приблизительное время считаем точным
   if ((m = /^(\d{1,2})ч$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }, { t: "word", w: "ч" }];
   if ((m = /^(\d{1,2})ish$/.exec(raw))) return [{ t: "num", v: +m[1]!, form: "digit" }];
   if (/^\d+$/.test(raw)) return [{ t: "num", v: +raw, form: "digit" }];
 
-  // «сегодняшний день», «на завтрашнюю», «послезавтрашние встречи» — прилагательное = само наречие
   const adj = DAY_ADJECTIVES.find(([prefix]) => raw.startsWith(prefix));
   if (adj) return [{ t: "word", w: adj[1] }];
 

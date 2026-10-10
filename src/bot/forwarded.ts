@@ -1,6 +1,4 @@
-// US-10: пересланное сообщение не исполняется как команда — это чужой текст (безопасность: «удали всё» от
-// кого угодно). Бот показывает его и спрашивает: «Выполнить как команду?». Выполняется от имени нажавшего.
-// US-65 (R1): кнопка «Создать событие из этого» — разбор чужого текста в событие (ingest.ts), всегда с карточкой.
+// Пересланное — чужой текст: без нажатия кнопки не исполняется как команда (иначе «удали всё» от кого угодно).
 
 import { attachMessage, createPendingAction, type PendingAction } from "../db/conversations";
 import { recordFeature } from "../db/features";
@@ -16,14 +14,13 @@ import { withTyping } from "./with-typing";
 
 export const FORWARD_CARD = "forward";
 
-/** Сколько текста храним в карточке: команде больше не нужно (в LLM уходит 500 символов). */
+// Больше команде не нужно: в LLM уходит 500 символов
 const MAX_STORED_LEN = 1000;
-/** Сколько показываем в карточке. */
 const MAX_SHOWN_LEN = 300;
-/** Похоже на событие — коротко: полный текст ещё будет в карточке события и в описании (ревью R1 #8). */
+// Коротко: полный текст ещё будет в карточке события и в описании
 const MAX_SHOWN_EVENT_LEN = 120;
 
-/** Откуда переслано (US-65): имя автора или чата, дата исходного сообщения (секунды Unix; 0 — скрыта). */
+// date — секунды Unix
 export interface ForwardOrigin {
   from?: string;
   date?: number;
@@ -34,7 +31,6 @@ export interface ForwardCardPayload extends ForwardOrigin {
   text: string;
 }
 
-/** forward_origin Telegram → имя и дата: user, hidden_user, chat, channel. */
 export function forwardOrigin(origin: unknown): ForwardOrigin {
   if (!origin || typeof origin !== "object") return {};
   const o = origin as {
@@ -66,8 +62,8 @@ export async function proposeForwarded(
     payload: { chatId, text: stored, ...origin } satisfies ForwardCardPayload,
     now: ctx.clock.now(),
   });
-  // Похоже на событие (в тексте есть дата) — главный сценарий R1: «Создать событие» первым, без вопроса безопасности
-  // в заголовке (ревью R1 #8). Без нажатия ничего не выполняется при любом порядке кнопок.
+  // Без нажатия ничего не выполняется при любом порядке кнопок — поэтому, если в тексте есть дата,
+  // «Создать событие» первым и без вопроса безопасности в заголовке
   const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
   const looksEvent = !!foreignDateSpans(stored, nowLocal, user.tz).point;
   const l = user.locale;
@@ -98,10 +94,7 @@ export async function proposeForwarded(
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
-/**
- * Нажатие на карточке: текст команды для выполнения или null («Не выполнять» или «Создать событие» — карточка
- * события показана здесь же). Карточка уже «забрана».
- */
+// null — выполнять нечего: «Не выполнять» или «Создать событие» (карточка события показана здесь же)
 export async function confirmForwarded(ctx: AppContext, user: User, action: PendingAction<ForwardCardPayload>, choice: string): Promise<string | null> {
   const { chatId, text } = action.payload;
   const run = choice === "run";
@@ -117,7 +110,6 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
     );
   }
   if (run) await recordFeature(ctx.db, user.id, "forwarded_confirm", ctx.clock.now());
-  // Событие из чужого текста (US-65): команда не выполняется, только карточка «Создать событие?»
   if (event) await withTyping(ctx, chatId, () => eventFromForwarded(ctx, user, chatId, action.conversationId, action.payload));
   return run ? text : null;
 }

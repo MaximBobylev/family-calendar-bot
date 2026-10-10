@@ -1,6 +1,4 @@
-// US-03: /disconnect — подтверждение карточкой, отзыв доступа в Google, удаление всех данных пользователя.
-// После этого человек — как новый: /start предложит подключить календарь.
-// Отзыв не удался — данные всё равно удаляем и честно говорим, что доступ нужно убрать вручную.
+// Отзыв доступа в Google не удался — данные всё равно удаляем и честно говорим, что доступ нужно убрать вручную.
 
 import { googleCredentials, linkedElsewhere } from "../db/accounts";
 import { attachMessage, createPendingAction, ensureConversation, type PendingAction } from "../db/conversations";
@@ -32,7 +30,6 @@ export async function proposeDisconnect(ctx: AppContext, user: User, chatId: num
     payload: { chatId } satisfies DisconnectPayload,
     now: ctx.clock.now(),
   });
-  // Владелец дома: подтверждение называет, что дом будет распущен (ревью R1 #15)
   const membership = await membershipOf(ctx.db, user.id);
   const others = membership?.role === "owner" ? (await membersOf(ctx.db, membership.household.id)).filter((m) => m.userId !== user.id) : [];
   const dissolveNote =
@@ -50,7 +47,6 @@ export async function proposeDisconnect(ctx: AppContext, user: User, chatId: num
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
-/** Нажатие на карточке. Карточка уже «забрана» атомарно. */
 export async function confirmDisconnect(
   ctx: AppContext,
   user: User,
@@ -73,16 +69,14 @@ export async function confirmDisconnect(
     if (await linkedElsewhere(ctx.db, creds.emailHash, user.id)) result = "disconnectRevokeShared";
     else result = (await revokeStoredToken(ctx.config, creds)) ? "disconnectDone" : "disconnectRevokeFailed";
   }
-  // Владелец уходит — дом распускается: общие календари шли через его Google (US-90, [решение 2026-10-06])
+  // Решение владельца: общие календари дома шли через Google владельца — без него дом распускается
   const membership = await membershipOf(ctx.db, user.id);
   if (membership?.role === "owner") await dissolveWithNotice(ctx, membership.household, user.id, user.locale);
   else if (membership) {
-    // Участник уходит вместе с данными: поручения на нём — снова у авторов (QA-07), владельцу — «больше не в доме» (QA-14)
     await releaseMemberAssignments(ctx, membership.household.id, user.id);
     await notifyOwner(ctx, membership.household, "homeMemberLeft", membership.displayName);
   }
   await deleteUserData(ctx.db, user.id, telegramId);
-  // Календари, которых больше нет ни у кого, — без подписки и снимков событий
   await dropOrphanSyncs(ctx.db);
   await reply(result);
 }

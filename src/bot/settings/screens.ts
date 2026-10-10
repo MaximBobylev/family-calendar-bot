@@ -1,5 +1,4 @@
-// /settings: экраны меню — текст и кнопки «st:<раздел>:<значение>», пресеты значений (белые списки).
-// Без записи в D1: только отображение текущих настроек.
+// Пресеты — белые списки значений, по ним проверяются нажатия (callbacks.ts). Без записи в D1.
 
 import type { CalendarInfo } from "../../calendar/model";
 import { parseLocal, utcToLocal } from "../../dates/calendar";
@@ -16,7 +15,7 @@ import { TG_REMINDER_PRESETS } from "../../sync/reminders";
 export const DURATIONS = [15, 30, 45, 60, 90, 120];
 export const DIGEST_TIMES = ["06:00", "06:30", "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", "10:00"];
 
-/** Пресеты напоминаний: ключ кнопки → минуты (null — как в Google). */
+// null — как в Google.
 export const REMINDER_PRESETS: Record<string, number[] | null> = {
   g: null,
   n: [],
@@ -32,7 +31,6 @@ export const ALL_DAY_PRESETS: Record<string, number[]> = { n: [], e18: [360], e9
 
 export const nowIn = (ctx: AppContext, tz: string) => hhmm(utcToLocal(ctx.clock.now(), tz).minutes);
 
-/** Пояс в меню: домашний или поездка поверх него (US-07). */
 function tzLine(ctx: AppContext, user: User): string {
   const l = user.locale;
   const trip = user.trip;
@@ -40,8 +38,6 @@ function tzLine(ctx: AppContext, user: User): string {
   const until = trip.until ? t("tzUntilPart", l, { day: dateLabel(parseLocal(`${trip.until}T00:00`).day, utcToLocal(ctx.clock.now(), trip.tz).day, l) }) : "";
   return t("settingsTzTrip", l, { tz: trip.tz, time: nowIn(ctx, trip.tz), until, home: user.home_tz });
 }
-
-// --- Экраны ----------------------------------------------------------------------
 
 export interface Screen {
   text: string;
@@ -88,7 +84,6 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
   };
 }
 
-/** Главный экран участника без своего Google. */
 function memberScreen(ctx: AppContext, user: User): Screen {
   const l = user.locale;
   const s = user.settings;
@@ -173,7 +168,6 @@ export function digestScreen(user: User): Screen {
   const l = user.locale;
   const cur = user.settings.digestOff ? undefined : (user.settings.digestTime ?? DEFAULT_DIGEST_TIME);
   const items = DIGEST_TIMES.map((tm) => btn(mark(tm === cur, tm), `digset:${tm.replace(":", "")}`));
-  // «Завтра» и «Неделя» (US-70, R1) — на том же экране
   const week = user.settings.weekDigest;
   return {
     text: `${t("settingsChooseDigest", l, { tz: user.tz })}\n\n${t("settingsDigestMore", l)}`,
@@ -191,7 +185,6 @@ export function digestScreen(user: User): Screen {
   };
 }
 
-/** «Уведомления»: об изменениях в календарях (US-72) и напоминания в Telegram за N минут (US-71). */
 export function notifyScreen(user: User): Screen {
   const l = user.locale;
   const s = user.settings;

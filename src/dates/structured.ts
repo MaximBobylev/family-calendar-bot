@@ -1,6 +1,5 @@
-// Структура даты от LLM («LLM структурирует, резолвит наш код», ревью парсера дат, шаг 4): строгая проверка и разрешение
-// теми же правилами, что и грамматика (resolvePointOrRange, date-rules.md). Модель только «читает» фразу — даты считает код
-// (ADR-0005 п.3). Любое неверное поле — структура отбрасывается целиком: лучше переспросить, чем молча ошибиться.
+// Структура даты от LLM: модель только «читает» фразу, даты считает код теми же правилами, что грамматика (ADR-0005 п.3).
+// Любое неверное поле — структура отбрасывается целиком: лучше переспросить, чем молча ошибиться.
 
 import { addMonths, daysInMonth, makeDay, type Moment, parseLocal, parts, weekday } from "./calendar";
 import { type Ast, type DateAst, type Period, resolvePointOrRange, type TimeAst, type WeekdayMod } from "./point";
@@ -45,7 +44,6 @@ export interface StructPeriod {
   segment?: "begin" | "middle" | "end";
 }
 
-/** Одна трактовка фразы. */
 export interface DateStructureOne {
   error?: (typeof STRUCT_ERRORS)[number];
   day?: StructDay;
@@ -60,12 +58,9 @@ export interface DateStructureOne {
   timezone?: string;
 }
 
-/** Структура от модели: трактовка + другие трактовки, если фраза двусмысленна («в среду или в четверг»). */
 export interface DateStructure extends DateStructureOne {
   alternatives?: DateStructureOne[];
 }
-
-// --- Строгая проверка ------------------------------------------------------
 
 const MAX_ALTERNATIVES = 3;
 
@@ -215,10 +210,7 @@ function one(o: Obj, top: boolean): DateStructureOne {
 
 const isEmpty = (s: DateStructureOne) => Object.keys(s).length === 0;
 
-/**
- * Ответ модели → структура. undefined — нет структуры или она испорчена (любое неверное поле, неизвестный тип):
- * бесплатные модели пропускают и путают поля — тогда второго мнения просто нет.
- */
+/** Бесплатные модели пропускают и путают поля — испорченная структура даёт undefined: второго мнения просто нет. */
 export function parseDateStructure(raw: unknown): DateStructure | undefined {
   let v = raw;
   // Часть моделей кладёт объект строкой JSON
@@ -245,8 +237,6 @@ export function parseDateStructure(raw: unknown): DateStructure | undefined {
   }
 }
 
-// --- Разрешение ------------------------------------------------------------
-
 class Invalid extends Error {
   constructor(readonly reason: ParseError) {
     super(reason);
@@ -265,7 +255,7 @@ function timeAst(t: StructTime): TimeAst {
 const absAst = (a: StructAbs) => ({ d: a.day, ...(a.month ? { m: a.month } : {}), ...(a.year ? { y: a.year } : {}) });
 const MOD: Record<(typeof STRUCT_WHICH)[number], WeekdayMod> = { none: "none", this: "this", next: "next", next_week: "nextWeek", plus_week: "plusWeek" };
 
-/** n-й день недели месяца (n = -1 — последний); null — такого нет (пятый понедельник). */
+/** n = -1 — последний; null — такого нет (пятый понедельник). */
 function nthWeekdayOf(year: number, month: number, wd: Weekday, n: number): number | null {
   const target = STRUCT_WEEKDAYS.indexOf(wd);
   if (n === -1) {
@@ -294,7 +284,7 @@ const concrete = (d: number): DateAst => {
   return { k: "abs", abs: { d: p.date, m: p.month, y: p.year } };
 };
 
-/** Дни-кандидаты простого дня — правилами грамматики (чтение без времени: «в пятницу» в пятницу — сегодня и +7). */
+/** Чтение без времени, как в грамматике: «в пятницу» в пятницу — сегодня и +7. */
 function baseDays(date: DateAst, now: Moment, tz: string): number[] {
   const r = resolvePointOrRange({ date }, "range", now, tz);
   if ("error" in r) throw new Invalid(r.error);
@@ -302,7 +292,6 @@ function baseDays(date: DateAst, now: Moment, tz: string): number[] {
   return vs.flatMap((v) => ("range" in v ? [parseLocal(`${v.range.from.slice(0, 10)}T00:00`).day] : []));
 }
 
-/** День структуры → варианты DateAst (с n-м днём недели и сдвигом — уже конкретными датами). */
 function dateAsts(s: DateStructureOne, now: Moment, tz: string): DateAst[] {
   const d = s.day;
   if (!d) return [];
@@ -335,7 +324,6 @@ function dateAsts(s: DateStructureOne, now: Moment, tz: string): DateAst[] {
   return (days ?? baseDays(simple!, now, tz)).map((x) => concrete(x + offset));
 }
 
-/** Одна трактовка → AST грамматики (несколько — если день дал несколько дат со сдвигом). */
 function asts(s: DateStructureOne, kind: "point" | "range", now: Moment, tz: string): Ast[] {
   const ast: Ast = {};
   if (s.time) ast.time = timeAst(s.time);
@@ -379,7 +367,6 @@ function asts(s: DateStructureOne, kind: "point" | "range", now: Moment, tz: str
   if (dates.length === 0) return [ast];
   return dates.map((date) => {
     const a: Ast = { ...ast, date };
-    // День недели + «на следующей неделе» — как в грамматике
     if (a.week && date.k === "wd") {
       if (a.week === "next") a.date = { ...date, mod: "nextWeek" };
       delete a.week;
@@ -391,7 +378,6 @@ function asts(s: DateStructureOne, kind: "point" | "range", now: Moment, tz: str
 
 const key = (v: ParseValue) => JSON.stringify(v);
 
-/** Структура → результат по правилам date-rules.md; несколько трактовок — варианты по порядку, без повторов. */
 export function resolveDateStructure(s: DateStructure, kind: "point" | "range", now: Moment, tz: string): ParseResult {
   const results: ParseResult[] = [];
   for (const variant of [s, ...(s.alternatives ?? [])]) {
@@ -419,10 +405,9 @@ export function resolveDateStructure(s: DateStructure, kind: "point" | "range", 
   return values.length === 1 ? values[0]! : { ambiguous: values };
 }
 
-/** Есть ли в структуре хоть одна трактовка с днём или временем (не ошибка). */
 export const structureHasValue = (s: DateStructure) => [s, ...(s.alternatives ?? [])].some((v) => !v.error);
 
-/** Удобство для тестов и замеров: разбор + разрешение. */
+/** Для тестов и замеров. */
 export function resolveRawStructure(raw: unknown, kind: "point" | "range", now: string, tz: string): ParseResult | undefined {
   const s = parseDateStructure(raw);
   return s ? resolveDateStructure(s, kind, parseLocal(now), tz) : undefined;

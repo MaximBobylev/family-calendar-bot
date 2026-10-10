@@ -1,4 +1,4 @@
-// Тексты: голосовые (распознавание, переслушивание) и пересланные сообщения (US-10).
+// Голосовые (распознавание, переслушивание) и пересланные сообщения.
 
 import type { Messages } from "./types";
 
@@ -23,7 +23,6 @@ export const inputMessages = {
     en: "I can't recognize voice right now — please type it.",
   },
   voiceDownloadFailed: { ru: "Не смог получить голосовое, пришлите ещё раз.", en: "I couldn't get the voice message, please send it again." },
-  // --- Пересланные сообщения (US-10) ---
   forwardedConfirm: {
     ru: "Это пересланное сообщение: «{text}». Выполнить как команду?",
     en: "This is a forwarded message: “{text}”. Run it as a command?",

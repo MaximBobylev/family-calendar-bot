@@ -4,7 +4,7 @@ import { formatMoment, parseLocal } from "../src/dates/calendar";
 import { type CreateOption, llmDateCheck, pickStart, resolveCalendar, resolveDraft, startCheck, withConversationDay } from "../src/bot/create-logic";
 import type { DateStructure } from "../src/dates/structured";
 
-// «Сейчас» — ср 7 октября 2026, 10:00 (как в приёмочных сценариях).
+// Среда, как в приёмочных сценариях.
 const now = parseLocal("2026-10-07T10:00");
 const tz = "Europe/Moscow";
 const cal = (id: string, title: string, extra: Partial<CalendarInfo> = {}): CalendarInfo => ({

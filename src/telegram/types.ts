@@ -15,7 +15,6 @@ export interface TgChat {
   title?: string;
 }
 
-/** Бота добавили в чат или убрали из него (my_chat_member) — приветствие в группе (ревью R1 #13). */
 export interface TgChatMemberUpdated {
   chat: TgChat;
   from: TgUser;
@@ -32,12 +31,10 @@ export interface TgMessage {
   text?: string;
   voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   audio?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
-  /** from — чтобы в группе отличить ответ боту (US-94). */
   reply_to_message?: { message_id: number; from?: TgUser };
   forward_origin?: unknown;
-  /** Фото — размеры по возрастанию (US-66). */
+  // Размеры по возрастанию
   photo?: { file_id: string; file_size?: number; width: number; height: number }[];
-  /** Файл: картинка без сжатия (US-66), приглашение .ics (US-67). */
   document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   caption?: string;
 }
@@ -46,12 +43,11 @@ export interface TgCallbackQuery {
   id: string;
   from: TgUser;
   message?: TgMessage;
-  /** Нажатие под inline-сообщением (US-95): message нет, чат неизвестен. */
+  // Нажатие под inline-сообщением: message нет, чат неизвестен
   inline_message_id?: string;
   data?: string;
 }
 
-/** Inline-запрос «@бот завтра 19:00 футбол» (US-95). */
 export interface TgInlineQuery {
   id: string;
   from: TgUser;

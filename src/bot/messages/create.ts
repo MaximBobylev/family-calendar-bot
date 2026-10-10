@@ -1,4 +1,4 @@
-// Тексты: создание события (US-30/31/32) — карточка, серии, вопросы «когда?», «во сколько?», «как назвать?».
+// Создание события: карточка, серии, вопросы «когда?», «во сколько?», «как назвать?».
 
 import type { Messages } from "./types";
 
@@ -35,7 +35,7 @@ export const createMessages = {
   renamed: { ru: "Готово, назвал «{title}».", en: "Done, renamed to “{title}”." },
   askWhen: { ru: "Когда поставить? Например: «завтра в 15».", en: "When? For example: “tomorrow at 3pm”." },
   askTime: { ru: "Во сколько?", en: "What time?" },
-  // tech-debt #26: время в чужом поясе — в карточке оба времени; незнакомый пояс — спросить, а не отбросить
+  // Время в чужом поясе — в карточке оба времени; незнакомый пояс — спросить, а не отбросить (tech-debt #26).
   calendarZoneNote: { ru: "🗓 В поясе календаря ({tz}): {time}", en: "🗓 In the calendar's time zone ({tz}): {time}" },
   zoneNote: {
     ru: "🌍 {time} {zone} = {myTime} по вашему времени ({tz})",

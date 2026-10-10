@@ -1,5 +1,4 @@
-// US-50: удаление события. Всегда подтверждение (US-05). Свою встречу удаляем (участники получат отмену),
-// чужую — не удаляем, а отклоняем приглашение. Повторяющиеся — «только эту / всю серию».
+// Свою встречу удаляем (участники получат отмену), чужую — не удаляем, а отклоняем приглашение.
 
 import { EventConflict, EventGone, type CalendarEvent, type CalendarProvider, type EventRef } from "../calendar/model";
 import { utcToLocal } from "../dates/calendar";
@@ -26,7 +25,6 @@ interface DeleteCardPayload {
   title: string;
   when: string;
   notify: boolean;
-  /** Не организатор — отклоняем приглашение, а не удаляем. */
   decline: boolean;
 }
 
@@ -96,7 +94,6 @@ export async function proposeDelete(
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
-/** Подтверждение удаления / отклонения. Карточка уже «забрана» атомарно. */
 export async function confirmDelete(
   ctx: AppContext,
   provider: CalendarProvider,
@@ -124,7 +121,7 @@ export async function confirmDelete(
       // etag — только для конкретного экземпляра; у серии он свой
       await provider.deleteEvent(ref, { notify: p.notify, ...(!whole && p.etag ? { etag: p.etag } : {}) });
       await edit(`${t(whole ? "deletedSeries" : "deleted", locale)}\n\n${details}`);
-      // Поручения, связанные с удалённым событием, отменяются (US-91); серия целиком — пока нет (экземпляры)
+      // Для серии целиком поручения пока не отменяем: они привязаны к экземплярам
       if (!whole) await cancelAssignmentsForEvent(ctx, p.ref, user.id);
     }
   } catch (e) {
@@ -139,9 +136,9 @@ export async function confirmDelete(
     throw e;
   }
   await recordFeature(ctx.db, user.id, "delete", ctx.clock.now());
-  // Удаление и отклонение не отменяются (US-61) — «отмени последнее» не должно откатить предыдущее действие
+  // «Отмени последнее» не должно откатить действие до удаления (US-61)
   await markNotUndoable(ctx, action.conversationId, user, choice === "decline" ? "decline" : "delete");
-  // Удалённое событие больше не «её» для следующих команд (US-60)
+  // Иначе «перенеси её» в следующей команде попадёт в удалённое (US-60)
   const state = await getDialogState(ctx.db, action.conversationId, user.id);
   if (state.lastEvent?.ref.providerEventId === p.ref.providerEventId) {
     await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: undefined }, ctx.clock.now());

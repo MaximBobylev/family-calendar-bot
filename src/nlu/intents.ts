@@ -1,4 +1,4 @@
-// Реестр интентов (docs/intents.md): схемы tools для LLM и разбор ответа.
+// Схемы tools для LLM и разбор ответа (docs/intents.md).
 // LLM не вычисляет даты — только копирует фрагменты, как сказано (ADR-0005 п.3).
 
 import { type DateStructure, parseDateStructure } from "../dates/structured";
@@ -14,7 +14,7 @@ export interface CreateEventIntent {
   allDay?: boolean;
   calendar?: string;
   location?: string;
-  /** Структура даты (ревью дат, шаг 4): даты считает наш код; нет или испорчена — undefined (второе мнение — `start`). */
+  /** Даты считает наш код; нет или испорчена — undefined (второе мнение — `start`). */
   when?: DateStructure;
 }
 
@@ -28,14 +28,13 @@ export interface ModifyEventIntent {
   scope?: "this" | "all";
 }
 
-/** «Какая следующая встреча?», «Когда встреча с Петей?» (US-21). */
 export interface FindEventIntent {
   name: "find_event";
   event?: string;
   next?: boolean;
 }
 
-/** Поручение другому участнику дома или «кому-то из нас» (US-91). Кому и что — ещё и из текста (bot/assign/logic.ts). */
+/** Кому и что разбирается ещё и из текста (bot/assign/logic.ts). */
 export interface AssignTaskIntent {
   name: "assign_task";
   /** Кому, как сказано: «мужу», «Ане». Нет — см. someone. */
@@ -44,14 +43,13 @@ export interface AssignTaskIntent {
   someone?: boolean;
   /** Что сделать, без дат и исполнителя: «забрать Машу из школы». */
   task?: string;
-  /** Дата/время как сказано. */
   when?: string;
 }
 
 export type Intent =
   | { name: "list_events"; range: string; calendar?: string }
   | AssignTaskIntent
-  /** «Мои дела», «что на мне завтра» (US-91) — только по тексту, не tool. */
+  /** Только по тексту, не tool. */
   | { name: "list_assignments"; byMe?: boolean }
   | FindEventIntent
   | CreateEventIntent
@@ -59,11 +57,10 @@ export type Intent =
   | { name: "delete_event"; event?: string }
   | { name: "unsupported" }
   | SetTimezoneIntent
-  /** Несколько команд (US-12). parts — разбор каждой: «…, отводит папа» как create + assign — на деле одно событие (QA R1 NLU, A). */
+  /** parts — разбор каждой команды: «…, отводит папа» как create + assign — на деле одно событие. */
   | { name: "multiple"; parts?: Intent[] };
 
-/** Пояс и поездки (US-07): фразы, которые не узнал детерминированный разбор (nlu/timezone-command.ts) — город не из
- * словаря, непривычная формулировка. tz от модели только проверяется (Intl), город из словаря важнее. */
+/** Фразы, которые не узнал nlu/timezone-command.ts. tz от модели только проверяется (Intl), город из словаря важнее. */
 export interface SetTimezoneIntent {
   name: "set_timezone";
   action: "trip" | "move" | "return" | "where";
@@ -219,9 +216,8 @@ export const TOOLS: ToolDefinition[] = [
   },
 ];
 
-// Замер 2026-10-05 (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название,
-// календарь до названия, два запроса в одном сообщении. Правила структуры даты `when` — до примеров: в конце промпта
-// они вытесняли правило календаря (замер 2026-10-08, раунд 2 llm-date-resolution-eval.md). Прогон: scripts/eval-intents.ts на testdata/nlu/intents.yaml.
+// Замер (docs/research/llm-intents-eval.md, вариант E): контрастные примеры — короткое название, календарь до названия,
+// два запроса в одном сообщении. Правила `when` — до примеров: в конце промпта они вытесняли правило календаря (llm-date-resolution-eval.md, раунд 2).
 const PROMPT_HEAD = `You route a user's message (Russian or English, often a voice transcript) to a calendar tool.
 Copy date/time words VERBATIM from the message — never drop the day, never compute or translate dates.
 Omit optional fields the user did not say. title is whatever names the event, even one word («стоматолог»); a bare «встреча» is not a title.
@@ -229,7 +225,7 @@ calendar: only if the message refers to one of the user's calendars — return t
 Two separate requests in one message → one tool call per request. Not about the user's calendar → "unsupported".
 `;
 
-/** Раздел о структуре даты `when` — ≈ 4,5 тыс. токенов из ≈ 7 (tech-debt #27а). */
+/** ≈ 4,5 тыс. токенов из ≈ 7 — поэтому есть вариант промпта без него. */
 const PROMPT_WHEN = `In create_event also fill "when" — the date/time words of "start" as a structure, e.g. "Созвон с Петей завтра в 15:30 на полчаса" → "when":{"day":{"type":"relative_days","days":1},"time":{"hour":15,"minute":30}}.
 
 DATE STRUCTURE (create_event.when) — kind=point:
@@ -270,10 +266,7 @@ const PROMPT_EXAMPLES = `Examples:
 
 export const SYSTEM_PROMPT = PROMPT_HEAD + PROMPT_WHEN + PROMPT_EXAMPLES;
 
-/**
- * Без структуры `when` — для звена с `dateStructure: false` (запасной Workers AI: промпт втрое короче по neurons,
- * tech-debt #27а). Дату тогда сверяем с `start`, как до ревью дат.
- */
+/** Для звена с `dateStructure: false` (запасной Workers AI): промпт втрое короче по neurons; дату тогда сверяем только с `start`. */
 export const SYSTEM_PROMPT_NO_WHEN = PROMPT_HEAD + PROMPT_EXAMPLES;
 export const TOOLS_NO_WHEN: ToolDefinition[] = TOOLS.map((t) => {
   if (t.function.name !== "create_event") return t;
@@ -286,9 +279,7 @@ export interface ParsedIntent {
   intent: Intent;
   tokensIn: number;
   tokensOut: number;
-  /** Сырые вызовы от модели — для замеров. */
   toolCalls?: ToolCall[];
-  /** Заголовки лимитов провайдера — для замеров. */
   rateHeaders?: Record<string, string>;
 }
 
@@ -322,16 +313,12 @@ export interface SeenHeaders {
   status: number;
 }
 
-/** Провайдер не ответил: статус/текст ошибки — для журнала. */
 export interface LlmAttemptError {
   provider: string;
   error: string;
 }
 
-/**
- * Цепочка провайдеров (основной → запасные): ошибка (429, 5xx, таймаут, сеть) — пробуем следующий.
- * Пустой ответ без tools — не ошибка провайдера, дальше не идём.
- */
+/** Пустой ответ без tools — не ошибка провайдера: к запасным не идём. */
 export async function parseIntentChain(
   chain: LlmConfig[],
   text: string,
@@ -360,7 +347,6 @@ export class LlmChainError extends Error {
   }
 }
 
-/** Структура даты из аргументов: строгая проверка, испорченная — как не данная. */
 function whenOf(raw: unknown): { when?: DateStructure } {
   const when = parseDateStructure(raw);
   return when ? { when } : {};
@@ -368,7 +354,6 @@ function whenOf(raw: unknown): { when?: DateStructure } {
 
 /** Вызовы tools → интент (отдельно — чтобы замеры могли переоценить сохранённые ответы без новых вызовов). */
 export function intentFromCalls(toolCalls: ToolCall[]): Intent {
-  // В MVP — одна команда на сообщение (US-12)
   if (toolCalls.length > 1) return { name: "multiple", parts: toolCalls.map((c) => intentFromCalls([c])) };
   const call = toolCalls[0];
   if (call?.name === "list_events" && typeof call.arguments.range === "string" && call.arguments.range.trim()) {

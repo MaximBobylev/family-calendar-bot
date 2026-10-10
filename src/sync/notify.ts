@@ -1,6 +1,5 @@
-// US-72: уведомления об изменениях в календаре во все чаты, где он виден, кроме чата-источника.
-// Outbox change_notices: строки пишутся в одном batch со снимками (повтор синка не шлёт дважды и не теряет), затем
-// чат «смывается»: наступившие уведомления — по одному или сводкой (пачка), в тихие часы — утренней задачей.
+// Outbox change_notices пишется в одном batch со снимками — повтор синка не шлёт дважды и не теряет; затем чат
+// «смывается»: по одному или сводкой, в тихие часы — утренней задачей.
 
 import type { AppContext } from "../bot/context";
 import { t } from "../bot/messages";
@@ -23,19 +22,14 @@ import {
 
 export const NOTIFY_FLUSH_JOB = "notify_flush";
 
-/** Изменение события для рассылки. */
 export interface Change {
   kind: ChangeKind;
   before: Snapshot | null;
   after: Snapshot | null;
-  /** Сделано ботом: из какого чата (туда не шлём) и кто. Нет — внешнее изменение (во все чаты). */
   origin?: { chatId: string; authorName?: string; authorUserId?: string };
 }
 
-/**
- * Получатели: чаты календаря с включёнными уведомлениями, календарь в них на запись, кроме чата-источника и личного чата
- * автора правки (сделал в семейном чате — себе эхо не нужно, ревью R1 #18).
- */
+// Автору правки и в личный чат эхо не нужно: сделал в семейном — сам знает.
 export function recipientsOf(chats: CalendarChat[], change: Pick<Change, "origin">): CalendarChat[] {
   const o = change.origin;
   return chats.filter((c) => c.writable && !c.settings.changeNotifyOff && c.chatId !== o?.chatId && !(o?.authorUserId && c.userId === o.authorUserId));
@@ -57,10 +51,6 @@ function noticeFor(change: Change, chat: CalendarChat): Notice | null {
   };
 }
 
-/**
- * Строки outbox для изменений календаря (в batch со снимками) и чаты, которые смыть после записи.
- * Окно 30 дней — по времени события; тихие часы — по поясу получателя: тогда — задача на 08:00.
- */
 export function noticeStatements(
   db: D1Database,
   pcid: string,
@@ -100,10 +90,7 @@ function flushJob(db: D1Database, chatId: string, at: number): D1PreparedStateme
     .bind(crypto.randomUUID(), NOTIFY_FLUSH_JOB, at, JSON.stringify({ chatId }), `${NOTIFY_FLUSH_JOB}:${chatId}:${at}`);
 }
 
-/**
- * Отправить наступившие уведомления чата: по одному или сводкой (пачка, US-72). Не отправилось — вернуть в очередь
- * и повторить через минуту задачей (ошибку не пробрасываем: синк, который их записал, уже завершён).
- */
+// Ошибку отправки не пробрасываем: синк, записавший уведомления, уже завершён — повтор делает задача.
 export async function flushChat(ctx: AppContext, chatId: string): Promise<void> {
   const now = ctx.clock.now();
   const claimed = await claimDueNotices(ctx.db, chatId, now);
@@ -151,17 +138,13 @@ export async function flushChat(ctx: AppContext, chatId: string): Promise<void> 
   }
 }
 
-/** Задача «смыть чат»: утро после тихих часов или повтор после сбоя отправки. */
 export async function runNotifyFlushJob(ctx: AppContext, job: DueJob): Promise<void> {
   const { chatId } = JSON.parse(job.payload_json) as { chatId: string };
   await flushChat(ctx, chatId);
 }
 
-/**
- * Записать уведомления об изменениях календаря и сразу отправить те, что не попали в тихие часы. Уведомления — в batch
- * раньше extra (снимков): их guard сверяется со снимком до записи (tech-debt #21). first — чтение, которому тоже нужен
- * снимок до batch; возвращается его результат.
- */
+// Уведомления — в batch раньше extra (снимков): их guard сверяется со снимком до записи (tech-debt #21). first —
+// чтение, которому тоже нужен снимок до batch; возвращается его результат.
 export async function notifyChanges(
   ctx: AppContext,
   pcid: string,

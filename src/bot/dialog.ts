@@ -1,6 +1,4 @@
-// Диалоговый слой до LLM: /connect, /settings, ответ на вопрос о названии (US-30), ответы на «Во сколько?» и ввод
-// настроек (dialog_state.awaiting), отмена открытых карточек (US-05), «отмени последнее» (US-61), поводы
-// переслушать голосовое. Остальное — шаг NLU (nlu-step.ts) и routeIntent.
+// Всё, что решается до LLM: ответы на вопросы бота, отмена карточек, «отмени последнее», поводы переслушать голосовое.
 
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
@@ -30,7 +28,6 @@ import { answerTripUntil, handleTimezoneCommand } from "./timezone";
 import { escalateVoice } from "./voice-rehear";
 import { withCalendar } from "./with-calendar";
 
-/** Новая команда аннулирует открытые карточки (US-05): сообщения карточек — в «Отменено». */
 export async function cancelCards(ctx: AppContext, user: User, conversationId: string): Promise<PendingAction[]> {
   const cancelled = await cancelOpenCards(ctx.db, conversationId, user.id, [
     CREATE_CARD,
@@ -51,7 +48,6 @@ export async function cancelCards(ctx: AppContext, user: User, conversationId: s
   return cancelled;
 }
 
-/** Команда текстом (или распознанное голосовое, или пересланное после «Выполнить»): от /settings до routeIntent. */
 export async function runCommand(
   ctx: AppContext,
   user: User,
@@ -70,7 +66,6 @@ export async function runCommand(
     return;
   }
 
-  // Ответ (reply) на вопрос о названии — переименовать созданное событие (US-30)
   if (opts.replyTo) {
     const q = await findOpenByMessage<TitleQuestionPayload>(ctx.db, conversationId, user.id, TITLE_QUESTION, opts.replyTo, ctx.clock.now());
     if (q && (await claimPendingAction(ctx.db, q.id, user.id, ctx.clock.now())).ok) {
@@ -97,7 +92,6 @@ export async function runCommand(
     }
   }
 
-  // Ответ на «Во сколько?» / «Когда поставить?» дополняет черновик (US-12)
   const state = await getDialogState(ctx.db, conversationId, user.id);
   if (state.awaiting) {
     await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
@@ -105,7 +99,7 @@ export async function runCommand(
     if (aw.expiresAt > ctx.clock.now() && (aw.kind === "settings_tz" || aw.kind === "settings_digest_time" || aw.kind === "settings_alias")) {
       if (await handleSettingsInput(ctx, user, chatId, aw, text)) return;
     }
-    // «До какого числа поездка?» (US-07): дата — запомнить; не дата — дальше как новая команда
+    // Не дата — дальше как новая команда
     if (aw.kind === "trip_until" && aw.expiresAt > ctx.clock.now() && (await answerTripUntil(ctx, user, chatId, text))) return;
     if (state.awaiting.kind === "create_time" && state.awaiting.expiresAt > ctx.clock.now()) {
       const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.tz)), user.tz);
@@ -119,7 +113,7 @@ export async function runCommand(
 
   const cancelled = await cancelCards(ctx, user, conversationId);
 
-  // «Отмени последнее» — отмена действия (US-61); голое «отмена» при открытой карточке — отмена карточки
+  // Голое «отмена» при открытой карточке — отмена карточки, а не последнего действия
   if (UNDO_PHRASE.test(text)) {
     const hadCards = cancelled.some((c) => c.kind !== TITLE_QUESTION);
     if (!(BARE_CANCEL.test(text) && hadCards)) {
@@ -128,23 +122,19 @@ export async function runCommand(
     return;
   }
 
-  // «Я в Тбилиси», «Я вернулся», «Какой у меня пояс?» (US-07) — без LLM
   if (await handleTimezoneCommand(ctx, user, chatId, conversationId, text)) return;
 
-  // Голосовое, которое текстовый путь, похоже, не понял, — переслушать мультимодальной моделью (multimodal-voice, D)
   const nowMs = ctx.clock.now();
   const prevVoice = state.lastVoice;
   if (voice) {
     const current = { ...voice, transcript: text, at: nowMs };
     await mergeDialogState(ctx.db, conversationId, user.id, { lastVoice: current }, nowMs);
-    // Повтор той же фразы — Whisper, скорее всего, снова ошибся. То же голосовое (повтор апдейта после сбоя,
-    // tech-debt #5) — не повтор фразы
+    // Повтор той же фразы — Whisper, скорее всего, снова ошибся. То же голосовое (повтор апдейта после сбоя) — не повтор
     const repeated = prevVoice && prevVoice.fileId !== voice.fileId && nowMs - prevVoice.at < REPEAT_WINDOW_MS;
     if (repeated && similarTranscripts(prevVoice.transcript, text)) {
       if (await escalateVoice(ctx, user, chatId, conversationId, current)) return;
     }
   }
-  // «Не так» — переслушать предыдущее голосовое
   if (isNotRight(text) && prevVoice && nowMs - prevVoice.at < NOT_RIGHT_WINDOW_MS) {
     if (await escalateVoice(ctx, user, chatId, conversationId, prevVoice)) return;
   }
@@ -152,18 +142,14 @@ export async function runCommand(
   const intent = await parseCommandIntent(ctx, user, chatId, text);
   if (!intent) return;
 
-  // Голосовое, на которое текстовый путь сказал бы «не понимаю», — сначала переслушать
   if (voice && effectiveIntent(text, intent).name === "unsupported") {
     if (await escalateVoice(ctx, user, chatId, conversationId, { ...voice, transcript: text, at: nowMs })) return;
   }
   await routeIntent(ctx, user, chatId, conversationId, text, intent);
 }
 
-/** Ответ на «Во сколько?» / «Когда поставить?»: дополненный черновик или undefined, если это не время. */
 function completeDraft(draft: CreateDraft, text: string, now: string, tz: string): CreateDraft | undefined {
-  // «Весь день» в ответ на «Во сколько?» (US-31)
   if ((draft.startText || draft.recurrenceText) && looksAllDay(text)) return { ...draft, allDay: true };
-  // Серия без времени: «в 10» дополняет правило (US-32)
   if (draft.recurrenceText) {
     const recurrenceText = `${draft.recurrenceText} ${/^\d/.test(text) ? `в ${text}` : text}`;
     const probe = parseDateFragment({ text: recurrenceText, kind: "recurrence", now, tz });

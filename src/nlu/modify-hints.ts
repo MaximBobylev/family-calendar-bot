@@ -1,5 +1,4 @@
-// Детерминированные подсказки для изменения события — страховка от того, что маленькая LLM
-// не заполнит необязательные поля (ADR-0002, замер 2026-10-04).
+// Детерминированные подсказки для изменения события: маленькая LLM не заполняет необязательные поля (замер).
 
 export interface ModifyHints {
   reference?: "next" | "last" | "list";
@@ -25,7 +24,6 @@ export function modifyHints(text: string): ModifyHints {
   const h: ModifyHints = {};
   const t = text.trim();
 
-  // «переименуй завтрашнюю встречу в Ревью дизайна», «назови её Стендап»
   const rename =
     /(?:переименуй|переименовать|rename)\s+(?:.*?\s)?(?:в|на|to)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t) ??
     /(?:назови|назвать|call)\s+(?:её|ее|его|эту встречу|it)\s+[«"]?(.+?)[»"]?\s*$/i.exec(t);
@@ -57,7 +55,6 @@ export const DELETE_VERBS = word("(удали|удалить|удалите|от
 export const UNDO_PHRASE = /(отмени|отменить|undo)\s+(последн|действи|это$)|^(отмена|отмени|cancel|undo)[.!]?$/i;
 /** Одно слово «отмена» — при открытой карточке отменяет её, иначе отменяет последнее действие. */
 export const BARE_CANCEL = /^(отмена|отмени|cancel)[.!]?$/i;
-/** «удали все встречи на завтра» — массовое удаление (R1). */
 export const MASS_DELETE = word("(все|всё|all)\\s+(встречи|события|дела|events|meetings)");
 
 const QUERY_NOISE = word(
@@ -66,10 +63,7 @@ const QUERY_NOISE = word(
     "все|всю|серию|только|пожалуйста|move|reschedule|rename|postpone|please|next|it)",
 );
 
-/**
- * Описание события из самой фразы: без глагола, дат, указателей и нового названия.
- * «Перенеси созвон с Петей на 16» → «созвон с Петей». Пусто → null (событие указано только временем/контекстом).
- */
+/** Пусто → null: событие указано только временем или контекстом. */
 export function modifyQuery(text: string, dateFragments: string[], newTitle?: string): string | null {
   let rest = text;
   if (newTitle) rest = rest.replace(new RegExp(`\\s(в|на|to)\\s+[«"]?${escapeRe(newTitle)}[»"]?\\s*$`, "i"), " ");

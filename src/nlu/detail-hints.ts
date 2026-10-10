@@ -1,5 +1,4 @@
-// Детали события из фразы (US-41, US-42): место, описание, напоминания. Детерминированно: маленькая LLM
-// такие поля заполняет ненадёжно, а «за час», «за сутки» считает парсер длительностей, не модель (ADR-0005 п.3).
+// Детали события детерминированно: маленькая LLM заполняет такие поля ненадёжно, а «за час» считает парсер длительностей (ADR-0005 п.3).
 // rest — фраза без деталей: по ней ищут само событие и его день («до встречи в среду» → «встречи в среду»).
 
 import { type EventReminders, MAX_REMINDER_MIN, MAX_REMINDERS } from "../calendar/model";
@@ -18,7 +17,6 @@ export interface DetailHints {
   /** Новое описание; text "" — убрать; append — «добавь описание» к существующему. */
   description?: { text: string; append: boolean };
   reminders?: RemindersHint;
-  /** Фраза без деталей — для поиска события. */
   rest: string;
 }
 
@@ -29,7 +27,6 @@ const NOT_WITH = `(?<!(?:с|со|with)\\s)`;
 
 const DESC_WORD = `(?:описани${L}*|заметк${L}*|комментари${L}*|description|notes?)`;
 const LOC_WORD = `(?:мест[оа]|адрес|location|place)`;
-// «Напоминай про танцы за час» (QA R1 NLU, D) — тоже напоминание
 const REMINDER_WORD = `(?:напоминани${L}*|напомни(?:ть)?|напомина(?:й|йте|ть)|remind(?:ers?)?)`;
 const REMOVE_VERB = `(?:убери|убрать|удали|удалить|сотри|стереть|очисти|сними|снять|отключи|отключить|выключи|выключить|отмени|отменить|remove|clear|delete|disable)`;
 
@@ -43,7 +40,6 @@ const LOC_REMOVE = re(`(?<!${L})${REMOVE_VERB}\\s+${LOC_WORD}(?!${L})`);
 const LOC_COLON = re(`${NOT_WITH}(?<!${L})${LOC_WORD}(?!${L})([^:]*?)\\s*:\\s*(.+)$`);
 /** «поменяй место встречи с Машей на кафе Пушкин». */
 const LOC_CHANGE = re(`(?<!${L})(?:поменяй|измени|смени|замени|change)\\s+${LOC_WORD}(?!${L})\\s*(.*?)\\s+(?:на|to)\\s+(.+)$`);
-/** «добавь место кафе Пушкин». */
 const LOC_ADD = re(`(?<!${L})(?:добавь|добавить|укажи|указать|поставь|запиши|set|add)\\s+${LOC_WORD}\\s+(.+)$`);
 /** «встреча в среду будет в офисе на Лесной» — догадка: проверяем, что это не время («будет в 15»). */
 const LOC_WILL_BE = re(`(?<!${L})(?:будет|пройд[её]т|состоится|will be)\\s+((?:в|во|на|у|at|in)\\s+.+)$`);
@@ -61,13 +57,12 @@ const REST_NOISE = re(
     `будет|пройдёт|пройдет|состоится|напоминани${L}*|напомни|напомнить|напоминай|напоминайте|напоминать|set|add|change|remove|clear|and|before|for)$`,
 );
 
-/** Время ли это: «в 15», «в среду» — да; «в офисе», «кафе Пушкин» — нет. */
 function isDateFragment(text: string): boolean {
   const r = parseDateFragment({ text, kind: "point", now: "2026-01-01T00:00", tz: "UTC" });
   return !("error" in r) || r.error === "in_past";
 }
 
-/** Длительность «час», «сутки», «15 минут», «два дня» → минуты; месяцы — Infinity (больше 4 недель). */
+/** Месяцы → Infinity (заведомо больше 4 недель). */
 function readMinutes(words: string[]): { minutes: number; n: number } | null {
   for (let n = Math.min(4, words.length); n >= 1; n--) {
     const text = words
@@ -96,7 +91,6 @@ function parseReminders(text: string): { hint?: RemindersHint; cut: [number, num
     const d = readMinutes(words);
     if (!d) continue;
     minutes.push(d.minutes);
-    // Конец съеденного куска: «за» + n слов
     const consumed = words.slice(0, d.n).join(" ");
     const end = start + m[0].length + after.indexOf(consumed) + consumed.length;
     cut.push([start, end]);

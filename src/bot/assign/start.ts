@@ -1,6 +1,4 @@
-// US-91: поручение — карточка автору (что, кому, когда, напоминания, событие) и после «Поручить» — предложение
-// исполнителю (или всем взрослым для «кто-то должен») с кнопками «Беру / Не могу», задачи напоминаний и эскалации.
-// Связь с событием: подходящее событие в календаре в день срока — само; нет — «Поручить + в календарь».
+// Поручение: карточка автору, после «Поручить» — предложения и задачи напоминаний. Событие в день срока связывается само.
 
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
 import { titleScore } from "../../calendar/match";
@@ -32,7 +30,6 @@ export const ASSIGN_CARD = "assign";
 
 interface AssignDraft extends AssignView {
   event?: EventRef;
-  /** Нет подходящего события, срок со временем — можно создать событие в этом календаре. */
   newEvent?: { calendarId: string; calendarTitle: string };
 }
 
@@ -41,7 +38,6 @@ export interface AssignCardPayload {
   draft: AssignDraft;
 }
 
-/** Срок из фразы: момент (со временем) или день; «в прошлом» — отдельно. */
 function resolveDue(whenText: string | undefined, now: number, tz: string): { dueAt: number; hasTime: boolean } | "past" | null {
   if (!whenText) return null;
   const parsed = parseDateFragment({ text: whenText, kind: "point", now: formatMoment(utcToLocal(now, tz)), tz });
@@ -53,7 +49,7 @@ function resolveDue(whenText: string | undefined, now: number, tz: string): { du
   return day ? { dueAt: localToUtc(parseLocal(`${day}T00:00`), tz), hasTime: false } : null;
 }
 
-/** Провайдер календаря без сообщений об ошибках: поиск события для связи — необязательная часть карточки. */
+// Без сообщений об ошибках: связь с событием — необязательная часть карточки.
 async function quietProvider(ctx: AppContext, user: User): Promise<CalendarProvider | null> {
   const scope = ctx.calendarScope;
   if (scope && scope.calendarIds.length === 0) return null;
@@ -61,10 +57,6 @@ async function quietProvider(ctx: AppContext, user: User): Promise<CalendarProvi
   return new GoogleCalendarProvider(ctx.config, ctx.db, scope?.ownerUserId ?? user.id, ctx.clock, scope?.calendarIds, undefined, scope?.defaultCalendarId);
 }
 
-/**
- * Событие в день срока, к которому относится поручение: «отвезти Ваню на плавание» ~ «Плавание Вани»
- * (половина слов совпадает; со временем — не дальше 3 часов от срока).
- */
 async function findEventToLink(
   provider: CalendarProvider,
   d: { title: string; dueAt: number; hasTime: boolean },
@@ -90,16 +82,13 @@ async function findEventToLink(
   return cal ? { newEvent: { calendarId: cal.id, calendarTitle: cal.title } } : {};
 }
 
-/** Связанное событие: со временем — название и момент начала (подпись — при показе, QA-03/04/05); весь день — готовая подпись. */
+// Со временем — момент, а не подпись: подпись строится при показе, в поясе получателя (QA-03/04/05).
 const eventLink = (e: CalendarEvent, tz: string, today: number, locale: string): { eventLabel: string; eventStartAt: number | null } =>
   e.start
     ? { eventLabel: e.title, eventStartAt: localToUtc(e.start, tz) }
     : { eventLabel: `${e.title}, ${dateLabel(e.startDay, today, locale)}`, eventStartAt: null };
 
-/**
- * Поправка «это поручение» по тексту применима: LLM сама сказала assign_task, или в доме есть такой участник
- * («пусть Аня …») / дом есть («кто-то должен …»). Иначе «Пусть будет встреча в 15» — обычная команда.
- */
+// Иначе «Пусть будет встреча в 15» — обычная команда, а не поручение.
 export async function assignmentApplies(ctx: AppContext, userId: string, override: Intent, llm: Intent): Promise<boolean> {
   if (override.name !== "assign_task" || llm.name === "assign_task") return true;
   const home = await loadHome(ctx.db, userId);
@@ -107,16 +96,14 @@ export async function assignmentApplies(ctx: AppContext, userId: string, overrid
   return override.someone === true || (!!override.assignee && matchNamed(override.assignee, home.members).length > 0);
 }
 
-/** Выбор исполнителя, когда «{who}» не нашёлся (ревью R1 #3): кнопки участников; роль («муж») запоминается выбранному. */
 export const ASSIGN_WHO_CARD = "assign_who";
 
 export interface AssignWhoPayload {
   chatId: number;
   text: string;
   intent: AssignTaskIntent;
-  /** Кандидаты по порядку кнопок m0, m1, … */
+  // По порядку кнопок m0, m1, …
   members: string[];
-  /** Другое имя, которое запомнить выбранному («муж»). */
   alias?: string;
 }
 
@@ -157,7 +144,6 @@ async function askWho(
   await attachMessage(ctx.db, id, sent.message_id);
 }
 
-/** Нажали участника на «Кому поручить?»: запомнить роль и продолжить поручение с ним. */
 export async function confirmWho(ctx: AppContext, user: User, action: PendingAction<AssignWhoPayload>, choice: string): Promise<void> {
   const p = action.payload;
   const locale = user.locale;
@@ -177,7 +163,6 @@ export async function confirmWho(ctx: AppContext, user: User, action: PendingAct
   await startAssign(ctx, user, p.chatId, action.conversationId, p.text, p.intent, member.userId);
 }
 
-/** «Напомни мужу забрать Машу из школы в 17» → карточка автору. forcedAssignee — выбран кнопкой (askWho). */
 export async function startAssign(
   ctx: AppContext,
   user: User,
@@ -196,9 +181,7 @@ export async function startAssign(
   const others = home.members.filter((m) => m.userId !== user.id);
   if (others.length === 0) return void (await say(t("assignNoOthers", locale)));
 
-  // Кому: по тексту (детерминированно), иначе — как поняла LLM; имена — по другим именам участников с падежами
   const phrase = parseAssignPhrase(text);
-  // Имя из текста не нашлось, а исполнитель от LLM нашёлся («Tell Anya …» → «Аня») — берём его (QA R1 NLU, B)
   const who = phrase && "someone" in phrase ? undefined : pickAssignee(phrase, intent.someone ? undefined : intent.assignee, home.members);
   let assigneeUserId: string | null = null;
   if (forcedAssignee) assigneeUserId = forcedAssignee;
@@ -229,7 +212,7 @@ export async function startAssign(
     eventLabel: null,
     eventStartAt: null,
   };
-  // Событие в календаре: подходящее — связать (и взять его время, если срок — только день); нет — предложить создать
+  // Срок — только день, а событие нашлось: берём время события.
   if (due) {
     try {
       const provider = await quietProvider(ctx, user);
@@ -283,10 +266,7 @@ function cardText(d: AssignDraft, home: Home, now: number, tz: string, locale: s
   return lines.join("\n");
 }
 
-/**
- * «Поручить» / «Поручить + в календарь» / «Отмена». Карточка уже забрана атомарно (callbacks.ts). В группе нажать может
- * любой взрослый дома — автор поручения всё равно автор команды. true — поручение создано.
- */
+// Карточка уже забрана атомарно (callbacks.ts). В группе нажать может любой взрослый — автором остаётся автор команды.
 export async function confirmAssign(ctx: AppContext, user: User, action: PendingAction<AssignCardPayload>, choice: string): Promise<boolean> {
   const { chatId } = action.payload;
   const d = { ...action.payload.draft };
@@ -344,7 +324,6 @@ export async function confirmAssign(ctx: AppContext, user: User, action: Pending
     },
     now,
   );
-  // Связь с событием: у события появляется ответственный и «для кого» (US-91 → US-92)
   if (d.event) {
     await setEventFamily(ctx.db, d.event, {
       ...(d.assigneeUserId ? { responsibleUserId: d.assigneeUserId } : {}),

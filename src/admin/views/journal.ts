@@ -1,4 +1,4 @@
-// Журнал распознанного (US-13): по умолчанию замаскирован; «Показать» — с причиной и записью в admin_audit.
+// По умолчанию замаскирован; «Показать» — с причиной и записью в admin_audit.
 
 import { flow, type Replay } from "../yaml-snippet";
 import { esc, escPre, fmtTime, raw, table, usd } from "./layout";
@@ -61,11 +61,10 @@ export interface JournalDetailView {
   costMicroUsd: number | null;
   now: string;
   tz: string;
-  /** Текст и результат: замаскированные или показанные. */
   text: string;
   result: string;
   replay: Replay | null;
-  /** Фрагменты дат, которые записала LLM (start / range / duration), — для сравнения с извлечением сейчас. */
+  // Как записала LLM — для сравнения с извлечением сейчас.
   llmSlots: [string, string][];
   datesSnippet: string;
   extractSnippet: string;

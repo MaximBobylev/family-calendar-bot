@@ -1,5 +1,4 @@
-// Панель «Квоты»: остатки у провайдеров LLM/STT/голоса и платформы Cloudflare — Workers, D1, Queues (docs/admin-console.md, «Квоты»). Источник у каждой строки
-// свой — API, заголовки последнего вызова или оценка по журналу; ключей на странице нет (src/ops/quotas.ts).
+// Источник у каждой строки свой — API, заголовки последнего вызова или оценка по журналу; ключей на странице нет.
 
 import type { QuotaReport } from "../../ops/quotas";
 import type { QuotaRow } from "../../ops/quota-rules";

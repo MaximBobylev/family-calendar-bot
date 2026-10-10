@@ -1,10 +1,5 @@
-// Деплой в Cloudflare. Запуск: docker compose run --rm deploy
-// Значения берутся из окружения (.env подключается compose). Секреты в вывод не печатаются.
-//
-// 1. Миграции D1 (remote)
-// 2. wrangler deploy → адрес Worker'а
-// 3. Секреты Worker'а (wrangler secret bulk); PUBLIC_BASE_URL, LLM_BASE и цепочки LLM_CHAIN/STT_CHAIN вычисляются
-// 4. Webhook Telegram на /telegram/webhook с секретом
+// Только по явной просьбе владельца: docker compose run --rm deploy (окружение — из .env через compose).
+// Секреты в вывод не печатать.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -30,10 +25,8 @@ function wrangler(args: string[], opts: { capture?: boolean } = {}): string {
 const accountId = need("CLOUDFLARE_ACCOUNT_ID");
 need("CLOUDFLARE_API_TOKEN");
 
-// 0. Проверки до выкладки
 for (const [cmd, args] of [
   ["npm", ["run", "-s", "typecheck"]],
-  // Линтер и проверка формата (без правок файлов)
   ["npx", ["biome", "ci"]],
   ["npx", ["vitest", "run"]],
 ] as const) {
@@ -42,24 +35,18 @@ for (const [cmd, args] of [
   if (r.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed — deploy aborted`);
 }
 
-// 1. Миграции
 wrangler(["d1", "migrations", "apply", "DB", "--remote"]);
 
-// 2. Деплой кода
 const out = wrangler(["deploy"], { capture: true });
 const url = /https:\/\/[\w.-]+\.workers\.dev/.exec(out)?.[0];
 if (!url) throw new Error("could not find workers.dev URL in wrangler deploy output");
 
-// 3. Секреты
-// Цепочки провайдеров (src/config.ts): основной → запасные; Workers AI — всегда последний запасной.
 const workersAi = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`;
 const llmChain: Record<string, unknown>[] = [];
 const openrouterKey = env.OPENROUTER_API_KEY?.trim();
-// Бесплатные модели OpenRouter часто перегружены у провайдера (429 «rate-limited upstream», 2026-10-05) —
-// несколько моделей через запятую, каждая — звено цепочки
-// Пока не в лайве — только бесплатные (решение 2026-10-05). Платная Gemma 4 26B — лучшая в замерах (97,3% полей,
-// ≈ $0.0002 за команду): вернуть первой перед бетой — OPENROUTER_MODEL=google/gemma-4-26b-a4b-it,…
-// Nemotron free первым: 91,9% полей, p50 0,8 с / p95 1,6 с, 0 ошибок на 124 фразах; бесплатная Gemma почти всегда 429.
+// Бесплатные модели OpenRouter часто отвечают 429 upstream — поэтому несколько звеньев. До запуска — только бесплатные
+// (решение владельца); Nemotron первым: 91,9% полей, p95 1,6 с, а бесплатная Gemma почти всегда 429.
+// Перед бетой вернуть первой платную Gemma 4 26B (97,3% полей): OPENROUTER_MODEL=google/gemma-4-26b-a4b-it,…
 const OPENROUTER_DEFAULT = "nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-26b-a4b-it:free";
 if (openrouterKey) {
   for (const model of (env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT)
@@ -71,15 +58,13 @@ if (openrouterKey) {
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: openrouterKey,
       model,
-      // Gemma 4 с «размышлением» отвечает 5–6 с (docs/research/llm-intents-eval.md)
+      // С «размышлением» Gemma 4 отвечает 5–6 с
       extraBody: { reasoning: { enabled: false } },
       ...(model.endsWith(":free") ? { inPerM: 0, outPerM: 0 } : {}),
     });
   }
 }
-// DeepSeek (docs/research/llm-intents-eval.md, 2026-10-08): deepseek-flash без «размышления» — 98,2% / 99,3% полей,
-// p50 1,1 с, ≈ $0,0003 за команду. Платный; серверы в Китае (ADR-0002). Решение владельца 2026-10-08: пока разработка —
-// только бесплатные модели, ключ сам по себе DeepSeek не включает; на запуске — LLM_PRIMARY=deepseek (первым в цепочке).
+// DeepSeek платный, серверы в Китае: по решению владельца ключ сам его не включает; на запуске — LLM_PRIMARY=deepseek.
 const deepseekKey = env.DEEPSEEK_API_KEY?.trim();
 if (deepseekKey && env.LLM_PRIMARY?.trim() === "deepseek") {
   const deepseek = {
@@ -88,20 +73,18 @@ if (deepseekKey && env.LLM_PRIMARY?.trim() === "deepseek") {
     apiKey: deepseekKey,
     model: env.DEEPSEEK_MODEL?.trim() || "deepseek-flash",
     extraBody: { thinking: { type: "disabled" } },
-    // Цена промаха кеша в «пиковые» часы; с кешем системного промпта — заметно дешевле
+    // Цена промаха кеша в пиковые часы — оценка сверху
     inPerM: 0.3,
     outPerM: 1.2,
   };
   llmChain.unshift(deepseek);
 }
-// Запасной Workers AI — без структуры даты `when`: с ней промпт ≈ 7 тыс. токенов вместо ≈ 2,6, втрое больше neurons из
-// общих 10 000/сутки (tech-debt #27а); дату на этом звене сверяем с `start`
+// Без структуры даты `when`: с ней промпт ≈ 7 тыс. токенов вместо ≈ 2,6 — втрое больше neurons из общих 10 000/сутки
 llmChain.push({ name: "workers-ai", baseUrl: `${workersAi}/v1`, apiKey: need("LLM_API_KEY"), model: "@cf/qwen/qwen3-30b-a3b-fp8", dateStructure: false });
 
 const sttChain: Record<string, unknown>[] = [];
 const groqKey = env.GROQ_API_KEY?.trim();
 if (groqKey) {
-  // Groq: whisper-large-v3-turbo ≈ $0.04 за час аудио
   sttChain.push({
     name: "groq",
     kind: "openai",
@@ -112,8 +95,7 @@ if (groqKey) {
   });
 }
 sttChain.push({ name: "workers-ai", kind: "workers-ai", baseUrl: workersAi, apiKey: need("LLM_API_KEY"), model: "@cf/openai/whisper-large-v3-turbo" });
-// Мультимодальный разбор голоса — эскалация, когда текстовый путь ошибся (docs/tracks/multimodal-voice.md, вариант D).
-// Спайк 2026-10-05: gemini-3.5-flash-lite напрямую — лучший (12/12, 1,4 с); запасной через OpenRouter — по желанию.
+// gemini-3.5-flash-lite напрямую — лучший в спайке переслушивания (12/12, 1,4 с).
 const voiceChain: Record<string, unknown>[] = [];
 const geminiKey = env.GEMINI_API_KEY?.trim();
 if (geminiKey) {
@@ -130,8 +112,8 @@ if (openrouterKey && voiceOpenRouterModel) {
   voiceChain.push({ name: "openrouter", kind: "openai-audio", baseUrl: "https://openrouter.ai/api/v1", apiKey: openrouterKey, model: voiceOpenRouterModel });
 }
 
-// Фото → событие (US-66). Решение владельца 2026-10-08 (роадмап R3): на запуске — DeepSeek Flash (замер: 12/12 событий,
-// p95 2,4 с против 22,7 с у Gemini), Gemini — запасной; пока разработка — только Gemini. Пишем всегда, даже `[]`.
+// Фото → событие: решение владельца — на запуске DeepSeek (p95 2,4 с против 22,7 с у Gemini), до запуска только Gemini.
+// Секрет пишем всегда, даже `[]`.
 const visionChain: Record<string, unknown>[] = [];
 const llmDeepseek = llmChain.find((c) => c.name === "deepseek");
 if (llmDeepseek) visionChain.push({ ...llmDeepseek, kind: "openai" });
@@ -142,7 +124,6 @@ console.log(`STT: ${sttChain.map((c) => `${c.name} (${c.model})`).join(" → ")}
 console.log(`Переслушивание голоса: ${voiceChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY)"}`);
 console.log(`Фото → событие: ${visionChain.map((c) => `${c.name} (${c.model})`).join(" → ") || "выключено (нет GEMINI_API_KEY и DeepSeek)"}`);
 
-// Имя бота — для ссылок-приглашений в дом и обращений в группе (US-90, US-94): из getMe, не из .env
 const me = (await (await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/getMe`)).json()) as { ok: boolean; result?: { username?: string } };
 if (!me.ok || !me.result?.username) throw new Error("getMe failed: cannot read the bot username");
 
@@ -163,14 +144,13 @@ const secrets: Record<string, string> = {
   VOICE_CHAIN: JSON.stringify(voiceChain),
   VISION_CHAIN: JSON.stringify(visionChain),
 };
-// Ротация ключа (tech-debt #8): прежние ключи — только если заданы; пусто — секрет не трогаем
+// Пусто — секрет не трогаем
 const oldKeys = env.TOKEN_ENCRYPTION_KEYS_OLD?.trim();
 if (oldKeys) secrets.TOKEN_ENCRYPTION_KEYS_OLD = oldKeys;
-// Алерты (tech-debt #7): свой чат — только если задан; иначе бот шлёт первому из ALLOWED_TELEGRAM_IDS
+// Без OPS_CHAT_ID алерты уходят первому из ALLOWED_TELEGRAM_IDS
 const opsChat = env.OPS_CHAT_ID?.trim();
 if (opsChat) secrets.OPS_CHAT_ID = opsChat;
-// Панель «Квоты» (Workers, D1, Queues, neurons): токен только с Account Analytics: Read — если задан; иначе Worker
-// пробует LLM_API_KEY. Токен деплоя (CLOUDFLARE_API_TOKEN) Worker'у не передаём: у него права на правку
+// Без него панель «Квоты» пробует LLM_API_KEY. Токен деплоя Worker'у не передаём: у него права на правку
 const analyticsToken = env.CF_ANALYTICS_TOKEN?.trim();
 if (analyticsToken) secrets.CF_ANALYTICS_TOKEN = analyticsToken;
 for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
@@ -187,7 +167,6 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
-// 4. Webhook Telegram
 const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKEN}/setWebhook`, {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -195,8 +174,7 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
     url: `${url}/telegram/webhook`,
     secret_token: secrets.TELEGRAM_WEBHOOK_SECRET,
     // edited_message не подписываем: игнорируется, но тратил бы квоты
-    // inline_query — inline-карточки (US-95); inline-режим включает владелец в @BotFather: /setinline
-    // my_chat_member — бота добавили в группу: приветствие с привязкой к дому (ревью R1 #13)
+    // inline_query приходит, только если владелец включил inline-режим в @BotFather: /setinline
     allowed_updates: ["message", "callback_query", "inline_query", "my_chat_member"],
     // Не сбрасываем: после неудачного деплоя там как раз ждут сообщения пользователей
     drop_pending_updates: false,
@@ -205,8 +183,6 @@ const res = await fetch(`https://api.telegram.org/bot${secrets.TELEGRAM_BOT_TOKE
 const tg = (await res.json()) as { ok: boolean; description?: string };
 if (!tg.ok) throw new Error(`setWebhook failed: ${tg.description}`);
 
-// 5. Меню команд Telegram (кнопка «/» в чате)
-// Личка — полное меню; группы — как обращаться и привязка чата (ревью R1 §4.3)
 const commands = {
   ru: [
     { command: "help", description: "Что я умею" },

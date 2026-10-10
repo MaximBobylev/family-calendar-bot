@@ -1,5 +1,4 @@
-// Справка /help и приветствие /start (ревью R1 §4): без LLM, по состоянию — новый пользователь, с Google без дома,
-// владелец дома, участник; в группе — короткая справка. «Что ты умеешь», «помощь», «help» — тоже справка.
+// Без LLM: текст зависит от состояния — без Google, без дома, владелец, участник.
 
 import { hasGoogleAccount } from "../db/accounts";
 import { dependentsOf, type Membership, membersOf, membershipOf } from "../db/households";
@@ -9,13 +8,11 @@ import { escapeHtml } from "./format";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
 
-/** «/help», «помощь», «справка», «что ты умеешь?», «help» — детерминированно, без LLM. */
 const HELP =
   /^(?:\/help(?:@\w+)?|помощь|справка|help|что\s+(?:ты\s+)?(?:умеешь|можешь)|что\s+умеет\s+бот|как\s+(?:тобой|этим)\s+пользоваться|what\s+can\s+you\s+do)[?!.]*$/iu;
 
 export const isHelpRequest = (text: string | undefined) => !!text && HELP.test(text.trim());
 
-/** Справка в личном чате: общая часть + строка по состоянию (без Google — с кнопкой «Подключить»). */
 export async function sendHelp(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const l = user.locale;
   const bot = escapeHtml(ctx.config.telegramBotUsername || "bot");
@@ -28,12 +25,10 @@ export async function sendHelp(ctx: AppContext, user: User, chatId: number): Pro
   await ctx.telegram.sendMessage(chatId, `${t("helpPrivate", l, { bot })}${tail}`, markup, { html: true });
 }
 
-/** Справка в группе — как обращаться и как привязать чат. */
 export async function sendGroupHelp(ctx: AppContext, user: User, chatId: number): Promise<void> {
   await ctx.telegram.sendMessage(chatId, t("helpGroup", user.locale, { bot: ctx.config.telegramBotUsername || "bot" }));
 }
 
-/** /start по состоянию (ревью R1 §4.1). Без Google и дома — с кнопкой «Подключить». */
 export async function sendStart(ctx: AppContext, user: User, chatId: number, hasGoogle: boolean, membership: Membership | null): Promise<void> {
   const l = user.locale;
   if (!hasGoogle && !membership) {

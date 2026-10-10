@@ -1,4 +1,4 @@
-// Тексты: расписание и списки событий (US-20), «следующая встреча» (US-21), пометки о незагруженных календарях.
+// Расписание, списки, «следующая встреча», пометки о незагруженных календарях.
 
 import type { Messages } from "./types";
 
@@ -21,7 +21,6 @@ export const readMessages = {
     en: "Which period do you mean: {options}?",
   },
   or: { ru: "или", en: "or" },
-  // --- Следующая / конкретная встреча (US-21) ---
   lookupNext: { ru: "Следующая встреча:", en: "Next event:" },
   lookupRunning: { ru: "Сейчас идёт: <b>{title}</b> (до {until})", en: "Happening now: <b>{title}</b> (until {until})" },
   lookupNoneAhead: { ru: "В ближайшие {days} дней встреч нет.", en: "No events in the next {days} days." },

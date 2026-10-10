@@ -1,5 +1,3 @@
-// Разбор часового пояса из /settings → «Другой…».
-
 import { describe, expect, it } from "vitest";
 import { parseTimeZone } from "../src/dates/timezone";
 import { namedZone } from "../src/dates/zone";

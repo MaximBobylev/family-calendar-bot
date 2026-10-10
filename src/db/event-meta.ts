@@ -1,5 +1,5 @@
-// «Для кого» и «ответственный» у события (US-92, ADR-0003 EventMeta): хранится у нас — участники без Google тоже видят.
-// Автор события (created_by_user_id) пишет households.ts:recordEventCreator.
+// «Для кого» и «ответственный» хранятся у нас, а не в Google, — чтобы видели и участники без Google (US-92).
+// Автора события (created_by_user_id) пишет households.ts:recordEventCreator.
 
 import type { EventRef } from "../calendar/model";
 
@@ -8,7 +8,7 @@ export interface EventFamilyMeta {
   forDependentId: string | null;
 }
 
-/** Задать ответственного и/или «для кого»; undefined — не трогать, null — убрать. */
+/** undefined — не трогать, null — убрать. */
 export async function setEventFamily(
   db: D1Database,
   ref: EventRef,
@@ -35,10 +35,7 @@ export async function setEventFamily(
     .run();
 }
 
-/**
- * Метаданные событий по id у провайдера (экземпляры серии — и по id серии: ответственный за всю серию, US-92).
- * Ключ — «calendarId|eventId».
- */
+/** Экземпляры серии ищутся и по id серии — ответственный бывает за всю серию. Ключ — «calendarId|eventId». */
 export async function familyMetaFor(db: D1Database, refs: { calendarId: string; ids: string[] }[]): Promise<Map<string, EventFamilyMeta>> {
   const out = new Map<string, EventFamilyMeta>();
   const pairs = refs.flatMap((r) => r.ids.map((id) => [r.calendarId, id] as const));

@@ -1,4 +1,4 @@
-// Разговоры, состояние диалога и карточки с кнопками (ADR-0003, US-05, US-60).
+// Разговоры, состояние диалога (контекст «её», «вторую», вопросы бота) и карточки с кнопками.
 
 import type { DateFixWatch } from "../bot/date-fix-logic";
 import { type CardVerdict, cardVerdict } from "./card-status";
@@ -11,8 +11,6 @@ export async function ensureConversation(db: D1Database, chatId: number | string
   return id;
 }
 
-// --- Состояние диалога -------------------------------------------------------
-
 export interface StoredRef {
   accountId: string;
   calendarId: string;
@@ -20,36 +18,28 @@ export interface StoredRef {
 }
 
 export interface DialogState {
-  /** Черновик, ожидающий недостающий слот (US-12): ответ пользователя дополняет его. */
   awaiting?:
     | { kind: "create_time"; draft: unknown; expiresAt: number }
-    /** Ввод пояса или других названий календаря из /settings (US-04, US-06). */
     | { kind: "settings_tz"; expiresAt: number }
     | { kind: "settings_digest_time"; expiresAt: number }
     | { kind: "settings_alias"; calendarId: string; expiresAt: number }
-    /** Вопросы дома (ревью R1 #3, #7): «Как вас называть?» (userId — кого называет владелец), имя ребёнка, название дома. */
+    /** userId — кого называет владелец. */
     | { kind: "home_name"; userId?: string; expiresAt: number }
     | { kind: "home_kid"; expiresAt: number }
     | { kind: "home_create"; expiresAt: number }
-    /** «До какого числа поездка?» (US-07): ответ датой дополняет поездку. */
     | { kind: "trip_until"; expiresAt: number };
-  /** Последний показанный список — для «перенеси вторую» (US-60). */
   lastList?: { refs: StoredRef[]; at: number };
-  /** День разговора (US-60): последний показанный один день или день созданного события, «YYYY-MM-DD» в поясе пользователя. */
+  /** Последний показанный один день или день созданного события (US-60); «YYYY-MM-DD» в поясе пользователя. */
   lastDay?: { day: string; at: number };
-  /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */
   lastEvent?: { ref: StoredRef; at: number };
-  /** Последнее голосовое — переслушать мультимодальной моделью, если текстовый путь ошибся (multimodal-voice, вариант D). */
   lastVoice?: { fileId: string; transcript: string; at: number; durationSec: number; reheard?: boolean };
-  /** Последнее действие для «отмени последнее» (US-61): карточка отмены или причина, почему нельзя. */
   lastUndo?: { actionId?: string; at: number; notUndoable?: "delete" | "decline" };
-  /** Последняя карточка создания — поймать правку её даты сразу после (метрика date_fix, tech-debt #26). */
+  /** Последняя карточка создания: правка её даты сразу после — метрика date_fix (tech-debt #26). */
   dateFix?: DateFixWatch;
 }
 
-/** Окно контекста = окно отмены (US-60). */
+/** Окно контекста намеренно равно окну отмены (US-60). */
 export const CONTEXT_TTL_MS = 15 * 60 * 1000;
-/** Сколько ждём ответа на вопрос бота (`awaiting`: «во сколько?», ввод настроек). */
 export const AWAIT_TTL_MS = 15 * 60 * 1000;
 
 export async function getDialogState(db: D1Database, conversationId: string, userId: string): Promise<DialogState> {
@@ -71,13 +61,12 @@ export async function setDialogState(db: D1Database, conversationId: string, use
     .run();
 }
 
-/** Попыток compare-and-swap в mergeDialogState, прежде чем записать «последний побеждает» (как было до tech-debt #18). */
+/** После стольких проигранных compare-and-swap — запись «последний побеждает». */
 const MERGE_ATTEMPTS = 3;
 
 /**
- * Обновить часть состояния, не затирая остальное. Апдейты одного пользователя обрабатываются параллельно (waitUntil
- * на каждый webhook), поэтому read-modify-write защищён оптимистично (tech-debt #18): запись проходит, только если
- * state_json не изменился с чтения (или строки ещё нет); иначе — перечитать и применить patch заново.
+ * Апдейты одного пользователя обрабатываются параллельно (waitUntil на каждый webhook), поэтому read-modify-write
+ * оптимистичный (tech-debt #18): запись проходит, только если state_json не изменился с чтения.
  */
 export async function mergeDialogState(db: D1Database, conversationId: string, userId: string, patch: Partial<DialogState>, now: number): Promise<void> {
   for (let attempt = 1; ; attempt++) {
@@ -109,8 +98,6 @@ export async function mergeDialogState(db: D1Database, conversationId: string, u
     if (res.meta.changes > 0) return;
   }
 }
-
-// --- Карточки (pending actions) ------------------------------------------------
 
 export interface PendingAction<P = unknown> {
   id: string;
@@ -153,10 +140,7 @@ function rowToAction<P>(r: {
   return { id: r.id, conversationId: r.conversation_id, userId: r.user_id, kind: r.kind, payload: JSON.parse(r.payload_json) as P, messageId: r.message_id };
 }
 
-/**
- * Атомарно «закрывает» карточку сразу в done — для коротких действий из текста («отмени последнее», ответ на вопрос
- * о названии). Нажатия кнопок идут через claimCard (статус executing, tech-debt #6).
- */
+/** Сразу в done — для коротких действий из текста («отмени последнее»); нажатия кнопок — через claimCard (tech-debt #6). */
 export async function claimPendingAction<P>(db: D1Database, id: string, userId: string, now: number): Promise<ClaimResult<P>> {
   const row = await db
     .prepare(
@@ -197,9 +181,8 @@ type ActionRow = { id: string; conversation_id: string; user_id: string; kind: s
 export type CardClaim<P> = { ok: true; action: PendingAction<P>; retry: boolean } | { ok: false; verdict: Exclude<CardVerdict, "retry"> };
 
 /**
- * Нажатие кнопки: забрать карточку на выполнение (open → executing) или, если прошлый обработчик умер посреди
- * действия, — забрать заново для идемпотентного kind (tech-debt #6, машина состояний — card-status.ts).
- * После действия — finishCard. Горячий путь — один UPDATE.
+ * open → executing; если прошлый обработчик умер посреди действия — забрать заново, но только идемпотентный kind
+ * (tech-debt #6, машина состояний — card-status.ts). После действия — finishCard.
  */
 export async function claimCard<P>(db: D1Database, id: string, userId: string, now: number, retryable: (kind: string) => boolean): Promise<CardClaim<P>> {
   const claimed = await db
@@ -238,12 +221,11 @@ export async function claimCard<P>(db: D1Database, id: string, userId: string, n
   return reclaimed ? { ok: true, action: rowToAction<P>(reclaimed), retry: true } : { ok: false, verdict: "inProgress" };
 }
 
-/** Итог выполнения карточки: done — действие завершено (или честно отказано), failed — не выполнено из-за сбоя. */
+/** done — и при честном отказе; failed — только сбой. */
 export async function finishCard(db: D1Database, id: string, status: "done" | "failed"): Promise<void> {
   await db.prepare("UPDATE pending_actions SET status = ? WHERE id = ? AND status = 'executing'").bind(status, id).run();
 }
 
-/** Новая команда аннулирует открытые карточки этого разговора (US-05). Возвращает их, чтобы отредактировать сообщения. */
 export async function cancelOpenCards(db: D1Database, conversationId: string, userId: string, kinds: string[]): Promise<PendingAction[]> {
   if (kinds.length === 0) return [];
   const { results } = await db
@@ -258,7 +240,6 @@ export async function cancelOpenCards(db: D1Database, conversationId: string, us
   return results.map((r) => rowToAction(r));
 }
 
-/** Открытое ожидание ответа на конкретное сообщение бота (ForceReply). */
 export async function findOpenByMessage<P>(
   db: D1Database,
   conversationId: string,

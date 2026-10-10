@@ -1,4 +1,4 @@
-// Точка входа Worker'а: HTTP (webhook Telegram, тестовые маршруты), очередь inbox, cron.
+// Точка входа Worker'а: HTTP, очередь inbox, cron.
 // Тип Env генерируется из wrangler.jsonc (`npm run types`), секреты — в src/env.d.ts.
 
 import { createContext, type AppContext } from "./bot/context";
@@ -49,7 +49,7 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
     return new Response("ok");
   }
 
-  // Посторонние и чужая переписка в группах — ответ сразу, без записи в D1 и очереди: спам не тратит квоты (ревью 2026-10-05)
+  // Посторонние и чужая переписка в группах — без записи в D1 и очереди: спам не тратит квоты
   const gate = await gateUpdate(ctx, update);
   if (gate !== "process") {
     const reply = replyToOutsider(ctx, update, gate);
@@ -58,9 +58,8 @@ async function telegramWebhook(ctx: AppContext, env: Env, request: Request, exec
     return new Response("ok");
   }
 
-  // Сохранить и сразу ответить 200 (ADR-0005 п.1). Обрабатываем тут же после ответа (waitUntil) —
-  // очередь Cloudflare добавляет секунды задержки; она остаётся страховкой на случай обрыва.
-  // В TEST_MODE обработку запускает тест через /__test/drain — детерминированно.
+  // Обрабатываем тут же после ответа (waitUntil): очередь Cloudflare добавляет секунды задержки, она — страховка
+  // на случай обрыва. В TEST_MODE обработку запускает тест через /__test/drain — детерминированно.
   const accepted = await acceptUpdate(ctx.db, update, ctx.clock.now());
   if (!ctx.config.testMode && (accepted || (await isUnfinished(ctx.db, update.update_id)))) {
     try {
@@ -90,9 +89,8 @@ export default {
     const ctx = await context(env);
     if (url.pathname === "/telegram/webhook") return telegramWebhook(ctx, env, request, exec);
     if (url.pathname.startsWith("/oauth/")) return handleOAuthRoute(ctx, request, url);
-    // Файл события inline-карточки (US-95)
     if (request.method === "GET" && url.pathname.startsWith("/ics/")) return serveIcs(ctx, url.pathname);
-    // Push Google о календаре (ADR-0005 §2): задача синка — сразу в очередь (в TEST_MODE её выполнит tick)
+    // В TEST_MODE задачу синка выполнит tick
     if (url.pathname === "/google/push") {
       return handleGooglePush(
         ctx,
@@ -115,7 +113,7 @@ export default {
   async queue(batch, env): Promise<void> {
     const ctx = await context(env);
     for (const msg of batch.messages) {
-      // Задачи планировщика (tech-debt #14): ошибки и повторы — внутри runQueuedJob, сообщение подтверждаем
+      // Ошибки и повторы — внутри runQueuedJob, поэтому сообщение подтверждаем всегда
       if ("jobId" in msg.body) {
         await runQueuedJob(ctx, msg.body.jobId).catch((e) => console.error("job run failed", msg.body, e));
         msg.ack();
@@ -124,7 +122,7 @@ export default {
       const { updateId } = msg.body;
       try {
         const outcome = await logged("update", { update_id: updateId, stage: "queue", attempt: msg.attempts }, () => processInboxUpdate(ctx, updateId));
-        // Ещё обрабатывается (waitUntil жив) — проверим позже, а не теряем молча (ревью 2026-10-05)
+        // Ещё обрабатывается (waitUntil жив) — проверим позже, а не теряем молча
         if (outcome === "busy") msg.retry({ delaySeconds: SAFETY_NET_DELAY_S });
         else msg.ack();
       } catch (e) {
@@ -136,15 +134,15 @@ export default {
 
   async scheduled(_controller, env): Promise<void> {
     const ctx = await context(env);
-    // Heartbeat cron для панели «здоровье» (docs/admin-console.md)
+    // Heartbeat cron для панели «здоровье»: значение не важно, важен updated_at
     await setOpsState(ctx.db, OPS_LAST_TICK, "", ctx.clock.now());
     const jobs = await tick(ctx.db, ctx.clock.now(), async (jobs, delays) => {
       await env.INBOX.sendBatch(jobs.map((j, i) => ({ body: { jobId: j.id } satisfies JobMessage, delaySeconds: delays[i]! })));
     });
     if (jobs) log("tick", { jobs });
-    // Раз в 5 минут: алерты владельцу (src/ops/alerts.ts; ошибки ловит сам runAlerts)
+    // Ошибки ловит сам runAlerts
     if (isAlertMinute(ctx.clock.now())) await runAlerts(ctx);
-    // Раз в час: ретеншн (privacy-политика, ADR-0005) и страховка дайджестов (US-70)
+    // Раз в час: ретеншн и страховка дайджестов
     if (new Date(ctx.clock.now()).getUTCMinutes() === 7) {
       await cleanup(ctx.db, ctx.clock.now());
       await ensureDigests(ctx.db, ctx.clock.now());

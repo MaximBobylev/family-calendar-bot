@@ -1,4 +1,4 @@
-// /settings: ввод текстом через awaiting в диалоге — пояс («Другой…»), время сводки, другие названия календаря (US-06).
+// Ввод текстом через awaiting: пояс («Другой…»), время сводки, другие названия календаря.
 
 import { parseHhmm } from "../../dates/daily";
 import { parseTimeZone } from "../../dates/timezone";

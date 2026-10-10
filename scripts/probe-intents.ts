@@ -1,4 +1,4 @@
-// Проверка интентов на реальной LLM — ручной запуск, не тест (нужны ключи из .env → сервис deploy):
+// Интенты на живой LLM; тратит квоту прода — только с разрешения владельца:
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/probe-intents.ts [--provider openrouter|workers-ai] "фраза" ...
 // По умолчанию — OpenRouter, если задан OPENROUTER_API_KEY, иначе Workers AI (как цепочка в scripts/deploy.ts).
 import { parseIntent } from "../src/nlu/intents";

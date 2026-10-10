@@ -1,5 +1,4 @@
-// Поручения (US-91, ADR-0003 Assignment): строки assignments, сообщения с кнопками (assignment_messages) и задачи
-// напоминаний/эскалации в scheduled_jobs (kind = assign, dedupe_key «assign:<id>:<что>:<момент>»). Миграции 0001, 0014.
+// Поручения (US-91): напоминания и эскалация — задачи scheduled_jobs с dedupe_key «assign:<id>:<что>:<момент>».
 
 import type { AssignJobWhat } from "../bot/assign/logic";
 
@@ -18,14 +17,13 @@ export interface Assignment {
   forDependentId: string | null;
   originChatId: string | null;
   event: { accountId: string; calendarId: string; providerEventId: string } | null;
-  /** Связанное событие: название (есть eventStartAt) или готовая подпись «Плавание Вани, сб 10:00» (старые строки, весь день). */
+  /** Название, если есть eventStartAt; иначе готовая подпись «…, сб 10:00» (старые строки, весь день). */
   eventLabel: string | null;
-  /** Начало связанного события (UTC, мс) — подпись строится при показе в поясе получателя (QA-03/04/05). */
+  /** UTC, мс: подпись строится при показе — в поясе получателя. */
   eventStartAt: number | null;
 }
 
 export const ASSIGN_JOB = "assign";
-/** Открытые — ждут ответа или взяты. */
 export const OPEN_STATUSES: AssignmentStatus[] = ["pending", "accepted"];
 
 type Row = {
@@ -105,10 +103,7 @@ export async function getAssignment(db: D1Database, id: string): Promise<Assignm
   return row ? fromRow(row) : null;
 }
 
-/**
- * Атомарный переход статуса: только из `from` и (если задано) у этого исполнителя; «кто-то должен» — взять может любой
- * (assignee NULL → он). Возвращает новое состояние или null, если кто-то успел раньше (гонка «Беру»).
- */
+/** null — кто-то успел раньше (гонка «Беру»). «Кто-то должен» (assignee NULL) взять может любой. */
 export async function transition(
   db: D1Database,
   id: string,
@@ -128,12 +123,10 @@ export async function transition(
   return row ? fromRow(row) : null;
 }
 
-/** Новый срок; время связанного события сдвигается на ту же величину (перенос события, QA-03). */
 export async function setAssignmentDue(db: D1Database, id: string, dueAt: number, deltaMs: number, now: number): Promise<void> {
   await db.prepare("UPDATE assignments SET due_at = ?, event_start_at = event_start_at + ?, updated_at = ? WHERE id = ?").bind(dueAt, deltaMs, now, id).run();
 }
 
-/** Открытые поручения на участнике и созданные им (уход из дома, удаление данных — QA-06/07). */
 export async function openAssignmentsInvolving(db: D1Database, householdId: string, userId: string): Promise<Assignment[]> {
   const { results } = await db
     .prepare(
@@ -145,7 +138,6 @@ export async function openAssignmentsInvolving(db: D1Database, householdId: stri
   return results.map(fromRow);
 }
 
-/** Открытые поручения дома (роспуск — обновить сообщения, QA-15). */
 export async function openAssignmentsOfHousehold(db: D1Database, householdId: string): Promise<Assignment[]> {
   const { results } = await db
     .prepare(`SELECT ${COLUMNS} FROM assignments WHERE household_id = ? AND status IN ('pending', 'accepted', 'declined')`)
@@ -154,7 +146,6 @@ export async function openAssignmentsOfHousehold(db: D1Database, householdId: st
   return results.map(fromRow);
 }
 
-/** Поручения, созданные автором и ещё не закрытые (US-91: «что я поручил»), — новые сроки первыми по порядку. */
 export async function assignmentsCreatedBy(db: D1Database, userId: string, householdId: string): Promise<Assignment[]> {
   const { results } = await db
     .prepare(
@@ -167,10 +158,7 @@ export async function assignmentsCreatedBy(db: D1Database, userId: string, house
   return results.map(fromRow);
 }
 
-/**
- * Поручение, на которое отвечают словом («Беру», «Не могу», «Сделано», ревью R1 #7): по сообщению (reply) или последнее
- * с предложением этому участнику в этом чате — в подходящих статусах.
- */
+/** Ответ словом («Беру», «Сделано»): по reply на сообщение, иначе последнее предложенное этому участнику в этом чате. */
 export async function assignmentForTextAnswer(
   db: D1Database,
   a: { userId: string; chatId: string; replyTo?: number; statuses: AssignmentStatus[] },
@@ -195,7 +183,7 @@ export async function assignmentForTextAnswer(
   return row ? fromRow(row) : null;
 }
 
-/** Открытые поручения участнику (US-91: «мои дела»); с открытыми «кто-то должен» его дома. */
+/** Вместе с открытыми «кто-то должен» его дома. */
 export async function openAssignmentsFor(db: D1Database, userId: string, householdId: string): Promise<Assignment[]> {
   const { results } = await db
     .prepare(
@@ -209,7 +197,6 @@ export async function openAssignmentsFor(db: D1Database, userId: string, househo
   return results.map(fromRow);
 }
 
-/** Открытые поручения, связанные с событием (перенос события сдвигает их, US-91). */
 export async function openAssignmentsForEvent(db: D1Database, ref: { calendarId: string; providerEventId: string }): Promise<Assignment[]> {
   const { results } = await db
     .prepare(
@@ -224,7 +211,7 @@ export async function openAssignmentsForEvent(db: D1Database, ref: { calendarId:
   return results.map(fromRow);
 }
 
-/** То же по событию календаря провайдера (синк Google, US-72): связь хранит id календаря автора — ищем через calendars. */
+/** Связь хранит наш id календаря автора, а синк знает только календарь провайдера — ищем через calendars. */
 export async function openAssignmentsForProviderEvent(db: D1Database, providerCalendarId: string, eventId: string): Promise<Assignment[]> {
   const { results } = await db
     .prepare(
@@ -236,8 +223,6 @@ export async function openAssignmentsForProviderEvent(db: D1Database, providerCa
     .all<Row>();
   return results.map(fromRow);
 }
-
-// --- Сообщения с кнопками ---------------------------------------------------------------
 
 export interface AssignmentMessage {
   chatId: string;
@@ -262,7 +247,6 @@ export async function assignmentMessages(db: D1Database, assignmentId: string): 
   return results.map((r) => ({ chatId: r.chat_id, messageId: r.message_id, userId: r.user_id, role: r.role as AssignmentMessage["role"], answer: r.answer }));
 }
 
-/** «Не могу» одного из предложенных («кто-то должен»): отметка у его сообщений. */
 export async function markOfferAnswer(db: D1Database, assignmentId: string, userId: string, answer: string): Promise<void> {
   await db
     .prepare("UPDATE assignment_messages SET answer = ? WHERE assignment_id = ? AND user_id = ? AND role = 'offer'")
@@ -270,16 +254,14 @@ export async function markOfferAnswer(db: D1Database, assignmentId: string, user
     .run();
 }
 
-/** Предложили заново («Предложить другому» → «Всем»): прежние «Не могу» не в счёт. */
+/** При новом предложении «Всем» прежние «Не могу» не в счёт. */
 export async function clearOfferAnswers(db: D1Database, assignmentId: string): Promise<void> {
   await db.prepare("UPDATE assignment_messages SET answer = NULL WHERE assignment_id = ?").bind(assignmentId).run();
 }
 
-// --- Задачи напоминаний ------------------------------------------------------------------
-
 const jobPrefix = (id: string) => `${ASSIGN_JOB}:${id}:`;
 
-/** Снять ожидающие напоминания поручения (отмена, перенос, сделано). Диапазон по dedupe_key — по индексу. */
+/** Диапазон по dedupe_key, а не LIKE, — чтобы шёл индекс. */
 export async function cancelAssignmentJobs(db: D1Database, id: string): Promise<void> {
   const p = jobPrefix(id);
   await db.prepare("UPDATE scheduled_jobs SET status = 'cancelled' WHERE dedupe_key >= ? AND dedupe_key < ? AND status = 'pending'").bind(p, `${p}￿`).run();
@@ -300,7 +282,6 @@ export async function scheduleAssignmentJobs(db: D1Database, id: string, plan: {
   );
 }
 
-/** Поручения участнику на период — для дайджеста (US-93). */
 export async function assignmentsDueBetween(db: D1Database, userId: string, fromUtc: number, toUtc: number): Promise<Assignment[]> {
   const { results } = await db
     .prepare(

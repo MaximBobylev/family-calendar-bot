@@ -1,6 +1,4 @@
-// US-30 / US-31: создание события. Карточка-подтверждение (осторожный режим), варианты кнопками для
-// неоднозначных дат, вопрос «во сколько?», предупреждение о пересечениях, вопрос о названии.
-// US-32: серии. Здесь — сценарий (I/O); черновик → варианты — create-logic.ts, карточка — create-view.ts.
+// Только сценарий с I/O; черновик → варианты — create-logic.ts, текст карточки — create-view.ts.
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { formatDate, localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
@@ -32,14 +30,12 @@ export { type CreateCardPayload, type CreateDraft, draftFromIntent, type TitleQu
 export const CREATE_CARD = "create";
 export const TITLE_QUESTION = "title";
 
-// --- Сценарий --------------------------------------------------------------
-
 export interface CreateArgs {
   user: User;
   chatId: number;
   conversationId: string;
   draft: CreateDraft;
-  /** От какого момента считать «завтра», «в четверг»: дата исходного пересланного сообщения (US-65). Нет — сейчас. */
+  // От какого момента считать «завтра»: дата пересланного сообщения (US-65); нет — сейчас
   refNow?: number;
 }
 
@@ -65,7 +61,6 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     return;
   }
   if (res.kind === "ask") {
-    // Ответ пользователя дополнит этот же черновик (US-12)
     // Второе мнение LLM о дате — только для первой карточки: ответ на вопрос дополняет наш кусок
     // Вопрос о незнакомом поясе — один раз: ответ — уже время по своему поясу
     // Структура LLM, по которой спросили время, уже в startText словами («02.11.2026») — ответ дополнит её
@@ -97,11 +92,9 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
     now: ctx.clock.now(),
   });
 
-  // Пересечения — только для единственного варианта (US-30)
   const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
   const { text, buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps);
   const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
-  // Ответственный и «для кого» (US-92) — строками под телом карточки
   const fam = familyCardLines(a.draft.family, locale);
   const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
   const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
@@ -118,7 +111,6 @@ function calendarErrorText(cal: Exclude<CalendarResolution, CalendarInfo>, calen
   return t("calendarNotFound", locale, { name: cal.name, list });
 }
 
-/** Пересечения с событиями в целевом календаре и календаре по умолчанию (US-30). */
 async function findOverlaps(provider: CalendarProvider, o: CreateOption, calendars: CalendarInfo[], locale: string): Promise<string[]> {
   if (o.allDay) return [];
   const relevant = new Set([o.calendarId, calendars.find((c) => c.isDefault)?.id]);
@@ -126,19 +118,17 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
   return events
     .filter((e) => !e.allDay && !e.free && relevant.has(e.ref.calendarId))
     .map((e) => {
-      // Пересечение, начавшееся в другой день, — с меткой дня
       const otherDay = e.start!.day !== o.start!.day ? ` (${dateLabel(e.start!.day, o.start!.day, locale)})` : "";
       return `${hhmm(e.start!.minutes)}–${hhmm(e.end!.minutes)}${otherDay} ${escapeHtml(e.title)}`;
     });
 }
 
-/** Напоминания по умолчанию из настроек бота (US-04): нет — как в Google; для «весь день» — без напоминаний. */
+// Не заданы в настройках — не передаём: Google поставит свои по умолчанию (для «весь день» — без напоминаний)
 function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
   const r = allDay ? (user.settings.allDayReminders ?? []) : user.settings.reminders;
   return r ? { reminders: r } : {};
 }
 
-/** Нажатие кнопки на карточке создания. Карточка уже «забрана» атомарно (claimPendingAction). */
 export async function confirmCreate(
   ctx: AppContext,
   provider: CalendarProvider,
@@ -174,10 +164,9 @@ export async function confirmCreate(
     ...remindersFor(user, o.allDay),
   });
 
-  // Автор — тот, кто попросил (в группе нажать «Создать» может любой взрослый дома, US-94)
+  // Не user.id: в группе нажать «Создать» может любой взрослый дома, а автор — тот, кто попросил (US-94)
   await noteCreator(ctx, created.ref, action.userId);
   await saveEventFamily(ctx, created.ref, action.payload.family);
-  // Ответственного назначили не сами — сказать ему лично (ревью R1 #9): «🚗 Отводите вы: Стоматолог (Ваня) — чт, 8 октября 16:00»
   await notifyResponsible(ctx, action.payload.family, action.userId, o);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
   const body = cardBody(o, today, locale, calendarsCount > 1);
@@ -209,12 +198,11 @@ export async function confirmCreate(
     { lastEvent: { ref: created.ref, at: ctx.clock.now() }, lastDay: { day: formatDate(o.startDay), at: ctx.clock.now() } },
     ctx.clock.now(),
   );
-  // Метрика date_fix (tech-debt #26): другой вариант / пересоздание на другую дату; запомнить карточку для «нет, в 16»
   await dateFixOnCreated(ctx, action, action.payload, Number(choice.slice(1)), created.ref);
   const features: Feature[] = ["create", ...(o.series ? ["recurring" as const] : []), ...(action.payload.viaAlias ? ["alias" as const] : [])];
   await recordFeature(ctx.db, user.id, features, ctx.clock.now());
 
-  // Название не задано — спросить; ответом считается только reply на этот вопрос (US-30)
+  // Ответом считается только reply на этот вопрос (US-30)
   if (!o.titleGiven) {
     const qId = await createPendingAction(ctx.db, {
       conversationId: action.conversationId,
@@ -229,11 +217,7 @@ export async function confirmCreate(
   return true;
 }
 
-/**
- * Календари дома, а пояс автора не совпадает с поясом дома (владельца) — [решение 2026-10-06, QA-09]: время считаем в поясе
- * автора (как он сказал), а в карточке показываем, сколько это по поясу дома: «🌍 17:00 по Asia/Yekaterinburg = 15:00 по
- * Europe/Moscow». Иначе — пусто.
- */
+// Решение владельца (QA-09): в календарях дома время считаем в поясе автора, как он сказал, а пояс дома (владельца) — подсказкой
 async function homeTzNote(ctx: AppContext, o: CreateOption, locale: string): Promise<string> {
   if (!ctx.calendarScope || o.allDay || !o.start || o.series) return "";
   const owner = await findUserById(ctx.db, ctx.calendarScope.ownerUserId);

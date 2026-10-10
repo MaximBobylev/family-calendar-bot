@@ -1,11 +1,10 @@
-// Явно названный пояс во фрагменте даты: «в 15:00 по Киеву», «в 12 по UTC+4», «3pm London time», «по местному» (tech-debt #26).
+// Явно названный пояс во фрагменте даты: «в 15:00 по Киеву», «в 12 по UTC+4», «3pm London time», «по местному».
 // Грамматика (point.ts) считает время в этом поясе и переводит в пояс пользователя; карточка показывает оба времени.
 
 import { BARE_ZONE_WORDS, LOCAL_ZONE_WORDS, ZONE_CITIES, type ZoneCity } from "./lexicon";
 import { parseTimeZone } from "./timezone";
 import { type Token, tokenize } from "./tokenize";
 
-/** Пояс и подписи для карточки: «по Киеву» / «Kyiv time». */
 export interface NamedZone {
   tz: string;
   ru: string;
@@ -15,12 +14,11 @@ export interface NamedZone {
 const CITY_BY_FORM = new Map<string, ZoneCity>(ZONE_CITIES.flatMap((c) => c.forms.map((f) => [f, c] as const)));
 const word = (tok: Token | undefined) => (tok?.t === "word" ? tok.w : undefined);
 
-/** Город, UTC±N или IANA-имя с позиции i (без предлога). bare — так можно сказать и без «по» / «time» («мск», «UTC+4»). */
+/** bare — пояс можно назвать без «по» / «time» («мск», «UTC+4»). */
 function zoneAt(tokens: Token[], i: number): { zone: NamedZone; n: number; bare: boolean } | null {
   const w = word(tokens[i]);
   if (!w) return null;
   const w1 = word(tokens[i + 1]);
-  // «new york», «buenos aires» — два слова
   const two = w1 ? CITY_BY_FORM.get(`${w} ${w1}`) : undefined;
   const city = two ?? CITY_BY_FORM.get(w);
   if (city) return { zone: { tz: city.tz, ru: `по ${city.ru}`, en: `${city.en} time` }, n: two ? 2 : 1, bare: BARE_ZONE_WORDS.has(w) };
@@ -34,7 +32,6 @@ function zoneAt(tokens: Token[], i: number): { zone: NamedZone; n: number; bare:
     const label = `UTC${offset}`;
     return { zone: { tz, ru: `по ${label}`, en: label }, n: sign ? 2 : 1, bare: true };
   }
-  // «по Europe/Berlin»
   if (w.includes("/")) {
     const tz = parseTimeZone(w);
     return tz ? { zone: { tz, ru: `по ${tz}`, en: tz }, n: 1, bare: false } : null;
@@ -42,10 +39,7 @@ function zoneAt(tokens: Token[], i: number): { zone: NamedZone; n: number; bare:
   return null;
 }
 
-/**
- * Пояс с позиции i: «по Киеву», «по киевскому времени», «по времени Киева», «Kyiv time», «мск», «UTC+4»;
- * «по местному (времени)», «local time» — "local" (пояс пользователя). null — здесь пояса нет.
- */
+/** «по Киеву», «по киевскому времени», «по времени Киева», «Kyiv time», «мск», «UTC+4»; "local" — «по местному (времени)», «local time». */
 export function readZone(tokens: Token[], i: number): { zone: NamedZone | "local"; n: number } | null {
   const w = word(tokens[i]);
   if (w === "по") {
@@ -64,7 +58,7 @@ export function readZone(tokens: Token[], i: number): { zone: NamedZone | "local
   return z.bare ? { zone: z.zone, n: z.n } : null;
 }
 
-/** Пояс, названный во фрагменте даты (для подписи в карточке); «по местному» и отсутствие пояса — undefined. */
+/** «по местному» — тоже undefined. */
 export function namedZone(fragment: string): NamedZone | undefined {
   const tokens = tokenize(fragment);
   for (let i = 0; i < tokens.length; i++) {
@@ -77,7 +71,6 @@ export function namedZone(fragment: string): NamedZone | undefined {
 /** Одинаковые пояса под разными IANA-именами: модель пишет новое имя, словарь — старое. */
 const TZ_ALIASES: Record<string, string> = { "Europe/Kyiv": "Europe/Kiev" };
 
-/** Подписи для пояса из структуры LLM (IANA-имя): город словаря — «по Киеву», Etc/GMT-4 — «по UTC+4», иначе само имя (ревью дат, шаг 4). */
 export function zoneByTz(tz: string): NamedZone {
   const city = ZONE_CITIES.find((c) => c.tz === (TZ_ALIASES[tz] ?? tz));
   if (city) return { tz, ru: `по ${city.ru}`, en: `${city.en} time` };

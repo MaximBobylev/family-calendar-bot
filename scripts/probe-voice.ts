@@ -1,7 +1,7 @@
-// Спайк мультимодального разбора голоса (docs/tracks/multimodal-voice.md, этап 1) — ручной запуск, не тест:
+// Спайк мультимодального разбора голоса. Тратит квоты прода — только с разрешения владельца:
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/probe-voice.ts reports/voice-spike [модели…]
 // Модели: «groq» (база: Whisper → текст), «gg:<модель>» (Gemini API напрямую, inlineData audio/ogg),
-// «or:<модель>» (OpenRouter, input_audio format=ogg). Один вызов: аудио → транскрипт + вызов инструмента.
+// «or:<модель>» (OpenRouter, input_audio format=ogg).
 // Живой журнал: <папка>/live.log; индекс фраз: <папка>/index.txt («v01|эталонный текст»).
 
 import { appendFileSync, readdirSync, readFileSync } from "node:fs";
@@ -43,7 +43,6 @@ The user's message is a VOICE recording (audio). In EVERY tool call fill "transc
 same language, every word as heard, numbers as heard, do not convert or normalize dates/times, do not fix grammar.
 If nothing intelligible was said (silence, noise, music), call no_speech.`;
 
-/** Наши tools + обязательный transcript + no_speech. */
 const VOICE_TOOLS: ToolDefinition[] = [
   ...TOOLS.map((t) => {
     const p = t.function.parameters as { properties?: Record<string, unknown>; required?: string[] };

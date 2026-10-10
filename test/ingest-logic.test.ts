@@ -5,7 +5,7 @@ import { parse as parseYaml } from "yaml";
 import { firstUrl, foreignDateSpans, guessPlace, heuristicTitle, sentences, sourceDescription } from "../src/bot/ingest-logic";
 import { parseDateFragment } from "../src/dates";
 
-// «Сейчас» — ср 7 октября 2026, 10:00 МСК (как в приёмочных сценариях)
+// Среда, как в приёмочных сценариях
 const now = "2026-10-07T10:00";
 const tz = "Europe/Moscow";
 const dates = (text: string) => foreignDateSpans(text, now, tz);
@@ -26,7 +26,6 @@ describe("foreignDateSpans", () => {
   it("длинный текст режется на куски", () => expect(sentences(`${"слово ".repeat(100)}`).length).toBe(3));
 });
 
-// Корпус чужих текстов (testdata/extract/foreign.yaml): фрагмент и во что он разбирается
 interface ForeignDoc {
   defaults: { now: string; tz: string };
   cases: { text: string; point: string | null; start?: string | string[] }[];

@@ -1,5 +1,4 @@
-// Обёртка действий с календарём: провайдер на пользователя и ошибки — понятным текстом (US-14, US-02).
-// Общая для маршрутизации интентов, диалога и нажатий кнопок.
+// Ошибки календаря — понятным текстом; прочие (Telegram, D1, баги) не выдаём за «Google не отвечает».
 
 import { GoogleCalendarProvider } from "../calendar/google-provider";
 import { AuthRevoked, CalendarError, PermissionDenied } from "../calendar/model";
@@ -9,20 +8,14 @@ import type { AppContext } from "./context";
 import { connectKeyboard } from "./keyboards";
 import { t } from "./messages";
 
-/**
- * Ошибки календаря — понятным текстом (US-14); отозванный доступ — предложить переподключить (US-02).
- * Прочие ошибки (Telegram, D1, баги) не выдаём за «Google не отвечает» (ревью 2026-10-05).
- * Возвращает false, если действие не удалось.
- */
 export async function withCalendar(ctx: AppContext, user: User, chatId: number, action: (provider: GoogleCalendarProvider) => Promise<void>): Promise<boolean> {
   try {
-    // Календари дома (US-90, US-94): через аккаунт владельца, только общие календари
     const scope = ctx.calendarScope;
     if (scope && scope.calendarIds.length === 0) {
       await ctx.telegram.sendMessage(chatId, t("homeNoSharedCalendars", user.locale));
       return false;
     }
-    // Записи в календарь — уведомление в другие чаты календаря (US-72) и пересчёт напоминаний (US-71)
+    // botWriteListener: после записи — уведомление в другие чаты календаря (US-72) и пересчёт напоминаний (US-71)
     await action(
       new GoogleCalendarProvider(
         ctx.config,

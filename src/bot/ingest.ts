@@ -1,7 +1,4 @@
-// Событие из чужого контента (эпик 7b, R1): пересланное (US-65), фото/скриншот (US-66), файл .ics (US-67).
-// Чужое никогда не исполняется как команда — только карточка «Создать событие?» / «Добавить в календарь?».
-// Даты — нашим парсером по тексту (ADR-0005); LLM / vision — только название и место. Журнал (US-13) — без
-// чужого текста: только извлечённые поля. Чистая логика — ingest-logic.ts, src/ics/*.
+// Чужое никогда не исполняется как команда — только карточка. В журнал (US-13) не пишем чужой текст, только извлечённые поля.
 
 import type { CalendarProvider } from "../calendar/model";
 import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
@@ -38,24 +35,19 @@ export const ICS_CARD = "ics";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_ICS_BYTES = 256 * 1024;
-/** Событий из одного .ics за раз `[решение 2026-10-06]`: больше — вежливый отказ. */
+// Решение владельца
 export const MAX_ICS_EVENTS = 10;
-/** Пересланное старше этого — «завтра» считаем от сегодня, а не от даты сообщения (US-65 AC, допущение 7 дней). */
+// Пересланное старше — «завтра» считаем от сегодня, а не от даты сообщения (допущение US-65)
 const MAX_FORWARD_AGE_MS = 7 * 86_400_000;
 
-// --- Общее: черновик из чужого текста → карточка создания -------------------------
-
 interface ForeignSource {
-  /** Текст, где ищем дату, место, название (подпись пользователя — первой). */
+  // Подпись пользователя — первой
   text: string;
-  /** Первая строка описания: «Из пересланного сообщения от Маши». */
   sourceLine: string;
-  /** Что цитировать в описании (по умолчанию — text). */
   quote?: string;
-  /** Название и место от модели (vision); нет — спросим LLM по тексту (useLlm) или возьмём эвристику. */
+  // Нет — спросим LLM по тексту (useLlm) или возьмём эвристику
   intent?: CreateEventIntent;
   useLlm: boolean;
-  /** От какого момента считать относительные даты (дата исходного сообщения). */
   refNow?: number;
 }
 
@@ -71,10 +63,8 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
   const title = intent?.title ?? heuristicTitle(dates.sentence, dates.fragments, location);
-  // Шаг 5 ревью дат: дата — из структуры модели (она видит весь текст и вёрстку: дату в клетке календаря, «вечера»
-  // отдельной строкой, «16–28 июня» — не время), наш парсер проверяет; расходятся — оба кнопками, модель первой.
-  // Фото — тоже: замер 41 картинки (2026-10-09, tech-debt #28) — 28/33 против 24/33 с нашим разбором первым, без
-  // регрессий (и у Gemini на 12 синтетических). Нет структуры — как раньше, `start` (наш кусок первым)
+  // Модель первой: она видит вёрстку (дату в клетке календаря, «вечера» отдельной строкой). Замер 41 картинки
+  // (tech-debt #28): 28/33 против 24/33 с нашим разбором первым, без регрессий.
   const llm = intent ? { start: intent.start, ...(intent.when ? { when: intent.when } : {}) } : {};
   const check = llmDateCheck(src.text, dates.point, llm, parseLocal(localNow), tz, true);
   const source = src.useLlm ? "forward" : "image";
@@ -90,7 +80,6 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
     dateCheck: { source, agreement: check.agreement, llm: check.llm },
   };
   if (!start.startText && !start.altWhen) {
-    // Даты нет — спросить «Когда?»; ответ дополнит этот же черновик (dialog.ts, US-12)
     await mergeDialogState(
       ctx.db,
       conversationId,
@@ -106,10 +95,7 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   );
 }
 
-/**
- * Название и место по чужому тексту от LLM (как для команд — тот же промпт и tools). undefined — LLM не помогла
- * (не create_event, сбой): берём эвристику. null — лимит исчерпан, пользователю ответили.
- */
+// undefined — LLM не помогла (не create_event, сбой): берём эвристику; null — лимит исчерпан, пользователю ответили
 async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: string): Promise<CreateEventIntent | undefined | null> {
   if (!(await withinLimit(ctx, user, "llm", chatId))) return null;
   const now = ctx.clock.now();
@@ -123,7 +109,7 @@ async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: s
       ...(via.outPerM !== undefined ? { llmOutPerM: via.outPerM } : {}),
     };
     const intent = parsed.intent.name === "create_event" ? parsed.intent : undefined;
-    // Журнал — без чужого текста: только что извлекли (US-65)
+    // Журнал — без чужого текста: только извлечённое
     await recordUsage(ctx.db, {
       userId: user.id,
       kind: "llm",
@@ -159,9 +145,6 @@ async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: s
   }
 }
 
-// --- US-65: пересланное ---------------------------------------------------------
-
-/** «Создать событие из этого» на карточке пересланного. */
 export async function eventFromForwarded(
   ctx: AppContext,
   user: User,
@@ -170,7 +153,6 @@ export async function eventFromForwarded(
   p: ForwardOrigin & { text: string },
 ): Promise<void> {
   const dateMs = p.date ? p.date * 1000 : undefined;
-  // «Завтра» в пересланном — от даты исходного сообщения; скрыта или старше недели — от сегодня
   const refNow = dateMs && dateMs <= ctx.clock.now() && ctx.clock.now() - dateMs <= MAX_FORWARD_AGE_MS ? dateMs : undefined;
   await proposeFromForeign(ctx, user, chatId, conversationId, {
     text: p.text,
@@ -180,8 +162,6 @@ export async function eventFromForwarded(
   });
   await recordFeature(ctx.db, user.id, "forward_event", ctx.clock.now());
 }
-
-// --- Вложения: фото (US-66) и .ics (US-67) ---------------------------------------
 
 const isIcs = (d: NonNullable<TgMessage["document"]>) => /\.ics$/i.test(d.file_name ?? "") || /^text\/calendar/i.test(d.mime_type ?? "");
 
@@ -200,9 +180,9 @@ function pickImage(m: TgMessage): ImagePick {
   return { fileId: d.file_id, mime: d.mime_type!.toLowerCase() };
 }
 
-/** Фото, картинка-файл или .ics. false — это не вложение, которое мы умеем (дальше — «пока не умею»). */
+// false — не вложение, которое мы умеем: дальше ответят «пока не умею»
 export async function handleAttachment(ctx: AppContext, user: User, message: TgMessage, conversationId: string): Promise<boolean> {
-  // Только личные чаты `[решение 2026-10-06]`: в группе картинки и файлы — не команды боту
+  // Решение владельца: в группе картинки и файлы — не команды боту
   if (message.chat.type !== "private") return false;
   const chatId = message.chat.id;
   if (message.document && isIcs(message.document)) {
@@ -238,7 +218,7 @@ async function eventFromImage(
   const caption = message.caption?.trim() || undefined;
   let res: Awaited<ReturnType<typeof understandImageChain>>;
   try {
-    // Картинка не хранится: скачали, отдали модели, забыли (US-66)
+    // Картинку не храним: скачали, отдали модели, забыли (US-66)
     const bytes = await ctx.telegram.downloadFile(image.fileId);
     res = await understandImageChain(ctx.config.vision, bytes, image.mime, caption);
   } catch (e) {
@@ -285,8 +265,6 @@ async function eventFromImage(
   });
   await recordFeature(ctx.db, user.id, "image_event", ctx.clock.now());
 }
-
-// --- US-67: .ics ------------------------------------------------------------------
 
 export interface IcsCardPayload {
   chatId: number;
@@ -371,13 +349,12 @@ function icsItemBody(it: IcsItem, today: number, locale: string): string {
   return lines.join("\n");
 }
 
-/** Напоминания по умолчанию из настроек (US-04) — как у обычного создания. */
 function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
   const r = allDay ? (user.settings.allDayReminders ?? []) : user.settings.reminders;
   return r ? { reminders: r } : {};
 }
 
-/** «Добавить» на карточке .ics: создать все события по очереди (идемпотентно — повтор после сбоя не дублирует). */
+// idempotencyKey на каждое событие: повтор после сбоя не дублирует уже созданные
 export async function confirmIcs(
   ctx: AppContext,
   provider: CalendarProvider,
@@ -414,7 +391,6 @@ export async function confirmIcs(
   }
   const body = items.map((it) => icsItemBody(it, today, l)).join("\n\n");
   if (items.length === 1 && created[0]) {
-    // Одно событие — как обычное создание: ссылка и «Отменить» (US-61)
     const undo = await recordUndo(ctx, {
       conversationId: action.conversationId,
       user,

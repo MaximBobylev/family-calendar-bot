@@ -1,9 +1,5 @@
-// Синхронизация календарей Google (ADR-0005 §2, docs/research/google-push.md). Одна подписка на календарь провайдера
-// (calendar_sync), читает его токен «владельца» — одного из пользователей, у кого календарь подключён.
-//   плановый синк (cal_sync) — цепочка задач: с push — раз в сутки (сверка-страховка), без push — опрос раз в 5–15 мин;
-//   по push (cal_push) — /google/push кладёт задачу, синк делает очередь; продление канала (watch_renew) — до истечения.
-// Инкрементально по syncToken; 410 — полная пересинхронизация окна −1/+60 дней со сверкой со снимками.
-// Изменения (applyEntries) → снимки, напоминания US-71, уведомления US-72 — одним batch.
+// Одна подписка на календарь провайдера, читается токеном одного из подключивших его («владельца»). Инкрементально
+// по syncToken; 410 — полный синк окна со сверкой со снимками. С push — сверка раз в сутки, без push — опрос.
 
 import { cancelAssignmentsForProviderEvent, shiftAssignmentsForProviderEvent } from "../bot/assign/answers";
 import type { AppContext } from "../bot/context";
@@ -42,35 +38,31 @@ export const SYNC_JOB = "cal_sync";
 export const PUSH_SYNC_JOB = "cal_push";
 export const WATCH_RENEW_JOB = "watch_renew";
 
-/** Окно полной синхронизации `[допущение ADR-0005: −1 / +60 дней]`. */
 const WINDOW_PAST_MS = DAY_MS;
 const WINDOW_FUTURE_MS = 60 * DAY_MS;
-/** Опрос без push: календарь с изменениями за сутки — раз в 5 мин, остальные — раз в 15. */
 const POLL_ACTIVE_MS = 5 * MINUTE_MS;
 const POLL_IDLE_MS = 15 * MINUTE_MS;
 const ACTIVE_FOR_MS = DAY_MS;
-/** С push — сверка раз в сутки: страховка от потерянных уведомлений и сдвиг горизонта напоминаний. */
+// Страховка от потерянных push и сдвиг горизонта напоминаний.
 const RECONCILE_MS = DAY_MS;
-/** Канал просим на неделю (у Google по умолчанию столько же), продлеваем за сутки до конца. */
+// У Google по умолчанию столько же.
 const CHANNEL_TTL_MS = 7 * DAY_MS;
 const RENEW_BEFORE_MS = DAY_MS;
 const LEASE_MS = 2 * MINUTE_MS;
-/** Изменение экземпляра серии в пределах этого времени после записи бота в серию — сделано ботом. */
+// Экземпляры серии приходят синком позже записи бота в серию — в этом интервале они приписываются боту.
 const ATTRIBUTION_MS = 10 * MINUTE_MS;
-/** Повторные push в этом интервале сливаются в одну задачу синка. */
 const PUSH_COALESCE_MS = 15_000;
 
 export const PUSH_PATH = "/google/push";
 
-/** Кто сделал изменение через бота: исходный чат (туда не шлём) и имя автора. */
+// Правка через бота: в chatId и автору в личный чат эхо этой правки не шлём.
 export interface Origin {
   chatId: string;
   authorName?: string;
-  /** Кто сделал — ему в личный чат эхо своей правки не шлём (ревью R1 #18). */
   authorUserId?: string;
 }
 
-/** Новое состояние события: after = null — удалено; hint — что сделал бот, если прежнего снимка нет. */
+// after = null — удалено; hint — что сделал бот, если прежнего снимка нет.
 export interface Entry {
   eventId: string;
   after: Snapshot | null;
@@ -78,7 +70,6 @@ export interface Entry {
   origin?: Origin;
 }
 
-/** Изменение приписать записи бота: то же событие с тем же etag или запись в его серию (недавно). */
 function attribute(writes: BotWriteRow[], e: Entry, before: Snapshot | null): Origin | undefined {
   const series = e.after?.seriesId ?? before?.seriesId;
   const w = writes.find((x) => (x.eventId === e.eventId && (!e.after || x.etag === e.after.etag)) || (!!series && x.eventId === series));
@@ -87,11 +78,8 @@ function attribute(writes: BotWriteRow[], e: Entry, before: Snapshot | null): Or
     : undefined;
 }
 
-/**
- * Применить новые состояния событий календаря: снимки, напоминания и уведомления — одним batch, затем отправка.
- * Тот же etag, что в снимке, — изменений нет (в том числе эхо собственной записи бота). notify=false — первая
- * синхронизация: запоминаем, но не рассылаем. extra — дополнительные запросы в тот же batch.
- */
+// Тот же etag, что в снимке, — не изменение (в том числе эхо записи самого бота).
+// notify=false — первая синхронизация: запоминаем, но не рассылаем.
 export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry[], opts: { notify: boolean; extra?: D1PreparedStatement[] }): Promise<number> {
   const now = ctx.clock.now();
   const old = await snapshotsByIds(
@@ -120,7 +108,7 @@ export async function applyEntries(ctx: AppContext, pcid: string, entries: Entry
     const kind = !before && e.hint ? e.hint : diffEvent(before, e.after);
     if (!e.origin && before && (kind === "moved" || kind === "cancelled")) {
       const direct = writes.some((w) => w.eventId === e.eventId && !!e.after && w.etag === e.after.etag);
-      // Запись бота в серию целиком: экземпляры приходят синком — автор известен по журналу
+      // Запись бота в серию целиком: экземпляры приходят синком, автор — только по журналу записей
       const series = writes.find((w) => w.eventId === (e.after?.seriesId ?? before.seriesId));
       const deltaMs = kind === "moved" && isActive(e.after) && isActive(before) ? e.after.startMs! - before.startMs! : 0;
       if (!direct) linked.push({ eventId: e.eventId, beforeEtag: before.etag ?? null, kind, deltaMs, actor: series?.authorUserId ?? null });
@@ -170,7 +158,6 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export type SyncOutcome = "ok" | "busy" | "gone" | "unavailable";
 
-/** Синхронизировать календарь провайдера. chain — плановый синк: ещё и горизонт напоминаний. */
 export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain: boolean }): Promise<SyncOutcome> {
   const now = ctx.clock.now();
   let row = await getSyncRow(ctx.db, pcid);
@@ -180,7 +167,7 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
   }
   const owner = await pickOwner(ctx.db, pcid, row.ownerCalendarId);
   if (!owner) {
-    // Календарь больше никем не подключён (каналы остановлены при отключении)
+    // Каналы уже остановлены при отключении (stopUserChannels)
     await dropSync(ctx.db, pcid);
     return "gone";
   }
@@ -239,7 +226,6 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
   } catch (e) {
     // Календарь удалён/недоступен владельцу или доступ отозван — не повторяем задачей; сверка попробует снова
     const unavailable = e instanceof AuthRevoked || e instanceof PermissionDenied || e instanceof EventGone;
-    // Для админки и алерта sync_stale (миграция 0016): только класс ошибки, без текста ответа
     await updateSyncRow(ctx.db, pcid, { last_outcome: unavailable ? "unavailable" : "error", last_error_at: now, last_error: errorClass(e) })
       .run()
       .catch(() => undefined);
@@ -253,13 +239,10 @@ export async function syncCalendar(ctx: AppContext, pcid: string, opts: { chain:
   }
 }
 
-// --- Каналы push ---------------------------------------------------------------------------------------------------
-
 function randomToken(): string {
   return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Канал есть и проживёт дольше суток — ничего; иначе открыть новый (старый остановить). */
 async function ensureChannel(ctx: AppContext, provider: GoogleCalendarProvider, pcid: string, now: number): Promise<void> {
   const row = await getSyncRow(ctx.db, pcid);
   if (!row) return;
@@ -267,10 +250,8 @@ async function ensureChannel(ctx: AppContext, provider: GoogleCalendarProvider, 
   await openChannel(ctx, provider, row, now);
 }
 
-/**
- * Открыть канал events.watch на /google/push. Не вышло (адрес не принят, лимиты) — остаёмся на опросе: синк по
- * расписанию работает и без push. Новый канал записываем до остановки старого — уведомления не теряются.
- */
+// Не вышло (адрес не принят, лимиты) — остаёмся на опросе. Новый канал записываем до остановки старого — иначе
+// уведомления между ними теряются.
 async function openChannel(ctx: AppContext, provider: GoogleCalendarProvider, row: SyncRow, now: number): Promise<void> {
   const channel = { id: crypto.randomUUID(), token: randomToken(), address: `${ctx.config.publicBaseUrl}${PUSH_PATH}`, expiration: now + CHANNEL_TTL_MS };
   let res: { resourceId: string; expiration?: number };
@@ -307,7 +288,7 @@ async function openChannel(ctx: AppContext, provider: GoogleCalendarProvider, ro
   if (row.channelId && row.channelResourceId) await provider.stopChannel({ id: row.channelId, resourceId: row.channelResourceId }).catch(() => undefined);
 }
 
-/** Продление канала: если его ещё не заменил плановый синк. */
+// Канал мог уже заменить плановый синк — тогда expiresAt не совпадёт.
 export async function runWatchRenewJob(ctx: AppContext, job: DueJob): Promise<void> {
   const { pcid, expiresAt } = JSON.parse(job.payload_json) as { pcid: string; expiresAt: number };
   if (!ctx.config.googlePushEnabled) return;
@@ -318,7 +299,7 @@ export async function runWatchRenewJob(ctx: AppContext, job: DueJob): Promise<vo
   await openChannel(ctx, new GoogleCalendarProvider(ctx.config, ctx.db, owner.userId, ctx.clock), row, ctx.clock.now());
 }
 
-/** Перед /disconnect (US-03): остановить каналы, открытые токеном пользователя, — остановить их может только он. */
+// Перед /disconnect: канал Google может остановить только токен, который его открыл.
 export async function stopUserChannels(ctx: AppContext, userId: string): Promise<void> {
   const rows = await channelsOwnedBy(ctx.db, userId);
   if (rows.length === 0) return;
@@ -338,12 +319,9 @@ export async function stopUserChannels(ctx: AppContext, userId: string): Promise
   }
 }
 
-/** После отключения/замены аккаунта: календари, которых больше нет ни у кого, — без подписки и снимков. */
 export async function dropOrphanSyncs(db: D1Database): Promise<void> {
   for (const pcid of await orphanSyncs(db)) await dropSync(db, pcid);
 }
-
-// --- Задачи --------------------------------------------------------------------------------------------------------
 
 function jobStatement(db: D1Database, kind: string, pcid: string, at: number, key: string): D1PreparedStatement {
   return db
@@ -355,7 +333,7 @@ function jobStatement(db: D1Database, kind: string, pcid: string, at: number, ke
     .bind(crypto.randomUUID(), kind, at, JSON.stringify({ pcid }), key);
 }
 
-/** Следующий плановый синк; цепочка одна на календарь — если уже ждёт (повтор задачи, страховка), второй не ставим. */
+// Цепочка одна на календарь: повтор задачи и страховка не должны её удваивать.
 async function scheduleSync(db: D1Database, pcid: string, at: number): Promise<void> {
   const waiting = await db
     .prepare("SELECT 1 FROM scheduled_jobs WHERE kind = ? AND status = 'pending' AND payload_json ->> '$.pcid' = ? LIMIT 1")
@@ -364,7 +342,6 @@ async function scheduleSync(db: D1Database, pcid: string, at: number): Promise<v
   if (!waiting) await jobStatement(db, SYNC_JOB, pcid, at, `${SYNC_JOB}:${pcid}:${crypto.randomUUID()}`).run();
 }
 
-/** Когда следующий плановый синк: с живым каналом — сверка раз в сутки, без — опрос. */
 function nextSyncAt(row: SyncRow | null, now: number): number {
   if (row?.channelId && (row.channelExpiresAt ?? 0) > now) return now + RECONCILE_MS;
   return now + (row?.lastChangeAt && row.lastChangeAt > now - ACTIVE_FOR_MS ? POLL_ACTIVE_MS : POLL_IDLE_MS);
@@ -385,10 +362,8 @@ export async function runPushSyncJob(ctx: AppContext, job: DueJob): Promise<void
   if (outcome === "busy") await enqueuePushSync(ctx.db, pcid, ctx.clock.now() + 30_000);
 }
 
-/**
- * Задача синка по push. Пачка push (массовое изменение) — одна задача: пока ждёт ещё не начатая, новую не ставим.
- * Уже идущая не в счёт — она могла прочитать календарь до этого изменения. Возвращает id новой задачи (null — уже есть).
- */
+// Пачка push — одна задача, пока ждёт ещё не начатая. Уже идущая не в счёт: она могла прочитать календарь до
+// этого изменения.
 export async function enqueuePushSync(db: D1Database, pcid: string, at: number): Promise<string | null> {
   const waiting = await db
     .prepare("SELECT 1 FROM scheduled_jobs WHERE kind = ? AND status = 'pending' AND payload_json ->> '$.pcid' = ? AND fire_at <= ? LIMIT 1")
@@ -403,10 +378,7 @@ export async function enqueuePushSync(db: D1Database, pcid: string, at: number):
   return id;
 }
 
-/**
- * Страховка раз в час: у каждого подключённого календаря есть подписка и плановый синк (новые подключения, оборванные
- * цепочки); календари, которых больше нет, — без подписки; ретеншн outbox уведомлений.
- */
+// Страховка раз в час: новые подключения и оборванные цепочки синка.
 export async function ensureCalendarSyncs(db: D1Database, now: number): Promise<void> {
   await dropOrphanSyncs(db);
   await pruneNotices(db, now);

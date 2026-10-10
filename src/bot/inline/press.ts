@@ -1,7 +1,4 @@
-// US-95: зарегистрированный пользователь (allowlist или дом) нажал «📅 Добавить себе» под inline-карточкой или открыл
-// бота по её ссылке (/start add_<токен>). С Google — карточка создания в личном чате (подтверждение — обычной кнопкой
-// «Создать», create-event.ts); без Google — ссылки без OAuth. Личный чат ещё не начат (Telegram 403) — открываем его
-// deep link'ом из ответа на нажатие, дальше — /start add_<токен>.
+// Личный чат с ботом ещё не начат (Telegram 403) — открываем его deep link'ом из ответа на нажатие, дальше /start add_<токен>.
 
 import { parseLocal, utcToLocal } from "../../dates/calendar";
 import { hasGoogleAccount } from "../../db/accounts";
@@ -21,7 +18,7 @@ import { addStartLink, type InlineEvent, parseInlineCallback } from "./logic";
 
 export const isInlinePress = (cq: TgCallbackQuery | undefined) => !!cq && parseInlineCallback(cq.data) !== null;
 
-/** Нажатие под inline-карточкой. Ответ на нажатие — один: «карточка в личном чате» или ссылка, открывающая этот чат. */
+// Ответ на нажатие у Telegram один: «карточка в личном чате» или ссылка, открывающая этот чат.
 export async function handleInlinePress(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
   const token = parseInlineCallback(cq.data)!;
   const e = await loadInlineEvent(ctx.db, token, ctx.clock.now());
@@ -35,7 +32,6 @@ export async function handleInlinePress(ctx: AppContext, user: User, cq: TgCallb
   else await ctx.telegram.answerCallbackQuery(cq.id, undefined, { url: addStartLink(ctx.config.telegramBotUsername, token) });
 }
 
-/** /start add_<токен> в личном чате от зарегистрированного пользователя. */
 export async function handleAddStart(ctx: AppContext, user: User, chatId: number, token: string): Promise<void> {
   const e = await loadInlineEvent(ctx.db, token, ctx.clock.now());
   if (!e) {
@@ -45,7 +41,7 @@ export async function handleAddStart(ctx: AppContext, user: User, chatId: number
   await deliverToPrivate(ctx, user, chatId, token, e);
 }
 
-/** Карточка создания (с Google) или ссылки (без Google) в личный чат; false — чат с ботом не начат или бот заблокирован. */
+// false — чат с ботом не начат или бот заблокирован.
 async function deliverToPrivate(ctx: AppContext, user: User, chatId: number, token: string, e: InlineEvent): Promise<boolean> {
   try {
     if (await hasGoogleAccount(ctx.db, user.id)) return await sendCreateCard(ctx, user, chatId, e);
@@ -60,10 +56,7 @@ async function deliverToPrivate(ctx: AppContext, user: User, chatId: number, tok
 
 const isUnreachable = (err: unknown) => err instanceof TelegramError && err.status === 403;
 
-/**
- * Карточка «Создать событие?» в календаре по умолчанию — время в поясе нажавшего (событие то же, момент тот же).
- * Карточку отправляем вне withCalendar: 403 недоступного чата он выдал бы за внутреннюю ошибку и написал бы о ней туда же.
- */
+// Вне withCalendar: 403 недоступного чата он выдал бы за внутреннюю ошибку и написал бы о ней туда же.
 async function sendCreateCard(ctx: AppContext, user: User, chatId: number, e: InlineEvent): Promise<boolean> {
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   const tz = user.tz;

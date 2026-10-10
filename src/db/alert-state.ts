@@ -1,5 +1,4 @@
-// Алерты владельцу (src/ops/alerts.ts): состояние правил в alert_state (миграция 0009) и счётчики,
-// которых нет в запросах панели «здоровье». Только агрегаты — тексты и id пользователей не выбираются.
+// Состояние правил алертов и счётчики для них. Только агрегаты — тексты и id пользователей не выбираются.
 
 import type { AlertState } from "../ops/alert-rules";
 
@@ -22,7 +21,7 @@ export async function saveAlertState(db: D1Database, s: AlertState): Promise<voi
 }
 
 export interface AlertCounts {
-  /** Задачи (кроме дайджестов), ставшие failed за час: queued_at — время последней попытки. */
+  /** Без дайджестов; «за час» — по queued_at, это время последней попытки. */
   jobsFailedHour: number;
   digestFailedDay: number;
   aiCalls: number;

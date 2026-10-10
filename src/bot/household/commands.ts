@@ -1,6 +1,4 @@
-// Команды дома в личном чате (US-90): создать дом, пригласить, вступить по ссылке, имя и другие имена, дети, выйти.
-// Ответы на вопросы дома («Как вас называть?», имя ребёнка, название дома) — обычным сообщением через
-// dialog_state.awaiting, без reply (ревью R1 #7). Разбор текста — logic.ts (без LLM); экран /home и кнопки — menu.ts.
+// Ответы на вопросы дома — обычным сообщением через dialog_state.awaiting, без reply (ревью R1 #7).
 
 import { randomToken } from "../../crypto";
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
@@ -44,12 +42,11 @@ import {
 } from "./logic";
 import { calendarsScreen, notify, showHome } from "./menu";
 
-/** Сколько ждём ответа на вопросы дома (имя — человек может ответить не сразу). */
+// Сутки: на вопрос об имени отвечают не сразу.
 const HOME_AWAIT_TTL_MS = 24 * 60 * 60 * 1000;
 
 const aliasesSuffix = (aliases: string[], locale: string) => (aliases.length ? t("homeAliasesSuffix", locale, { list: aliases.join(", ") }) : "");
 
-/** Кнопки ролей к вопросу об имени: «муж, папа» / «жена, мама». */
 export const roleButtons = (locale: string): InlineKeyboardButton[][] => [
   [
     { text: t("homeRoleHusband", locale), callback_data: "hm:role:h" },
@@ -57,7 +54,6 @@ export const roleButtons = (locale: string): InlineKeyboardButton[][] => [
   ],
 ];
 
-/** Ждать ответа на вопрос дома следующим сообщением. */
 export async function awaitHome(
   ctx: AppContext,
   user: User,
@@ -68,17 +64,13 @@ export async function awaitHome(
   await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { ...awaiting, expiresAt: ctx.clock.now() + HOME_AWAIT_TTL_MS } }, ctx.clock.now());
 }
 
-/** Вопрос дома снят (ответили кнопкой). */
 export async function clearHomeAwait(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   const { awaiting } = await getDialogState(ctx.db, conversationId, user.id);
   if (awaiting?.kind.startsWith("home_")) await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: undefined }, ctx.clock.now());
 }
 
-/**
- * Команды дома в личном чате и ответы на вопросы дома. true — сообщение обработано, дальше не идёт.
- * Доступны и участнику без Google.
- */
+// Доступны и участнику без Google.
 export async function handleHouseholdText(ctx: AppContext, user: User, message: TgMessage, tgUser: TgUser): Promise<boolean> {
   const text = message.text?.trim();
   if (!text) return false;
@@ -90,7 +82,7 @@ export async function handleHouseholdText(ctx: AppContext, user: User, message: 
   return true;
 }
 
-/** Ответ на вопрос дома (awaiting). Не похоже на имя или название — вопрос снимается, сообщение идёт дальше как команда. */
+// Не похоже на имя или название — вопрос снимается, сообщение идёт дальше как команда.
 async function answerHomeQuestion(ctx: AppContext, user: User, chatId: number, text: string, tgUser: TgUser): Promise<boolean> {
   const conversationId = await ensureConversation(ctx.db, chatId, "private");
   const { awaiting } = await getDialogState(ctx.db, conversationId, user.id);
@@ -111,7 +103,6 @@ async function answerHomeQuestion(ctx: AppContext, user: User, chatId: number, t
     return true;
   }
   const target = awaiting.userId ?? user.id;
-  // Другого участника называет только владелец
   if (target !== user.id && membership.role !== "owner") return false;
   if (await nameTaken(ctx, membership.household.id, parsed.name, target)) {
     await ctx.telegram.sendMessage(chatId, t("homeNameTaken", user.locale, { name: parsed.name }));
@@ -189,7 +180,6 @@ export async function createHome(ctx: AppContext, user: User, chatId: number, na
   await ctx.telegram.sendMessage(chatId, escapeHtml(text), { inline_keyboard: picker.buttons }, { html: true });
 }
 
-/** Ссылка-приглашение (только владелец): одноразовая, 48 ч; preset — имя и другие имена приглашённого. */
 export async function sendInvite(
   ctx: AppContext,
   user: User,
@@ -233,7 +223,6 @@ export async function addKid(ctx: AppContext, user: User, chatId: number, househ
   await ctx.telegram.sendMessage(chatId, t("homeKidAdded", user.locale, { name, aliases: aliasesSuffix(aliases, user.locale) }));
 }
 
-/** Выйти из дома (участник; владелец — только распустить). messageId — экран /home, который заменить итогом. */
 export async function leaveHousehold(ctx: AppContext, user: User, chatId: number, membership: Membership, messageId?: number): Promise<void> {
   const { household } = membership;
   const say = async (text: string) => {
@@ -244,14 +233,12 @@ export async function leaveHousehold(ctx: AppContext, user: User, chatId: number
     await say(t("homeOwnerCantLeave", user.locale));
     return;
   }
-  // Поручения на нём — снова у авторов, напоминания сняты (QA-06)
   await releaseMemberAssignments(ctx, household.id, user.id);
   await removeMember(ctx.db, household.id, user.id);
   await say(t("homeLeft", user.locale, { name: household.name }));
   await notifyOwner(ctx, household, "homeMemberLeft", membership.displayName);
 }
 
-/** Имя уже носит другой взрослый участник или ребёнок дома (QA-16): тогда «Ане» не понять, кому. */
 async function nameTaken(ctx: AppContext, householdId: string, name: string, exceptUserId?: string): Promise<boolean> {
   const n = name.toLowerCase();
   const [members, kids] = await Promise.all([membersOf(ctx.db, householdId), dependentsOf(ctx.db, householdId)]);
@@ -260,7 +247,6 @@ async function nameTaken(ctx: AppContext, householdId: string, name: string, exc
   );
 }
 
-/** Владельцу — на его языке (QA-10): «новый участник» / «больше не в доме». */
 export async function notifyOwner(ctx: AppContext, household: Household, key: "homeMemberLeft" | "homeMemberJoined", name: string): Promise<void> {
   const owner = (await membersOf(ctx.db, household.id)).find((m) => m.role === "owner");
   if (!owner?.telegramId) return;
@@ -268,11 +254,8 @@ export async function notifyOwner(ctx: AppContext, household: Household, key: "h
   await notify(ctx, owner.telegramId, t(key, ownerUser?.locale ?? "ru", { name, home: household.name }));
 }
 
-/**
- * `/start home_<код>` (US-90): проверить приглашение ДО регистрации (посторонний с неверным кодом не становится
- * пользователем), затем атомарно «погасить» код и добавить в дом. Приглашённому allowlist не нужен.
- * Язык нового участника — из Telegram: не русский — английский интерфейс (ревью R1 #11, QA-32).
- */
+// Приглашение проверяется ДО регистрации: посторонний с неверным кодом не становится пользователем. Приглашённому
+// allowlist не нужен.
 export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number, code: string): Promise<void> {
   const lang = from.language_code ?? "ru";
   const now = ctx.clock.now();
@@ -307,7 +290,6 @@ export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number
   await addMember(ctx.db, { householdId: home.id, userId: user.id, name, aliases: preset?.aliases ?? [], now });
   await adoptOwnerTimezone(ctx.db, user.id, home.ownerUserId);
   const owner = (await membersOf(ctx.db, home.id)).find((m) => m.role === "owner");
-  // Что я буду делать и что можно попросить (ревью R1 §4.1); вечерняя сводка «Завтра» — одной кнопкой (ревью R1 #10)
   await ctx.telegram.sendMessage(chatId, t("homeJoined", locale, { name: home.name, owner: owner?.displayName || "—" }), {
     inline_keyboard: [[{ text: t("homeTomorrowButton", locale), callback_data: "hm:tmr" }]],
   });
@@ -316,7 +298,6 @@ export async function joinByInvite(ctx: AppContext, from: TgUser, chatId: number
   await notifyOwner(ctx, home, "homeMemberJoined", name);
 }
 
-/** «Как вас называть в доме?» — ответ обычным сообщением (awaiting) или кнопкой роли. */
 export async function askName(ctx: AppContext, user: User, chatId: number): Promise<void> {
   await awaitHome(ctx, user, chatId, { kind: "home_name" });
   await ctx.telegram.sendMessage(chatId, t("homeAskName", user.locale), { inline_keyboard: roleButtons(user.locale) });

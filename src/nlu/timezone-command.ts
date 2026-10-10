@@ -1,5 +1,4 @@
-// US-07 (R2): фразы о часовом поясе и поездках — без LLM, до шага NLU: «Я в Тбилиси [до воскресенья]», «Я переехал в …»,
-// «Я вернулся», «Какой у меня часовой пояс?». Город — по словарю городов (любой падеж); незнакомый город — не про пояс.
+// Фразы о часовом поясе и поездках — без LLM, до шага NLU; незнакомый город — не про пояс.
 // Кейсы — testdata/nlu/timezone.yaml.
 
 import { parseDateFragment } from "../dates";
@@ -14,7 +13,7 @@ export type TimezoneCommand =
   /** until — слова окончания как сказаны («воскресенья», «15 октября»): день считает бот в поясе поездки. */
   | { kind: "trip"; tz: string; place: string; until?: string };
 
-/** Основа города по формам «по Берлину» / «до Берлина»: «берлин» — и «в Берлине», и «в Берлин»; короче 4 букв — только точно. */
+/** Общая основа форм «по Берлину» / «до Берлина» ловит и «в Берлине», и «в Берлин»; короче 4 букв — только точно. */
 const STEMS = ZONE_CITIES.map((c) => {
   const [a = "", b = ""] = c.forms;
   let i = 0;
@@ -22,7 +21,6 @@ const STEMS = ZONE_CITIES.map((c) => {
   return { tz: c.tz, stem: a.slice(0, i), exact: new Set([...c.forms, c.en.toLowerCase()]) };
 });
 
-/** Пояс места: город из словаря, IANA-имя, UTC±N; не знаем — undefined. */
 export function placeTimeZone(place: string): string | undefined {
   const known = parseTimeZone(place);
   if (known) return known;
@@ -84,10 +82,7 @@ export function parseTimezoneCommand(text: string): TimezoneCommand | null {
   return null;
 }
 
-/**
- * День окончания поездки («YYYY-MM-DD») по словам после «до»: дата, момент или конец периода; «на неделю», «на 3 дня»,
- * «на месяц» — сегодня плюс длительность. Прошлое и не дата — нет.
- */
+/** Слова после «до» (уже без «до») или «на неделю» — сегодня плюс длительность. Прошлое и не дата — undefined. */
 export function tripUntil(text: string, now: string, tz: string): string | undefined {
   if (/^(на|for)\s/i.test(text)) {
     const d = parseDateFragment({ text, kind: "duration", now, tz });

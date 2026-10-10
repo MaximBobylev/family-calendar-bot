@@ -1,11 +1,4 @@
-// Тестовые эндпоинты (ADR-0006). Доступны только при TEST_MODE=true — в проде маршрутов нет.
-//   POST /__test/clock  {"now": "2026-10-07T07:00:00Z"} — установить «сейчас»
-//   POST /__test/tick   — выполнить планировщик до текущего «сейчас» (задачи — сразу, без очереди)
-//   POST /__test/hourly — часовые работы cron: ретеншн, страховка дайджестов и синхронизации календарей
-//   POST /__test/drain  — синхронно обработать все апдейты из inbox; упавшие — 500 со списком {failed: [update_id]}
-//   POST /__test/retry  — повторить упавшие апдейты (status 'failed'), как это сделал бы ретрай очереди (tech-debt #5)
-//   POST /__test/alerts — оценить правила алертов сейчас (в cron — раз в 5 минут) → {sent: ["jobs:fire", …]}
-//   POST /__test/reset  — очистить состояние
+// Доступны только при TEST_MODE=true — в проде этих маршрутов нет. Задачи tick выполняет сразу, без очереди.
 
 import type { AppContext } from "../bot/context";
 import { setTestClock } from "../clock";
@@ -17,6 +10,7 @@ import { OPS_LAST_HOURLY, OPS_LAST_TICK, setOpsState } from "../db/ops-state";
 import { runAlerts } from "../ops/alerts";
 import { ensureCalendarSyncs } from "../sync/engine";
 
+// Дочерние таблицы раньше родительских: D1 проверяет внешние ключи.
 const TABLES = [
   "date_metrics",
   "inline_adds",

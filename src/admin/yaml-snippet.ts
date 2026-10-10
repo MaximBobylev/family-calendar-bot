@@ -1,12 +1,10 @@
-// «В тест» и replay (docs/admin-console.md #6, #7): фраза из журнала → заготовка YAML для переносимых наборов
-// (testdata/dates, testdata/extract) и прогон текущего детерминированного извлечения/парсера дат.
 // Чисто: без D1, сети и LLM. Админка в репозиторий не пишет — заготовку копируют руками.
 
 import { parseDateFragment, type ParseResult, type ValueKind } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { extractDateSpans } from "../dates/extract";
 
-/** «Сейчас» фразы — локальное время пользователя без смещения, как в testdata («2026-10-07T10:00»). */
+// Локальное время без смещения, как в testdata («2026-10-07T10:00»).
 export function localNow(utcMs: number, tz: string): { now: string; tz: string } {
   try {
     return { now: formatMoment(utcToLocal(utcMs, tz)), tz };
@@ -23,7 +21,7 @@ export interface ReplayFragment {
 }
 
 export interface Replay {
-  /** Как извлекались даты: list_events — период, остальное — момент (как в обработке команд). */
+  // list_events — период, остальное — момент, как в обработке команд.
   kind: "point" | "range";
   spans: { point?: string; range?: string; duration?: string };
   fragments: ReplayFragment[];
@@ -42,7 +40,6 @@ export function replay(text: string, now: string, tz: string, intent: string | n
   return { kind, spans, fragments };
 }
 
-/** Значение в стиле YAML flow — как пишут testdata: `{ datetime: "2026-10-09T15:00" }`, `{ error: in_past }`. */
 export function flow(v: unknown): string {
   if (v === null || v === undefined) return "null";
   if (Array.isArray(v)) return `[${v.map(flow).join(", ")}]`;
@@ -54,7 +51,6 @@ export function flow(v: unknown): string {
   return String(v);
 }
 
-/** Заготовка для testdata/dates/<файл>.yaml: по кейсу на фрагмент, ожидание = текущий разбор. */
 export function datesSnippet(r: Replay, now: string, tz: string, idBase: string): string {
   const head = "# testdata/dates/<файл>.yaml → cases: — ожидание = текущий разбор, проверьте и поправьте";
   if (r.fragments.length === 0) return `${head}\n# дат в тексте не найдено — заготовки нет`;
@@ -71,10 +67,7 @@ export function datesSnippet(r: Replay, now: string, tz: string, idBase: string)
   return [head, ...cases].join("\n");
 }
 
-/**
- * Заготовка для testdata/extract/cases.yaml. Текст — замаскированный (▒ заменить руками на нейтральные слова)
- * или показанный (тогда анонимизировать: имена, места, личное).
- */
+// Текст замаскированный (▒ заменить руками на нейтральные слова) или показанный — тогда анонимизировать: имена, места, личное.
 export function extractSnippet(r: Replay, text: string, now: string, tz: string, revealed: boolean): string {
   const note = revealed
     ? "# ТЕКСТ НЕ АНОНИМИЗИРОВАН: замените имена, места и личное на нейтральные слова, даты не трогайте"

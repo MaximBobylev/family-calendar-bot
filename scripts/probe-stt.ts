@@ -1,4 +1,4 @@
-// Проверка распознавания на реальном провайдере — ручной запуск, не тест (ключи из .env → сервис deploy):
+// Распознавание на живом провайдере; тратит квоту прода — только с разрешения владельца:
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/probe-stt.ts [--provider groq|workers-ai] файл.ogg ...
 // Файл — OGG/Opus, как голосовое Telegram (синтетику: say -v Milena -o x.aiff "…" && ffmpeg -i x.aiff -c:a libopus x.ogg).
 import { readFileSync } from "node:fs";

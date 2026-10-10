@@ -1,5 +1,4 @@
-// Служебные метки эксплуатации (ops_state, миграция 0006): последний прогон cron, кеш getWebhookInfo.
-// Читает админка (src/admin/queries.ts); пишут cron и админка.
+// Служебные метки эксплуатации: последний прогон cron, кеш getWebhookInfo, заголовки лимитов провайдеров.
 
 export const OPS_LAST_TICK = "last_tick_at";
 export const OPS_LAST_HOURLY = "last_hourly_at";
@@ -11,13 +10,11 @@ export async function setOpsState(db: D1Database, key: string, value: string, no
     .run();
 }
 
-/** Заголовки лимитов последнего вызова провайдера (x-ratelimit-*, retry-after) — для панели «Квоты». */
 export const RATE_HEADERS_PREFIX = "rate_headers:";
 
 export interface SeenRateHeaders {
   provider: string;
   headers: Record<string, string>;
-  /** HTTP-статус того вызова: 429 — лимит уже сработал. */
   status: number;
   at: number;
 }

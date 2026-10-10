@@ -1,7 +1,4 @@
-// Планировщик (ADR-0005 п.4, п.6; tech-debt #14). Cron раз в минуту только раздаёт наступившие задачи
-// в очередь (pending → queued); выполняет их потребитель очереди (queued → running → done).
-// Повтор — с экспоненциальной задержкой (fire_at сдвигается), после MAX_ATTEMPTS — failed.
-// Задача, застрявшая в queued/running дольше STALE_MS (упал воркер, потерялось сообщение), возвращается в pending.
+// Cron только раздаёт наступившие задачи в очередь, выполняет их потребитель очереди (ADR-0005 п.4, tech-debt #14).
 // Исполнитель должен быть идемпотентным по смыслу: при сбое после отправки задача может повториться.
 
 import type { AppContext } from "./bot/context";
@@ -29,25 +26,22 @@ export interface JobMessage {
 
 const MAX_ATTEMPTS = 5;
 const STALE_MS = 10 * 60 * 1000;
-/** Первая пауза перед повтором упавшей задачи; дальше удваивается. */
 const RETRY_BASE_MS = 60 * 1000;
-/** Разброс отправки по секундам — лимит Telegram ~30 сообщений/с. */
+/** Лимит Telegram — ~30 сообщений/с. */
 const JOBS_PER_SECOND = 20;
 
 type JobHandler = (ctx: AppContext, job: DueJob) => Promise<void>;
 const HANDLERS: Record<string, JobHandler> = {
   [DIGEST_JOB]: runDigestJob,
-  // US-70, R1: «Завтра» и «Неделя» — тот же исполнитель, период по виду задачи
+  // Один исполнитель: период сводки берёт из вида задачи
   [TOMORROW_DIGEST_JOB]: runDigestJob,
   [WEEK_DIGEST_JOB]: runDigestJob,
-  // Синхронизация Google, уведомления об изменениях, напоминания в Telegram (ADR-0005 §2, US-72, US-71)
   [SYNC_JOB]: runSyncJob,
   [PUSH_SYNC_JOB]: runPushSyncJob,
   [WATCH_RENEW_JOB]: runWatchRenewJob,
   [NOTIFY_FLUSH_JOB]: runNotifyFlushJob,
   [TG_REMINDER_JOB]: runReminderJob,
   [ASSIGN_JOB]: runAssignJob,
-  // Поездки (US-07): «Вернулись?»
   [TRIP_CHECK_JOB]: runTripCheckJob,
 };
 
@@ -64,10 +58,7 @@ export async function claimDueJobs(db: D1Database, now: number, limit = 500): Pr
   return results;
 }
 
-/**
- * Один проход cron: вернуть зависшие, забрать наступившие и отдать их `enqueue` (очередь; в тестах — сразу выполнить).
- * Если очередь недоступна — задачи возвращаются в pending до следующей минуты.
- */
+/** Застрявшие в queued/running (упал воркер, потерялось сообщение) возвращаются в pending. В тестах enqueue выполняет сразу. */
 export async function tick(db: D1Database, now: number, enqueue: (jobs: DueJob[], delays: number[]) => Promise<void>): Promise<number> {
   await db
     .prepare("UPDATE scheduled_jobs SET status = 'pending' WHERE status IN ('queued', 'running') AND queued_at < ?")
@@ -87,7 +78,7 @@ export async function tick(db: D1Database, now: number, enqueue: (jobs: DueJob[]
   return jobs.length;
 }
 
-/** Выполнить задачу из очереди. Повторная доставка того же сообщения ничего не делает (захват queued → running). */
+/** Очередь может доставить сообщение повторно — тогда захват queued → running не пройдёт и ничего не случится. */
 export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void> {
   const now = ctx.clock.now();
   const job = await ctx.db
@@ -115,7 +106,6 @@ export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void
     if (job.attempts >= MAX_ATTEMPTS) {
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'failed', last_error = ? WHERE id = ?").bind(error, job.id).run();
     } else {
-      // 1, 2, 4, 8 минут
       const retryAt = ctx.clock.now() + RETRY_BASE_MS * 2 ** (job.attempts - 1);
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'pending', fire_at = ?, last_error = ? WHERE id = ?").bind(retryAt, error, job.id).run();
     }
@@ -124,11 +114,7 @@ export async function runQueuedJob(ctx: AppContext, jobId: string): Promise<void
 
 const DAY_MS = 86_400_000;
 
-/**
- * Ретеншн (privacy-политика, ADR-0005, ревью 2026-10-05): inbox — 7 дней (ошибки — 30),
- * тексты в журнале — 90 дней, карточки/state/OAuth-ссылки — 1 день после истечения, диалог — 30 дней,
- * выполненные задачи — 7 дней (ошибки — 30).
- */
+/** Сроки хранения — из privacy-политики (ADR-0005). */
 export async function cleanup(db: D1Database, now: number): Promise<void> {
   await db.batch([
     db.prepare("DELETE FROM inbox WHERE status = 'done' AND received_at < ?").bind(now - 7 * DAY_MS),
@@ -141,7 +127,7 @@ export async function cleanup(db: D1Database, now: number): Promise<void> {
     db.prepare("DELETE FROM dialog_state WHERE updated_at < ?").bind(now - 30 * DAY_MS),
     db.prepare("DELETE FROM scheduled_jobs WHERE status IN ('done', 'cancelled') AND fire_at < ?").bind(now - 7 * DAY_MS),
     db.prepare("DELETE FROM scheduled_jobs WHERE status = 'failed' AND fire_at < ?").bind(now - 30 * DAY_MS),
-    // Inline-карточки (US-95): срок токена — неделя после события; отметки «добавил» — 60 дней
+    // expires_at токена — уже неделя после события
     db.prepare("DELETE FROM inline_events WHERE expires_at < ?").bind(now),
     db.prepare("DELETE FROM inline_adds WHERE created_at < ?").bind(now - 60 * DAY_MS),
   ]);

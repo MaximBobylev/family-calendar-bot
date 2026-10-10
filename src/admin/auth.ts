@@ -1,9 +1,9 @@
-// Вход в админку: пока HTTP Basic (ADMIN_USER / ADMIN_PASSWORD), один оператор. Дальше — Cloudflare Access + operators
-// (docs/admin-console.md, «Доступ»). Изменения — только POST с проверкой Origin.
+// Пока HTTP Basic, один оператор; дальше — Cloudflare Access (docs/admin-console.md, «Доступ»). Изменения — только POST
+// с проверкой Origin.
 
 import { timingSafeEqual } from "../crypto";
 
-/** Имя оператора (для аудита) или null, если вход не прошёл. Пустой пароль в конфиге — админка закрыта. */
+// Пустой пароль в конфиге — админка закрыта.
 export function adminOperator(request: Request, user: string, password: string): string | null {
   if (!user || !password) return null;
   const header = request.headers.get("authorization") ?? "";

@@ -1,7 +1,5 @@
-// US-71: напоминания о встречах в Telegram «за N минут». Задача scheduled_jobs на (событие, пользователь, момент);
-// источник времени — снимки синхронизации (event_snapshots), поэтому перенос/удаление события переставляет или
-// снимает напоминание. Ставим на горизонт HORIZON_MS вперёд; дальше горизонт двигает плановый синк календаря.
-// При срабатывании событие сверяется со снимком ещё раз: не совпало время — молчим (новая задача уже стоит).
+// Время берётся из снимков синка, горизонт двигает плановый синк. При срабатывании сверяемся со снимком ещё раз:
+// время не совпало — молчим (задача на новое время уже стоит).
 
 import type { AppContext } from "../bot/context";
 import { telegramChatOf } from "../db/accounts";
@@ -11,9 +9,8 @@ import type { DueJob } from "../scheduler";
 import { DAY_MS, MINUTE_MS, reminderFireAt, reminderText, type Snapshot } from "./logic";
 
 export const TG_REMINDER_JOB = "tg_reminder";
-/** Напоминания ставятся на столько вперёд; плановый синк (не реже раза в сутки) двигает горизонт. */
+// Больше суток — плановый синк бывает не реже раза в сутки.
 export const HORIZON_MS = 3 * DAY_MS;
-/** Варианты «за N минут» в /settings. */
 export const TG_REMINDER_PRESETS = [5, 10, 15, 30, 60];
 
 interface ReminderPayload {
@@ -23,15 +20,11 @@ interface ReminderPayload {
   minutes: number;
 }
 
-/** Кому напоминать о событиях календаря: пользователи с включённой настройкой. */
 export const reminderUsers = (chats: CalendarChat[]) => chats.filter((c): c is CalendarChat & { userId: string } => !!c.userId && !!c.settings.tgReminderMin);
 
 type ReminderUser = { userId: string; settings: { tgReminderMin?: number } };
 
-/**
- * Поставить напоминания по снимкам для пользователей — одним запросом (json_each). Ключ — событие, пользователь и
- * момент: повтор не дублирует; отменённую раньше (событие переносили туда и обратно) — вернуть.
- */
+// Отменённую раньше задачу с тем же ключом (событие переносили туда и обратно) — вернуть, а не пропустить.
 function insertReminders(db: D1Database, pcid: string, snaps: Snapshot[], users: ReminderUser[], now: number): D1PreparedStatement[] {
   const rows: { id: string; u: string; f: number; p: string; k: string }[] = [];
   for (const s of snaps) {
@@ -65,7 +58,6 @@ function insertReminders(db: D1Database, pcid: string, snaps: Snapshot[], users:
   return out;
 }
 
-/** События изменились: снять их ожидающие напоминания и поставить по новому времени (в том же batch, что и снимки). */
 export function reminderStatements(
   db: D1Database,
   pcid: string,
@@ -87,7 +79,6 @@ export function reminderStatements(
   ];
 }
 
-/** Сдвинуть горизонт: напоминания на ближайшие HORIZON_MS по всем событиям календаря (идемпотентно). */
 export async function extendReminders(db: D1Database, pcid: string, now: number): Promise<void> {
   const users = reminderUsers(await chatsForCalendar(db, pcid));
   if (users.length === 0) return;
@@ -96,13 +87,11 @@ export async function extendReminders(db: D1Database, pcid: string, now: number)
   if (stmts.length) await db.batch(stmts);
 }
 
-/** Настройка пользователя поменялась: снять его напоминания и поставить заново по всем его календарям. */
 export async function rescheduleUserReminders(db: D1Database, userId: string, now: number): Promise<void> {
   await db.prepare("UPDATE scheduled_jobs SET status = 'cancelled' WHERE user_id = ? AND kind = ? AND status = 'pending'").bind(userId, TG_REMINDER_JOB).run();
   for (const pcid of await userCalendarIds(db, userId)) await extendReminders(db, pcid, now);
 }
 
-/** Срабатывание: сверить со снимком (время, отмена, отказ, настройка) и отправить. */
 export async function runReminderJob(ctx: AppContext, job: DueJob): Promise<void> {
   const p = JSON.parse(job.payload_json) as ReminderPayload;
   const user = job.user_id ? await findUserById(ctx.db, job.user_id) : null;

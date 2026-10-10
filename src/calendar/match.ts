@@ -54,7 +54,6 @@ export function normalizeWords(text: string): string[] {
     .filter((w) => w.length > 0);
 }
 
-/** Значимые слова описания (без «встречу», предлогов и местоимений). */
 export function queryWords(query: string): string[] {
   return normalizeWords(query).filter((w) => !STOP_WORDS.has(w));
 }
@@ -67,7 +66,6 @@ export function sameWord(a: string, b: string): boolean {
   return common >= Math.max(3, Math.min(a.length, b.length) - 2);
 }
 
-/** Доля значимых слов описания, найденных в названии: 0…1. Пустое описание — 0. */
 export function titleScore(query: string, title: string): number {
   const q = queryWords(query);
   if (q.length === 0) return 0;
@@ -75,13 +73,9 @@ export function titleScore(query: string, title: string): number {
   return q.filter((w) => t.some((tw) => sameWord(w, tw))).length / q.length;
 }
 
-/** Слова, которые не отличают один календарь от другого: «в общий календарь», «из рабочего календаря». */
 const CALENDAR_WORDS = new Set(["в", "во", "из", "на", "к", "для", "in", "to", "календарь", "календаря", "календаре", "календарем", "календарём", "calendar"]);
 
-/**
- * Календарь по названию или алиасу (US-06): сначала точно, потом с учётом падежей («в семейном» ~ «семейный»).
- * Неоднозначно или не найдено — undefined.
- */
+/** Сначала точно, потом с учётом падежей; неоднозначно — undefined, как и «не найдено». */
 export function findCalendarByName<C extends { title: string; aliases: string[] }>(calendars: C[], name: string): C | undefined {
   const norm = (s: string) => normalizeWords(s).filter((w) => !CALENDAR_WORDS.has(w));
   const wanted = norm(name);

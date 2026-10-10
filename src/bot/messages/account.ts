@@ -1,4 +1,4 @@
-// Тексты: приветствие, доступ, подключение Google и страницы OAuth, /disconnect (US-01, US-02, US-03).
+// Приветствие, доступ, подключение Google и страницы OAuth, /disconnect.
 
 import type { Messages } from "./types";
 
@@ -65,7 +65,6 @@ export const accountMessages = {
     ru: "Не получилось подключить календарь. Вернитесь в Telegram и попробуйте ещё раз.",
     en: "Couldn't connect the calendar. Go back to Telegram and try again.",
   },
-  // --- /disconnect (US-03) ---
   disconnectConfirm: {
     ru: "Отключить Google Календарь и удалить все ваши данные?\n\nЯ отзову доступ к календарю и удалю настройки, названия календарей, черновики и журнал команд. События в самом Google Календаре останутся как есть.",
     en: "Disconnect Google Calendar and delete all your data?\n\nI'll revoke calendar access and delete your settings, calendar names, drafts and command log. Events in Google Calendar itself stay as they are.",

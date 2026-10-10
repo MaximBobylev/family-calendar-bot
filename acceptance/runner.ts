@@ -1,15 +1,7 @@
-// Раннер приёмочных сценариев (ADR-0006). Работает с ботом только по HTTP — как с чёрным ящиком,
-// поэтому те же сценарии пригодны для любой реализации (TypeScript сейчас, Go потом).
-//
-// Окружение: SUT_URL (бот), FAKES_URL (фейки), WEBHOOK_SECRET.
-// Запуск: docker compose run --rm acceptance                       — все сценарии
-//         docker compose run --rm -e SCENARIO=undo,US-61 acceptance — выборочно (или аргументами:
-//         docker compose run --rm acceptance npx tsx acceptance/runner.ts undo US-61)
-//         … --list (или SCENARIO_LIST=1) — только список id / story / файл, без запуска
-// SCENARIO_DIR=repro — сценарии из acceptance/repro (воспроизведения багов QA, по умолчанию не запускаются);
-// DUMP_TELEGRAM=1 — после каждого сценария напечатать все сообщения бота (исследовательское тестирование).
-// Фильтр — через запятую или пробел; сценарий выбран, если подходит хоть одно слово: US-xx — по story,
-// «10-undo» / «10-undo.yaml» — по файлу, иначе — подстрока id. Фильтр ничего не выбрал — ошибка.
+// Бот — только чёрный ящик по HTTP, код приложения не импортировать: сценарии должны пережить переписывание на Go (ADR-0006).
+// SCENARIO=undo,US-61 (или аргументы) — фильтр: US-xx — по story, «10-undo[.yaml]» — по файлу, иначе подстрока id;
+// --list (SCENARIO_LIST=1) — только список; SCENARIO_DIR=repro — сценарии из acceptance/repro (по умолчанию не запускаются);
+// DUMP_TELEGRAM=1 — после каждого сценария напечатать все сообщения бота.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,68 +10,61 @@ import { parse as parseYaml } from "yaml";
 const SUT = process.env.SUT_URL ?? "http://localhost:8787";
 const FAKES = process.env.FAKES_URL ?? "http://localhost:9100";
 const SECRET = process.env.WEBHOOK_SECRET ?? "test-secret";
-/** Имя бота (TELEGRAM_BOT_USERNAME стенда) — для ответов боту в группе (US-94). */
 const BOT_USERNAME = process.env.BOT_USERNAME ?? "cab_test_bot";
 const cliArgs = process.argv.slice(2);
 const listOnly = cliArgs.includes("--list") || !!process.env.SCENARIO_LIST;
 const filters = [...cliArgs.filter((a) => a !== "--list"), process.env.SCENARIO ?? ""].flatMap((a) => a.split(/[\s,]+/)).filter(Boolean);
 
-// --- Формат сценария ---------------------------------------------------------
-
 type Step =
   | { clock: string }
-  /** Проход планировщика (cron раз в минуту): наступившие задачи выполняются сразу. */
+  /** Проход cron (раз в минуту): наступившие задачи выполняются сразу. */
   | { tick: true }
   /** Часовые работы cron: ретеншн, страховка дайджестов. */
   | { hourly: true }
-  /** Оценка правил алертов владельцу (в cron — раз в 5 минут); expect_sent — какие переходы отправлены: ["jobs:fire"]. */
+  /** Оценка правил алертов; expect_sent — какие переходы отправлены: ["jobs:fire"]. */
   | { alerts: true | { expect_sent: string[] } }
   | { telegram: TelegramInput }
   | { webhook_raw: { body: unknown; secret?: string | null; expect_status: number } }
-  /** Пользователь from добавил бота в групповой чат chat_id (my_chat_member: left → member) — приветствие (ревью R1 #13). */
+  /** my_chat_member: left → member — from добавил бота в групповой чат chat_id. */
   | { bot_added: { from: number; chat_id: number; first_name?: string } }
   | { expect_telegram: TelegramExpectation[] }
   | { expect_no_telegram: true }
-  /** Сколько сообщений бот отправил с прошлой проверки (без проверки содержимого) — для длинных серий. */
+  /** Сообщений бота с прошлой проверки, без проверки содержимого. */
   | { expect_telegram_count: number }
-  /** Повторить шаги N раз (лимиты, серии запросов). */
   | { repeat: { times: number; steps: Step[] } }
-  /** Сколько всего запросов получила LLM с начала сценария. */
-  /** Запросы к основному LLM (запасной считается отдельно — expect_provider_calls). */
+  /** Только основная LLM; запасная — в expect_provider_calls. */
   | { expect_llm_requests: number }
-  /** Провайдер отвечает ошибкой (0 — снова работает): llm | llm-backup | stt | stt-openai. */
+  /** status 0 — снова работает; provider: llm | llm-backup | stt | stt-openai. */
   | { provider_outage: { provider: string; status: number } }
-  /** Ответы эндпоинтов остатков квот: {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?}. */
+  /** {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?}. */
   | { fake_quotas: Record<string, unknown> }
-  /** Сколько запросов получили эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance) — проверка кеша; ключ — верный. */
+  /** Запросов к /key и /user/balance — проверка кеша остатков. */
   | { expect_quota_requests: number }
-  /** Сколько раз вызывался каждый провайдер с последнего сброса: {llm: 1, llm-backup: 1, stt-openai: 1, stt: 0}. */
+  /** С начала сценария: {llm: 1, llm-backup: 1, stt-openai: 1, stt: 0}. */
   | { expect_provider_calls: Record<string, number> }
   | { google_account: { email: string; calendars: unknown[] } }
   | { oauth: OAuthStep }
   | { oauth_reuse_last_link: { expect_status: number } }
-  /** Открыть callback, придержанный шагом oauth с hold_callback (по email согласия), в браузере browser. */
+  /** Открыть callback, придержанный шагом oauth с hold_callback (of — email согласия), в браузере browser. */
   | { oauth_callback: { of: string; browser?: string; without_bind_cookie?: boolean; expect_status: number; page_contains?: string[] } }
   | { google_revoke: string }
-  /** Выданные аккаунту access token Google перестают приниматься (401) — как истёкший раньше срока или отозванный. */
+  /** Выданные аккаунту access token получают 401 — как отозванные раньше срока. */
   | { google_expire_access: string }
-  /** Сколько раз бот обновлял access token (POST /token, grant_type=refresh_token) с начала сценария. */
   | { expect_token_refreshes: number }
-  /** Ближайшие times (1) вызовов Telegram method (sendMessage) с этим текстом отвечают ошибкой status (500). */
+  /** Ближайшие times (1) вызовов method (sendMessage) с этим текстом отвечают ошибкой status (500). */
   | { telegram_fails: { text_contains: string; method?: string; status?: number; times?: number } }
-  /** Ретрай очереди: повторить упавшие апдейты (tech-debt #5); expect_failure — снова упадёт. */
+  /** Повторить упавшие апдейты; expect_failure — снова упадёт. */
   | { queue_retry: true | { expect_failure?: boolean } }
-  /** Отзывы токена ботом (US-03): сколько было и какой токен отозван последним. */
+  /** last — какой токен отозван последним. */
   | { expect_token_revocations: { count: number; last?: string } }
-  /** Эндпоинт отзыва токена у Google отвечает ошибкой. */
+  /** Статус ошибки эндпоинта отзыва у Google. */
   | { token_revoke_fails: number }
   | { google_touch: { email: string; calendar: string; id: string } }
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
-  /** Голосовое: распознаётся в transcript; stt_error — Whisper отвечает ошибкой; download_fails — файла нет. */
   /**
-   * Голосовое: Whisper распознаёт его в transcript; heard — что услышит мультимодальная модель, если бот решит
-   * переслушать (эскалация): {transcript, tool, args} | {no_speech: true} | {error: status}.
+   * stt_error — Whisper отвечает ошибкой; download_fails — файла нет; heard — что услышит мультимодальная модель,
+   * если бот решит переслушать: {transcript, tool, args} | {no_speech: true} | {error: status}.
    */
   | {
       voice: {
@@ -89,17 +74,15 @@ type Step =
         stt_error?: number;
         download_fails?: boolean;
         reply_to_question?: boolean;
-        /** Пересланное голосовое (forward_origin) — не команда пользователя (US-10). */
         forwarded?: boolean;
-        /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
+        /** Обработка падает — дальше шаг queue_retry. */
         expect_failure?: boolean;
         heard?: { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number };
       };
     }
-  /** Сколько раз бот переслушивал голосовые мультимодальной моделью. */
   | { expect_voice_rehearings: number }
   /**
-   * Фото (US-66): content — «содержимое» файла (ключ фикстуры), seen — что «увидит» Gemini:
+   * content — ключ фикстуры вместо содержимого файла; seen — что «увидит» модель:
    * {text, tool?: create_event, args?} | {no_event: true, text?} | {error: status}. as_document — картинка файлом с этим mime.
    */
   | {
@@ -114,34 +97,31 @@ type Step =
         forward_from?: string;
       };
     }
-  /** Файл (US-67, .ics): содержимое — content; file_name, mime_type как пришлёт Telegram. */
   | { document: { from: number; file_name: string; content: string; mime_type?: string; size?: number } }
-  /** Сколько раз бот отправлял картинку в Gemini (US-66); caption_contains — в последнем запросе была подпись. */
+  /** caption_contains — в последнем запросе была подпись. */
   | { expect_vision_requests: number | { count: number; caption_contains?: string; via?: "openai" | "gemini" } }
   /**
    * HTTP-запрос к SUT. В path, значениях form и text_(not_)contains подставляются {{имя}} из capture предыдущих шагов;
    * capture: { имя: регэксп с одной группой } — запомнить кусок ответа (например, id из ссылки).
    */
   | { http_get: HttpCheck }
-  /** POST формы (application/x-www-form-urlencoded) — действия на страницах (админка). */
+  /** Форма как application/x-www-form-urlencoded. */
   | { http_post: HttpCheck & { form?: Record<string, string> } }
   | { llm: Record<string, unknown> }
-  /** Нажать кнопку с этим текстом в последнем сообщении бота, где она есть; first_name — имя нажавшего в Telegram; chat — только сообщение в этом чате (US-91: у каждого своё предложение). */
+  /** Кнопка в последнем сообщении бота, где она есть; first_name — имя нажавшего; chat — искать только в этом чате. */
   | { press: string | { button: string; from?: number; again?: boolean; first_name?: string; chat?: number } }
   /** Ответить (reply) на последний вопрос бота с ForceReply. */
   | { reply: { from: number; text: string } }
-  /** url_contains — ответ открывает ссылку (t.me/<бот>?start=…, US-95); capture — запомнить кусок url как {{имя}}. */
+  /** url_contains — ответ открывает ссылку; capture — запомнить кусок url как {{имя}}. */
   | { expect_callback_answer: { text_contains?: string[]; empty?: boolean; url_contains?: string[]; capture?: Record<string, string> } }
   | { expect_google_events: { email: string; calendar: string; events: ExpectedEvent[]; count?: number } }
   /** Подключённый пользователь «одним шагом»: аккаунт Google + /start + согласие; сообщения привязки проверены и пропущены. */
   | { connected_user: { from: number; email: string; calendars: unknown[]; language?: string } }
   /**
    * Запомнить кусок последнего сообщения бота, где регэксп нашёлся (одна группа): {invite: "start=home_(\\S+)"}.
-   * Подставляется как {{имя}} в text шага telegram (US-90: код приглашения).
+   * Подставляется как {{имя}} в text шага telegram.
    */
   | { capture_telegram: Record<string, string> }
-  // --- Inline-режим (US-95) ---
-  /** Inline-запрос «@бот <query>» от пользователя from (в любом чате). */
   | { inline_query: { from: number; query: string; language?: string } }
   /** Последний answerInlineQuery: empty — без результатов; results — по порядку (заголовок, текст карточки, кнопки). */
   | { expect_inline_answer: { empty?: boolean; results?: InlineResultExpectation[] } }
@@ -150,7 +130,6 @@ type Step =
    * callback без message, с inline_message_id (один на результат — нажатия разных людей попадают в одно сообщение).
    */
   | { inline_press: { from: number; index?: number; language?: string } }
-  // --- Синхронизация Google, push (ADR-0005 §2, US-72, US-71) ---
   /**
    * Google шлёт push-уведомление во все каналы календаря (state: exists | sync; token — подменить секрет канала).
    * expect_status — каждый ответ бота (200); channels — сколько каналов должно быть у календаря (по умолчанию ≥ 1).
@@ -162,7 +141,7 @@ type Step =
   | { google_expire_sync_tokens: string }
   /** calendarList и events.list у фейка Google — страницами по n записей (0 — без страниц): проверка пагинации. */
   | { google_page_size: number }
-  /** Каналы push календаря у Google: сколько открыто, сколько остановлено всего (channels.stop). */
+  /** stopped — всего через channels.stop. */
   | { expect_google_channels: { calendar: string; active: number; stopped?: number } }
   /** Запросы синхронизации календаря с начала сценария по видам: {full: 1, incremental: 2, expired: 1}. */
   | { expect_google_syncs: { calendar: string } & Record<string, number | string> };
@@ -173,15 +152,12 @@ interface InlineResultExpectation {
   buttons?: string[];
 }
 
-/**
- * Пользователь нажимает последнюю кнопку «Подключить» и на экране Google соглашается (consent: email)
- * или отказывает (deny: true).
- */
+/** Нажать последнюю «Подключить» и на экране Google согласиться (consent: email) или отказать (deny). */
 interface OAuthStep {
   consent?: string;
   deny?: boolean;
   expect_status?: number;
-  /** Страница перед экраном согласия (tech-debt #1): «подключаете к Telegram-аккаунту …». */
+  /** Страница перед экраном согласия. */
   page_contains?: string[];
   /** Отправить форму страницы без её cookie — как чужой сайт (CSRF). */
   without_cookie?: boolean;
@@ -189,13 +165,12 @@ interface OAuthStep {
   from?: number;
   /** Именованный браузер со своими cookie (по умолчанию — один на сценарий). */
   browser?: string;
-  /** Callback без cookie oauth_bind — как будто его открыли в другом браузере (login CSRF, A4). */
+  /** Callback без cookie oauth_bind — как открытый в другом браузере (login CSRF). */
   callback_without_bind_cookie?: boolean;
-  /** Ответ callback содержит эти строки. */
   callback_contains?: string[];
   /** Согласиться у Google, но callback не открывать: code+state «уносит» злоумышленник (шаг oauth_callback). */
   hold_callback?: boolean;
-  /** Google получил другой code_challenge — verifier бота не подойдёт, обмен кода отвергается (PKCE, A5). */
+  /** Google получил другой code_challenge — verifier бота не подойдёт, обмен кода отвергается (PKCE). */
   tamper_challenge?: boolean;
 }
 
@@ -213,18 +188,16 @@ interface TelegramInput {
   voice?: { file_id: string; duration: number };
   first_name?: string;
   username?: string;
-  /** Пересланное сообщение (forward_origin от другого пользователя) — не команда (US-10). */
   forwarded?: boolean;
-  /** Имя автора пересланного (по умолчанию «Friend») и дата исходного сообщения ISO (по умолчанию скрыта — 0), US-65. */
+  /** По умолчанию автор «Friend», дата ISO скрыта (0). */
   forward_from?: string;
   forward_date?: string;
-  /** Вложения (US-66, US-67) — шаги photo и document. */
   photo?: { file_id: string; file_size?: number; width: number; height: number }[];
   document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   caption?: string;
-  /** Обработка апдейта падает (ждём ретрай очереди — шаг queue_retry). */
+  /** Обработка падает — дальше шаг queue_retry. */
   expect_failure?: boolean;
-  /** Ответ (reply) на последнее сообщение бота в этом чате — обращение к боту в группе (US-94). */
+  /** Reply на последнее сообщение бота в этом чате — обращение к боту в группе. */
   reply_to_bot?: boolean;
 }
 
@@ -268,8 +241,6 @@ interface Scenario {
   steps: Step[];
 }
 
-// --- HTTP --------------------------------------------------------------------
-
 async function post(url: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 }
@@ -282,7 +253,6 @@ interface TelegramCall {
     message_id?: number;
     text?: string;
     reply_markup?: { inline_keyboard?: { text: string; url?: string; callback_data?: string }[][]; force_reply?: boolean };
-    /** answerInlineQuery (US-95). */
     results?: InlineResult[];
   };
 }
@@ -298,14 +268,12 @@ async function allTelegramCalls(): Promise<TelegramCall[]> {
   return (await (await fetch(`${FAKES}/__fake/telegram/calls`)).json()) as TelegramCall[];
 }
 
-/** Последнее сообщение бота в чате — как reply_to_message «ответа боту» (с автором-ботом). */
 async function lastBotMessageIn(chatId: number): Promise<{ message_id: number; from: unknown }> {
   const last = (await allTelegramCalls()).filter((c) => c.method === "sendMessage" && String(c.body.chat_id) === String(chatId) && c.messageId).at(-1);
   if (!last) throw new AssertionError(`no bot message in chat ${chatId} to reply to`);
   return { message_id: last.messageId!, from: { id: 1, is_bot: true, first_name: "Bot", username: BOT_USERNAME } };
 }
 
-/** URL последней кнопки привязки Google из сообщений бота (from — только в этот чат). */
 async function lastConnectUrl(from?: number): Promise<string> {
   const urls = (await allTelegramCalls())
     .filter((c) => from === undefined || String(c.body.chat_id) === String(from))
@@ -319,7 +287,7 @@ async function lastConnectUrl(from?: number): Promise<string> {
   return `${SUT}${u.pathname}${u.search}`;
 }
 
-/** Cookie браузера для бота: имя+путь → значение. Срок (Max-Age) не отслеживается, кроме удаления (Max-Age=0). */
+/** Срок (Max-Age) не отслеживается, кроме удаления (Max-Age=0). */
 class CookieJar {
   private items = new Map<string, { name: string; value: string; path: string }>();
 
@@ -349,7 +317,6 @@ class CookieJar {
   }
 }
 
-/** Запрос «из браузера»: его cookie уходят с запросом (кроме withoutCookies), Set-Cookie из ответа запоминаются. */
 async function browse(jar: CookieJar, url: string, init: RequestInit & { withoutCookies?: boolean } = {}): Promise<Response> {
   const { withoutCookies, ...rest } = init;
   const cookie = withoutCookies ? "" : jar.header(url);
@@ -358,10 +325,7 @@ async function browse(jar: CookieJar, url: string, init: RequestInit & { without
   return res;
 }
 
-/**
- * Экран согласия Google (фейк): согласие выдаёт код, привязанный к code_challenge из ссылки (tamper — к чужому);
- * отказ — error=access_denied. Возвращает URL callback, куда Google отправил бы браузер.
- */
+/** Код привязан к code_challenge из ссылки (tamper — к чужому). Возвращает URL callback, куда Google отправил бы браузер. */
 async function googleConsent(consent: URL, o: { consent?: string; deny?: boolean; tamper_challenge?: boolean }): Promise<string> {
   const p = consent.searchParams;
   const callback = new URL(p.get("redirect_uri") ?? "");
@@ -407,9 +371,7 @@ async function openConnectLink(
   return { status: res.status, page, consent: new URL(res.headers.get("location") ?? "") };
 }
 
-// --- Выполнение --------------------------------------------------------------
-
-/** Служебные вызовы Telegram — не сообщения пользователю; в expect_telegram не учитываются. */
+/** Не сообщения пользователю — в expect_telegram не учитываются. */
 const SERVICE_METHODS = new Set(["answerCallbackQuery", "getFile", "sendChatAction", "getWebhookInfo", "answerInlineQuery"]);
 
 class AssertionError extends Error {}
@@ -427,7 +389,6 @@ async function runScenario(s: Scenario): Promise<void> {
   const browsers = new Map<string, CookieJar>();
   const browser = (name = "default") => browsers.get(name) ?? browsers.set(name, new CookieJar()).get(name)!;
   const heldCallbacks = new Map<string, string>();
-  // Значения, запомненные capture в http_get/http_post, — подставляются как {{имя}}
   const vars = new Map<string, string>();
   const fill = (s: string) =>
     s.replace(/\{\{(\w+)\}\}/g, (_, name: string) => {
@@ -475,7 +436,6 @@ async function runScenario(s: Scenario): Promise<void> {
     await drainInbox("drain", where, t.expect_failure);
   };
 
-  /** Обработать inbox (drain) или повторить упавшие (retry); expectFailure — обработка должна упасть. */
   const drainInbox = async (kind: "drain" | "retry", where: string, expectFailure = false) => {
     const res = await post(`${SUT}/__test/${kind}`, {});
     const body = await res.text();
@@ -503,7 +463,7 @@ async function runScenario(s: Scenario): Promise<void> {
       callback_query: {
         id: `cq${++callbackSeq}`,
         from: { id: p.from, is_bot: false, first_name: p.firstName ?? "Test", language_code: "ru" },
-        // Отрицательный id — групповой чат (как в Telegram)
+        // В Telegram у групп отрицательный id
         message: { message_id: p.messageId, date: 0, chat: { id: p.chatId, type: p.chatId < 0 ? "group" : "private" } },
         data: p.data,
       },
@@ -538,7 +498,7 @@ async function runScenario(s: Scenario): Promise<void> {
     } else if ("capture_telegram" in step) {
       const calls = (await allTelegramCalls()).filter((c) => !SERVICE_METHODS.has(c.method)).reverse();
       for (const [name, re] of Object.entries(step.capture_telegram)) {
-        // Текст и ссылки кнопок (ссылка .ics, US-95)
+        // И ссылки кнопок — например, на .ics
         const haystack = (c: TelegramCall) => [c.body.text ?? "", ...(c.body.reply_markup?.inline_keyboard ?? []).flat().map((b) => b.url ?? "")].join("\n");
         const m = calls.map((c) => new RegExp(re).exec(haystack(c))).find((x) => x?.[1]);
         if (!m) throw new AssertionError(`${where}: capture_telegram ${name} /${re}/ not found in bot messages`);
@@ -1002,7 +962,6 @@ function checkCall(where: string, call: TelegramCall, exp: TelegramExpectation) 
   }
 }
 
-/** Все вызовы Telegram сценария по порядку: метод, чат, текст, кнопки (DUMP_TELEGRAM). */
 async function dumpTelegram(): Promise<void> {
   for (const c of await allTelegramCalls()) {
     if (c.method === "getFile" || c.method === "sendChatAction") continue;
@@ -1015,9 +974,6 @@ async function dumpTelegram(): Promise<void> {
   }
 }
 
-// --- Main ----------------------------------------------------------------------
-
-/** Сценарий подходит под слово фильтра: US-xx — story, имя файла (с .yaml или без) — файл, иначе подстрока id. */
 function matches(s: Scenario & { file: string }, word: string): boolean {
   if (/^(US|ADR)-/i.test(word)) return s.story.toUpperCase() === word.toUpperCase();
   if (/^\d\d-/.test(word) || word.endsWith(".yaml")) return s.file === word || s.file === `${word}.yaml`;

@@ -1,6 +1,4 @@
-// Метрика `date_fix` (tech-debt #26): ловим правку даты сразу после карточки создания — другой вариант, изменение времени
-// только что созданного события, отмена и создание заново на другую дату. Классификация — date-fix-logic.ts; здесь — состояние
-// диалога, строка в date_metrics и лог. Всё best-effort: сбой метрики не ломает действие пользователя.
+// Всё best-effort: сбой метрики не ломает действие пользователя. Классификация — date-fix-logic.ts.
 
 import type { StoredRef } from "../db/conversations";
 import { getDialogState, mergeDialogState } from "../db/conversations";
@@ -29,7 +27,6 @@ async function safely(what: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 
-/** Событие создано кнопкой карточки: правка ли это (другой вариант / пересоздание), учёт «создано», запомнить карточку. */
 export function dateFixOnCreated(ctx: AppContext, card: CardRef, payload: CreateCardPayload, index: number, ref: StoredRef): Promise<void> {
   return safely("created", async () => {
     const o = payload.options[index]!;
@@ -56,7 +53,6 @@ export function dateFixOnCreated(ctx: AppContext, card: CardRef, payload: Create
   });
 }
 
-/** Карточку создания отменили: запомнить, что хотели, — пересоздание на другую дату станет правкой. */
 export function dateFixOnCancelled(ctx: AppContext, card: CardRef, payload: CreateCardPayload): Promise<void> {
   return safely("cancelled", async () => {
     const o: CreateOption | undefined = payload.options[0];
@@ -74,7 +70,6 @@ export function dateFixOnCancelled(ctx: AppContext, card: CardRef, payload: Crea
   });
 }
 
-/** Созданное только что событие откатили «Отменить»: дальше — как отменённая карточка. */
 export function dateFixOnUndoCreate(ctx: AppContext, card: CardRef, ref: StoredRef): Promise<void> {
   return safely("undo", async () => {
     const state = await getDialogState(ctx.db, card.conversationId, card.userId);
@@ -85,7 +80,6 @@ export function dateFixOnUndoCreate(ctx: AppContext, card: CardRef, ref: StoredR
   });
 }
 
-/** Событие изменено: время только что созданного — правка его даты (один раз на карточку). */
 export function dateFixOnModified(ctx: AppContext, card: CardRef, ref: StoredRef, timeChanged: boolean): Promise<void> {
   return safely("modified", async () => {
     const state = await getDialogState(ctx.db, card.conversationId, card.userId);

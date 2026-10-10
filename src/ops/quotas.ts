@@ -1,7 +1,5 @@
-// Остатки квот провайдеров и платформы Cloudflare для /admin/quotas и алерта quota_low (docs/admin-console.md, «Квоты»):
-// бесплатные эндпоинты остатков (OpenRouter /key, DeepSeek /user/balance, GraphQL Analytics — Workers AI, Workers, D1,
-// Queues), заголовки последних настоящих вызовов и оценки по журналу. Квоту моделей не тратит. Ответы API — в кеше ops_state минуту; сбой одного провайдера
-// не ломает остальные. Адреса — из цепочек провайдеров конфигурации (ADR-0006), ключи на страницу не попадают.
+// Квоту моделей не тратит: только бесплатные эндпоинты остатков, заголовки прошлых вызовов и оценки по журналу.
+// Сбой одного провайдера не ломает остальные; ключи на страницу и в алерт не попадают.
 
 import type { AppContext } from "../bot/context";
 import { getOpsState, loadRateHeaders, type SeenRateHeaders, saveRateHeaders, setOpsState } from "../db/ops-state";
@@ -46,26 +44,22 @@ const NO_ACCESS_HINT = " — токену CF_ANALYTICS_TOKEN (или LLM_API_KEY
 export interface QuotaProbe {
   provider: string;
   rows: QuotaRow[];
-  /** Не удалось получить (текст без ключей). */
   error?: string;
-  /** Провайдер не подключён — почему. */
+  // Провайдер не подключён — почему
   off?: string;
 }
 
 export interface QuotaReport {
   now: number;
-  /** Когда запрошены API (кеш минуту). */
   fetchedAt: number;
   cached: boolean;
   probes: QuotaProbe[];
   headers: SeenRateHeaders[];
-  /** Тариф Workers из конфигурации (vars.CF_WORKERS_PLAN); null — аккаунт Cloudflare неизвестен. */
   cfPlan: CfPlan | null;
 }
 
-/** Ответ API или ошибка — то, что лежит в кеше. */
 type Got = { ok: true; json: unknown } | { ok: false; error: string };
-/** cloudflare — neurons Workers AI; cf_* — платформа (Workers, D1, Queues). */
+// cloudflare — neurons Workers AI; cf_* — платформа (Workers, D1, Queues).
 const SOURCES = ["openrouter", "deepseek", "cloudflare", "cf_workers", "cf_d1", "cf_queues"] as const;
 type Fetched = Partial<Record<(typeof SOURCES)[number], Got>>;
 
@@ -102,7 +96,7 @@ function endpoints(ctx: AppContext): Partial<Record<keyof Fetched, Endpoint>> & 
   return out;
 }
 
-/** Ключ в тексте ошибки (URL, эхо провайдера) — на страницу и в алерт не попадает. */
+// Провайдер может вернуть ключ в тексте ошибки (URL, эхо запроса).
 function scrub(s: string, keys: string[]): string {
   return keys.reduce((t, k) => t.split(k).join("<key>"), s).slice(0, 200);
 }
@@ -139,7 +133,7 @@ async function fetchAll(ctx: AppContext, now: number): Promise<{ fetched: Fetche
   return { fetched, fetchedAt: now, cached: false };
 }
 
-/** Разбор ответа: неожиданный формат — ошибка провайдера, а не падение страницы. */
+// Неожиданный формат ответа — ошибка провайдера, а не падение страницы.
 function rowsOf(provider: string, got: Got | undefined, parse: (json: unknown) => QuotaRow[], prefix = ""): QuotaProbe {
   if (!got) return { provider, rows: [] };
   const fail = (msg: string) => ({ provider, rows: [], error: prefix ? gqlError(prefix + msg) : msg });
@@ -151,7 +145,6 @@ function rowsOf(provider: string, got: Got | undefined, parse: (json: unknown) =
   }
 }
 
-/** Ошибка доступа GraphQL — с подсказкой, какое право дать токену. */
 const gqlError = (msg: string) => (/not authorized|authorization denied|permission/i.test(msg) ? msg + NO_ACCESS_HINT : msg);
 
 export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
@@ -203,7 +196,6 @@ export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
     probes.push(probe);
   }
 
-  // Платформа Cloudflare: Workers, D1, Queues — по строке ошибки на продукт
   const cf = ctx.config.cloudflare;
   if (cf) {
     probes.push(rowsOf("Workers", fetched.cf_workers, (j) => workersRows(parseWorkers(j, cf.scriptName), cf.plan, cf.scriptName, fetchedAt), "GraphQL: "));
@@ -225,10 +217,9 @@ export async function quotaReport(ctx: AppContext): Promise<QuotaReport> {
   return { now, fetchedAt, cached, probes, headers, cfPlan: cf?.plan ?? null };
 }
 
-/** Строки всех провайдеров — для алерта. */
 export const quotaRows = (r: QuotaReport) => r.probes.flatMap((p) => p.rows);
 
-/** Сохранить заголовки лимитов, увиденные цепочкой, — по записи на провайдера. Сбой записи не мешает ответу пользователю. */
+// Сбой записи не должен мешать ответу пользователю.
 export async function rememberRateHeaders(ctx: AppContext, seen: SeenHeaders[]): Promise<void> {
   if (seen.length === 0) return;
   try {

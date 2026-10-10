@@ -1,5 +1,4 @@
-// Поиск события по описанию для изменения и удаления (US-40, US-50): описание с падежами, день/время
-// из фразы, «следующую», «её», «вторую» (US-60); несколько — кнопками, по названию не нашлось — события дня.
+// Несколько кандидатов — выбор кнопками; по названию не нашлось, но день назван — все события дня.
 
 import { queryWords, titleScore } from "../calendar/match";
 import type { CalendarEvent, CalendarProvider, EventRef, EventReminders } from "../calendar/model";
@@ -24,18 +23,17 @@ const diff = minutesBetween;
 export type EventPurpose = "modify" | "delete";
 
 export interface EventRequest {
-  /** Описание события: «встречу с Петей», «планёрку». */
   query?: string;
-  /** «следующую», «её/эту», «вторую» (из последнего списка). */
+  // «следующую», «её/эту», «вторую» (из последнего списка)
   reference?: "next" | "last" | "list";
   listIndex?: number;
   newTitle?: string;
-  /** "" — убрать место. */
+  // "" — убрать место
   newLocation?: string;
-  /** "" — убрать описание; appendDescription — дописать к существующему (US-41). */
+  // "" — убрать описание
   newDescription?: string;
   appendDescription?: boolean;
-  /** Напоминания события (US-42): overrides [] — без напоминаний. */
+  // overrides [] — без напоминаний
   reminders?: EventReminders;
   scope?: "this" | "all";
   spans: ModifySpans;
@@ -48,12 +46,8 @@ interface PickCardPayload {
   purpose: EventPurpose;
 }
 
-// --- Поиск события ----------------------------------------------------------
-
-/**
- * Кандидаты. fuzzy=true — по названию ничего не совпало, но день указан: предлагаем все события дня
- * («Не нашёл „созвон“ — может, одна из этих?»), это закрывает и синонимы («созвон» ↔ «звонок»).
- */
+// fuzzy — по названию ничего не совпало, но день указан: предлагаем все события дня. Это закрывает и синонимы
+// («созвон» ↔ «звонок»).
 async function findCandidates(
   ctx: AppContext,
   provider: CalendarProvider,
@@ -77,7 +71,6 @@ async function findCandidates(
     if (!req.query && !req.spans.reference) return { events: [], fuzzy: false };
   }
 
-  // Окно поиска: день/время из фразы или ближайшие 30 дней
   let from = localToUtc({ day: now.day, minutes: 0 }, tz);
   let to = localToUtc({ day: now.day + SEARCH_DAYS, minutes: 0 }, tz);
   let exact: Moment | undefined;
@@ -102,7 +95,6 @@ async function findCandidates(
     const scored = events.map((e) => ({ e, s: titleScore(req.query!, e.title) })).filter((x) => x.s > 0);
     const best = Math.max(0, ...scored.map((x) => x.s));
     events = scored.filter((x) => x.s === best).map((x) => x.e);
-    // Название не совпало, но день назван — предложить события этого дня
     if (events.length === 0 && req.spans.reference) {
       events = inWindow.filter((e) => !e.allDay);
       fuzzy = events.length > 0;
@@ -121,7 +113,7 @@ async function findCandidates(
     }
   }
   if (req.reference === "next" || (!req.spans.reference && !exact)) {
-    // Без указания дня — ближайшие ещё не начавшиеся (US-21)
+    // Без указания дня — только ещё не начавшиеся
     events = events.filter((e) => (e.allDay ? e.startDay >= now.day : diff(e.start!, now) > 0));
   }
   // Событие на весь день — по полуночи UTC своего дня
@@ -139,7 +131,7 @@ export interface LocateArgs {
   purpose: EventPurpose;
 }
 
-/** Ровно одно найденное событие — или null, если пользователю уже ответили (не найдено / выбор кнопками). */
+// null — пользователю уже ответили (не найдено / выбор кнопками)
 export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a: LocateArgs): Promise<CalendarEvent | null> {
   const { user, chatId } = a;
   const locale = user.locale;
@@ -178,7 +170,6 @@ export async function locateEvent(ctx: AppContext, provider: CalendarProvider, a
   return null;
 }
 
-/** Выбор события из нескольких кандидатов → выбранное событие и для чего оно. */
 export async function confirmPick(
   ctx: AppContext,
   provider: CalendarProvider,

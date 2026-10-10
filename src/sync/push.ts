@@ -1,6 +1,5 @@
-// POST /google/push — уведомление Google о канале events.watch (ADR-0005 §2, docs/research/google-push.md).
-// Проверяем id канала и секрет (X-Goog-Channel-Token), ставим задачу синка и сразу отвечаем 200: тяжёлой работы
-// в запросе нет. «sync» — подтверждение открытия канала, ничего не делаем.
+// Только ставим задачу синка и сразу отвечаем 200 — тяжёлой работы в запросе Google нет. Состояние «sync» —
+// подтверждение открытия канала, не изменение.
 
 import type { AppContext } from "../bot/context";
 import { timingSafeEqual } from "../crypto";
@@ -8,7 +7,7 @@ import { syncRowByChannel } from "../db/sync";
 import { log } from "../log";
 import { enqueuePushSync } from "./engine";
 
-/** sendJob — отдать задачу в очередь сразу (прод); без него задачу заберёт ближайший cron. */
+// Без sendJob задачу заберёт ближайший cron.
 export async function handleGooglePush(ctx: AppContext, request: Request, sendJob?: (jobId: string) => Promise<void>): Promise<Response> {
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
   const channelId = request.headers.get("x-goog-channel-id") ?? "";
@@ -23,7 +22,7 @@ export async function handleGooglePush(ctx: AppContext, request: Request, sendJo
   if (state === "sync") return new Response("ok");
   const jobId = await enqueuePushSync(ctx.db, row.pcid, ctx.clock.now());
   if (jobId && sendJob) {
-    // Сразу в очередь (как tick: pending → queued); не вышло — задача остаётся pending до ближайшего cron
+    // Как tick: pending → queued; не вышло — задача остаётся pending до ближайшего cron
     try {
       await ctx.db.prepare("UPDATE scheduled_jobs SET status = 'queued', queued_at = ? WHERE id = ? AND status = 'pending'").bind(ctx.clock.now(), jobId).run();
       await sendJob(jobId);

@@ -1,6 +1,3 @@
-// Квоты провайдеров (src/ops/quota-rules.ts): разбор ответов OpenRouter /key, DeepSeek /user/balance, GraphQL
-// Cloudflare и заголовков Groq; пороги жёлтого и алерта; ни ключей, ни меток ключей в строках.
-
 import { describe, expect, it } from "vitest";
 import {
   CF_LIMITS,
@@ -202,7 +199,7 @@ describe("Cloudflare platform (GraphQL Analytics)", () => {
     expect(req).toMatchObject({ remaining: 15_000, level: "warn", alert: true });
     expect(cpu).toMatchObject({ used: 25.8, remaining: 0, level: "warn" });
     expect(lowQuotas([req!, cpu!])).toEqual(["Workers: 15000 запр. из 100000"]);
-    // Paid: месячное включённое
+    // Paid — месячный лимит, сброс 1-го числа
     expect(workersRows(s, "paid", SCRIPT, NOW)[0]).toMatchObject({ limit: CF_LIMITS.paid.requests, alert: false, resetAt: Date.parse("2026-11-01T00:00:00Z") });
   });
 

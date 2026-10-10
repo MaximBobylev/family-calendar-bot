@@ -1,6 +1,5 @@
-// US-95: inline-запрос «@бот завтра 19:00 футбол» → карточки-результаты. Отвечаем прямо из webhook, без inbox:
-// Telegram шлёт запрос на каждое нажатие клавиши, ответ нужен сразу, а повтор безвреден. Без LLM — только парсер дат.
-// Посторонним — пустой ответ (US-01, ADR-0001).
+// Отвечаем прямо из webhook, без inbox: Telegram шлёт запрос на каждое нажатие клавиши, ответ нужен сразу, повтор
+// безвреден. Посторонним — пустой ответ.
 
 import { DEFAULT_DURATION_MIN } from "../../db/settings";
 import { saveInlineEvent } from "../../db/inline";
@@ -13,9 +12,8 @@ import { inlineKeyboard, inlineToken } from "./guest";
 import { inlineCardText, inlineEventEnd, inlineResultTitle, inlineWhen, parseInlineQuery } from "./logic";
 import { utcToLocal } from "../../dates/calendar";
 
-/** Сколько хранить токен после конца события: ссылка .ics и кнопка ещё работают у тех, кто открыл чат позже. */
+// Ссылка .ics и кнопка ещё работают у тех, кто открыл чат позже.
 const KEEP_AFTER_END_MS = 7 * 86_400_000;
-/** Неоднозначная дата — несколько вариантов; больше — шум. */
 const MAX_RESULTS = 3;
 
 export async function handleInlineQuery(ctx: AppContext, q: TgInlineQuery): Promise<void> {

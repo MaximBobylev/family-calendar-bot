@@ -1,5 +1,3 @@
-// Структурные логи (src/log.ts): одна строка JSON, класс ошибки без хвоста сообщения.
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorClass, log, logged } from "../src/log";
 

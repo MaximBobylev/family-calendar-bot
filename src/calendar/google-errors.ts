@@ -1,4 +1,4 @@
-// Ошибки Google → ошибки календаря из model.ts (tech-debt #12). Остальное (D1, баги) пропускаем как есть.
+// Ошибки Google → ошибки календаря из model.ts (tech-debt #12); остальное (D1, баги) пропускаем как есть.
 
 import { GoogleApiError, GoogleAuthError } from "../google/errors";
 import { AuthRevoked, CalendarError, EventConflict, EventGone, PermissionDenied, ProviderUnavailable } from "./model";
@@ -15,7 +15,7 @@ export function toCalendarError(e: unknown): unknown {
     if (e.status === 403 && !RATE_LIMIT_403.test(e.message)) return new PermissionDenied(e.message);
     return new ProviderUnavailable(e.message);
   }
-  // Таймаут fetchWithTimeout и обрыв сети
+  // Таймаут fetchWithTimeout и обрыв сети (у fetch это TypeError)
   if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError" || (e instanceof TypeError && /fetch|network/i.test(e.message)))) {
     return new ProviderUnavailable(e.message);
   }

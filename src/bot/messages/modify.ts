@@ -1,4 +1,4 @@
-// Тексты: изменение события (US-40/41/42/43) — карточка «Было → Стало», серии, детали (место, описание, напоминания).
+// Изменение события: карточка «Было → Стало», серии, детали.
 
 import type { Messages } from "./types";
 
@@ -29,7 +29,6 @@ export const modifyMessages = {
   eventChangedMeanwhile: { ru: "Встречу уже изменили — проверьте и повторите команду.", en: "The event was changed meanwhile — please check and try again." },
   modified: { ru: "✅ Изменено", en: "✅ Updated" },
   wholeSeriesChanged: { ru: "↻ Изменена вся серия.", en: "↻ The whole series was updated." },
-  // --- Детали события (US-41, US-42) ---
   placeLabel: { ru: "Место", en: "Place" },
   descriptionLabel: { ru: "Описание", en: "Description" },
   remindersLabel: { ru: "Напоминания", en: "Reminders" },

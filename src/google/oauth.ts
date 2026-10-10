@@ -1,17 +1,17 @@
-// Google OAuth (US-02, ADR-0001): ссылка согласия и обмен кода на токены.
+// Google OAuth (ADR-0001): ссылка согласия, обмен кода на токены, отзыв.
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 import type { Config } from "../config";
 import { aadFor, decryptSecret } from "../crypto";
 
-/** Минимальные scopes (ADR-0001 п.4). */
+/** Намеренно минимальные (ADR-0001 п.4). */
 export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly"];
 
 export function redirectUri(config: Config): string {
   return `${config.publicBaseUrl}/oauth/google/callback`;
 }
 
-/** codeChallenge — PKCE S256 (RFC 7636): код без нашего code_verifier бесполезен (tracks/telegram-login.md, A5). */
+/** PKCE S256: перехваченный код без нашего code_verifier бесполезен. */
 export function consentUrl(config: Config, state: string, codeChallenge: string): string {
   const params = new URLSearchParams({
     client_id: config.googleClientId,
@@ -36,7 +36,7 @@ export interface TokenResponse {
   scope: string;
 }
 
-/** client_secret остаётся (web-клиент Google — конфиденциальный); code_verifier — вдобавок к нему (PKCE). */
+/** client_secret нужен и с PKCE: web-клиент Google — конфиденциальный. */
 export async function exchangeCode(config: Config, code: string, codeVerifier: string): Promise<TokenResponse> {
   const res = await fetchWithTimeout(
     `${config.googleOAuthBase}/token`,
@@ -59,8 +59,8 @@ export async function exchangeCode(config: Config, code: string, codeVerifier: s
 }
 
 /**
- * Отозвать доступ (US-03): Google снимает всё разрешение приложения для этого аккаунта, не только этот токен.
- * 400 invalid_token — токен уже недействителен (отозван в Google): для пользователя это тоже успех.
+ * Google снимает всё разрешение приложения для этого аккаунта, не только этот токен.
+ * 400 invalid_token — уже отозван в Google: для пользователя это тоже успех.
  */
 export async function revokeToken(config: Config, token: string): Promise<void> {
   const res = await fetchWithTimeout(
@@ -78,7 +78,7 @@ export async function revokeToken(config: Config, token: string): Promise<void> 
   throw new Error(`google revoke failed: ${res.status} ${body}`);
 }
 
-/** Расшифровать сохранённый refresh token и отозвать. false — не получилось (сеть, Google, сменился ключ). */
+/** false — не получилось (сеть, Google, сменился ключ). */
 export async function revokeStoredToken(config: Config, stored: { accountId: string; credentialsEnc: string }): Promise<boolean> {
   try {
     await revokeToken(config, await decryptSecret(stored.credentialsEnc, config.tokenKeys, aadFor.account(stored.accountId)));

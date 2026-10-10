@@ -1,5 +1,4 @@
-// Бот в семейном групповом чате (US-94): привязка чата к дому (/home link), команды только участников дома по общим
-// календарям (через аккаунт владельца), карточки может нажать любой взрослый дома. Непривязанный чат — без данных.
+// Групповой чат дома: общие календари через аккаунт владельца, карточки нажимает любой взрослый дома. Непривязанный чат — без данных.
 
 import { hasGoogleAccount } from "../../db/accounts";
 import { ensureConversation } from "../../db/conversations";
@@ -16,17 +15,17 @@ import { t } from "../messages";
 import { parseHouseholdCommand, stripBotMention } from "./logic";
 import { householdScope } from "./scope";
 
-/** Команды, которые в группе не выполняем: они про личные данные одного человека. */
+// Про личные данные одного человека — только в личном чате.
 const PRIVATE_ONLY = /^\/(start|settings|connect|disconnect|forget)(@\w+)?\b/i;
 
 const sameHome = (m: Membership | null, h: Household | null): m is Membership => !!m && !!h && m.household.id === h.id;
 
-/** Привязать/отвязать чат может владелец или участник с Google ([решение 2026-10-06]). */
+// Не только владелец, но и участник с Google — решение владельца 2026-10-06.
 async function canManageLink(ctx: AppContext, m: Membership, userId: string): Promise<boolean> {
   return m.role === "owner" || hasGoogleAccount(ctx.db, userId);
 }
 
-/** Сообщение в группе — уже обращённое к боту (gate.ts) и от человека с доступом. */
+// Сюда доходит только обращённое к боту и от человека с доступом (gate.ts).
 export async function handleGroupMessage(ctx: AppContext, user: User, message: TgMessage): Promise<void> {
   const chatId = message.chat.id;
   const locale = user.locale;
@@ -59,19 +58,16 @@ export async function handleGroupMessage(ctx: AppContext, user: User, message: T
     } else await ctx.telegram.sendMessage(chatId, t("homeOwnerOnly", locale));
     return;
   }
-  // Управление домом и личные настройки — в личном чате
   if (cmd || PRIVATE_ONLY.test(text)) {
     await ctx.telegram.sendMessage(chatId, t("groupPrivateCommand", locale));
     return;
   }
-  // «Беру» ответом на сообщение поручения в группе (ревью R1 #7)
   if (message.reply_to_message && (await handleTextAnswer(ctx, user, chatId, text, message.reply_to_message.message_id))) return;
-  // Создавать и менять события в группе может любой участник дома — как и в личном чате (US-90, [решение 2026-10-06])
+  // Любой участник дома, как и в личном чате, — решение владельца 2026-10-06.
   const scoped: AppContext = { ...ctx, calendarScope: await householdScope(ctx.db, home) };
   await handleCommand(scoped, user, { ...message, text });
 }
 
-/** Привязать чат к дому: владелец или участник с Google; уже привязан к этому дому — так и сказать (QA-18). */
 async function linkChat(
   ctx: AppContext,
   user: User,
@@ -93,10 +89,7 @@ async function linkChat(
   }
 }
 
-/**
- * Бота добавили в группу (my_chat_member, ревью R1 #13): приветствие; добавил тот, кто может привязать, — кнопка
- * «Привязать» к его дому. Посторонних отсеивает gate.ts (молча).
- */
+// Посторонних, добавивших бота, gate.ts отсеивает раньше (молча).
 export async function greetGroup(ctx: AppContext, upd: TgChatMemberUpdated): Promise<void> {
   const joined = ["member", "administrator"].includes(upd.new_chat_member.status) && ["left", "kicked"].includes(upd.old_chat_member.status);
   if (!joined || upd.chat.type === "private" || upd.chat.type === "channel" || upd.from.is_bot) return;
@@ -111,13 +104,9 @@ export async function greetGroup(ctx: AppContext, upd: TgChatMemberUpdated): Pro
   } else await ctx.telegram.sendMessage(upd.chat.id, t("groupHelloNoHome", user.locale, { bot }));
 }
 
-/** Кнопка «🔗 Привязать» в приветствии группы. */
 export const GROUP_LINK_CALLBACK = "hg:link";
 
-/**
- * Нажатие в группе: карточку может нажать любой взрослый дома (US-94) — проверяем членство нажавшего; действие
- * выполняется от имени автора карточки (его пояс, его «отмени последнее», он — «кто создал»).
- */
+// Проверяем членство нажавшего, а действие — от имени автора карточки (его пояс, его «отмени последнее»).
 export async function handleGroupCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
   const chatId = cq.message?.chat.id;
   if (chatId && cq.data === GROUP_LINK_CALLBACK) {

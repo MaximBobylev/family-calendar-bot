@@ -1,5 +1,4 @@
-// Длительности: «полтора часа», «на 45 минут», «часа на три», «2 дня», «неделю».
-// Используются в kind=shift / kind=duration и внутри «через …» в kind=point.
+// Длительности («полтора часа», «часа на три», «неделю») — общие для kind=shift, kind=duration и «через …» в kind=point.
 
 import { UNITS, type Unit } from "./lexicon";
 import type { ParseResult } from "./types";
@@ -37,16 +36,14 @@ const unitOf = (tok: Token | undefined): Unit | undefined => {
 };
 const numOf = (tok: Token | undefined) => (tok?.t === "num" && tok.form !== "ordGen" && tok.form !== "ordNom" ? tok.v : undefined);
 
-/** Пытается прочитать длительность с позиции `i`. Возвращает её и число съеденных токенов. */
+/** n — число съеденных токенов. */
 export function readDuration(tokens: Token[], i: number): { d: Duration; n: number } | null {
   const w = word(tokens[i]);
 
   if (w === "полчаса" || w === "полчасика") return { d: { ...ZERO, minutes: 30 }, n: 1 };
-  // «half an hour»
   if (w === "half" && /^(an?)$/.test(word(tokens[i + 1]) ?? "") && unitOf(tokens[i + 2]) === "hour") {
     return { d: { ...ZERO, minutes: 30 }, n: 3 };
   }
-  // «пару часов», «через пару дней», «a couple of days» = 2
   {
     let k = i;
     if (w === "a") k++;
@@ -64,7 +61,7 @@ export function readDuration(tokens: Token[], i: number): { d: Duration; n: numb
     return d ? { d, n: 2 } : null;
   }
 
-  // «часа на три» — единица, затем «на» и число
+// «часа на три»
   const u0 = unitOf(tokens[i]);
   if (u0 && word(tokens[i + 1]) === "на" && numOf(tokens[i + 2]) !== undefined) {
     const d = fromUnit(u0, numOf(tokens[i + 2])!);
@@ -81,7 +78,6 @@ export function readDuration(tokens: Token[], i: number): { d: Duration; n: numb
     return d ? { d, n: 2 + half } : null;
   }
 
-  // «час», «день», «неделю» — одна единица
   if (u0) {
     const d = fromUnit(u0, 1);
     return d ? { d, n: 1 } : null;
@@ -100,7 +96,7 @@ export function toIso(d: Duration, sign = ""): string {
 const LATER = new Set(["позже", "later", "вперед", "forward", "after"]);
 const EARLIER = new Set(["раньше", "earlier", "назад", "back", "before"]);
 
-/** kind=shift: «на час позже», «на два дня раньше», «на неделю вперёд». Без направления — позже. */
+/** Без направления — позже. */
 export function parseShift(tokens: Token[]): ParseResult {
   let i = 0;
   if (word(tokens[i]) === "на") i++;
@@ -118,7 +114,6 @@ export function parseShift(tokens: Token[]): ParseResult {
   return { shift: toIso(dur.d, sign) };
 }
 
-/** kind=duration: «на полчаса», «часа на три», «на весь день», «for 30 minutes». */
 export function parseDuration(tokens: Token[]): ParseResult {
   const words = tokens.map((t) => word(t) ?? "?").join(" ");
   if (/^(на )?(весь|целый) день$|^all day$/.test(words)) return { duration: "all_day" };
@@ -129,10 +124,7 @@ export function parseDuration(tokens: Token[]): ParseResult {
   return { duration: toIso(dur.d) };
 }
 
-/**
- * ISO-длительность или сдвиг («PT1H30M», «+P1D», «-PT30M») → минуты со знаком.
- * Месяцы и годы в минуты не переводятся — null (вызывающий код должен сказать «не понял»).
- */
+/** Месяцы и годы в минуты не переводятся — null (вызывающий код должен сказать «не понял»). */
 export function durationToMinutes(iso: string): number | null {
   const sign = iso.startsWith("-") ? -1 : 1;
   const body = iso.replace(/^[+-]/, "");

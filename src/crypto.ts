@@ -1,11 +1,5 @@
-// Шифрование секретов в D1 (refresh token Google, PKCE verifier): AES-GCM, ключ — секрет TOKEN_ENCRYPTION_KEY
-// (base64, 32 байта). tech-debt #8 — версия формата и ротация ключей:
-//   v1:     "v1:" + base64(iv[12] || ciphertext), AAD = контекст записи («account:<id>», «access:<id>»,
-//           «oauth_state:<state>») —
-//           шифротекст не подставить в чужую строку БД;
-//   legacy: base64(iv[12] || ciphertext) без AAD — записи до v1, только расшифровка (перешифруются при переподключении).
-// Ротация: новый ключ — в TOKEN_ENCRYPTION_KEY, прежние — в TOKEN_ENCRYPTION_KEYS_OLD (через запятую): шифрует
-// только текущий, расшифровка пробует текущий, затем старые.
+// AES-GCM для секретов в D1; AAD — контекст записи (aadFor), чтобы шифротекст нельзя было подставить в чужую строку БД.
+// Ротация (tech-debt #8): шифрует только TOKEN_ENCRYPTION_KEY, расшифровка пробует и TOKEN_ENCRYPTION_KEYS_OLD.
 
 const b64 = {
   encode: (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)),
@@ -21,10 +15,8 @@ async function importKey(keyB64: string): Promise<CryptoKey> {
 
 const V1 = "v1:";
 
-/** Ключи: первый — текущий (шифрует), остальные — прежние (только расшифровка). */
 export type KeyRing = readonly [current: string, ...old: string[]];
 
-/** Зашифровать (формат v1). aad — контекст записи, тот же нужен для расшифровки. */
 export async function encryptSecret(plain: string, keys: KeyRing, aad: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const params = { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) };
@@ -35,7 +27,7 @@ export async function encryptSecret(plain: string, keys: KeyRing, aad: string): 
   return V1 + b64.encode(out);
 }
 
-/** Расшифровать v1 (с aad) или legacy (без AAD) любым ключом из связки. Ни один не подошёл — ошибка. */
+/** Без префикса v1 — legacy-записи без AAD: только расшифровка, перешифруются при переподключении. */
 export async function decryptSecret(sealed: string, keys: KeyRing, aad: string): Promise<string> {
   const v1 = sealed.startsWith(V1);
   const bytes = b64.decode(v1 ? sealed.slice(V1.length) : sealed);
@@ -50,7 +42,6 @@ export async function decryptSecret(sealed: string, keys: KeyRing, aad: string):
   throw new Error("secret cannot be decrypted with any configured key");
 }
 
-/** Связка ключей из секретов: TOKEN_ENCRYPTION_KEY и необязательный TOKEN_ENCRYPTION_KEYS_OLD (через запятую). */
 export function keyRing(current: string, old: string | undefined): KeyRing {
   const rest = (old ?? "")
     .split(",")
@@ -59,7 +50,6 @@ export function keyRing(current: string, old: string | undefined): KeyRing {
   return [current, ...rest];
 }
 
-/** AAD для refresh token аккаунта, его кешированного access token (tech-debt #13) и PKCE verifier OAuth-ссылки. */
 export const aadFor = {
   account: (accountId: string) => `account:${accountId}`,
   access: (accountId: string) => `access:${accountId}`,
@@ -71,12 +61,10 @@ export async function sha256Hex(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Случайная строка для state и прочих одноразовых токенов (URL-safe). */
 export function randomToken(bytes = 24): string {
   return base64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 
-/** Сравнение секретов за постоянное время (длина не утекает через ранний выход). */
 export function timingSafeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a);
   const y = new TextEncoder().encode(b);
@@ -85,12 +73,11 @@ export function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** PKCE code_verifier (RFC 7636 §4.1): 32 случайных байта → 43 символа [A-Za-z0-9-_]. */
+/** RFC 7636 §4.1 требует 43–128 символов: 32 байта дают ровно 43. */
 export function pkceVerifier(): string {
   return randomToken(32);
 }
 
-/** PKCE code_challenge, метод S256: BASE64URL(SHA256(ascii(verifier))). */
 export async function pkceChallenge(verifier: string): Promise<string> {
   return base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }

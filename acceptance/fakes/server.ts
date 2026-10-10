@@ -1,74 +1,70 @@
-// Фейки внешних API для приёмочных тестов (ADR-0006). Не импортирует код бота.
+// Фейки внешних API для приёмки; код бота не импортирует (ADR-0006). Правка файла — `docker compose restart fakes`.
 //
-//   /telegram/bot<token>/<method>   — фейк Telegram Bot API: запоминает вызовы, отвечает успехом
-//   /google-oauth/token             — обмен кода на токены: код выдан /__fake/google/authorize, одноразовый;
-//                                     был code_challenge — нужен верный code_verifier (PKCE S256), иначе invalid_grant
-//   /google/calendar/v3/…           — фейк Google Calendar API (токен = "at-<email>", после refresh — "at-<email>~<n>";
-//                                     отозванный доступ и «просроченные» expire-access токены — 401)
-//   /llm/v1/chat/completions        — фейк LLM: ответ берётся из фикстур по тексту пользователя
-//   /llm-backup/v1/chat/completions — запасной провайдер LLM: те же фикстуры (цепочка провайдеров)
-//   /stt/run/<model>                — фейк Whisper (Workers AI REST): ответ по содержимому аудио
-//   /stt-openai/audio/transcriptions — фейк OpenAI-совместимого STT (Groq), multipart: те же фикстуры
-//   /gemini/v1beta/models/<m>:generateContent — фейк мультимодального разбора голоса: ответ по содержимому аудио
-//   /vision/v1/chat/completions     — OpenAI-совместимое чтение картинок (DeepSeek, VISION_CHAIN): те же фикстуры, что у Gemini
-//   /telegram/file/bot<t>/<path>    — файлы Telegram (голосовые, фото, .ics — содержимое строкой)
+// Фейки API:
+//   /telegram/bot<token>/<method>     — Telegram Bot API: запоминает вызовы, отвечает успехом
+//   /telegram/file/bot<t>/<path>      — файлы Telegram (голосовые, фото, .ics — содержимое строкой)
+//   /google-oauth/token               — код от /__fake/google/authorize одноразовый; был code_challenge — нужен верный
+//                                       code_verifier (S256), иначе invalid_grant
+//   /google-oauth/revoke              — отзыв: снимает доступ аккаунта целиком
+//   /google/calendar/v3/…             — токен "at-<email>", после refresh "at-<email>~<n>"; отозванный и expire-access — 401
+//   /llm/v1/chat/completions, /llm-backup/v1/chat/completions — LLM и запасная: ответ из фикстур по тексту пользователя
+//   /stt/run/<model>                  — Whisper (Workers AI REST): ответ по содержимому аудио
+//   /stt-openai/audio/transcriptions  — OpenAI-совместимый STT (Groq), multipart: те же фикстуры
+//   /gemini/v1beta/models/<m>:generateContent — переслушивание голоса и чтение картинок
+//   /vision/v1/chat/completions       — OpenAI-совместимое чтение картинок (DeepSeek): те же фикстуры, что у Gemini
+//   GET /llm/v1/key, GET /llm-backup/user/balance — остатки OpenRouter и DeepSeek (панель «Квоты»)
+//   POST /cf/client/v4/graphql        — GraphQL Analytics Cloudflare: набор — по имени в запросе
+//                                       (aiInferenceAdaptiveGroups, workersInvocationsAdaptive, d1…, queueMessageOperations…)
+//   Groq отвечает с x-ratelimit-*-requests; LLM в outage 429 — с x-ratelimit-limit/remaining/reset.
 //
 // Управление для раннера:
-//   GET  /__fake/telegram/calls     — все вызовы Telegram с последнего сброса
-//   POST /__fake/google/accounts    — завести Google-аккаунт: {email, calendars: [...]}
-//   POST /__fake/google/authorize   — «согласие на экране Google»: {email, code_challenge?, code_challenge_method?} → {code}
-//   GET  /__fake/google/token-requests — все запросы к /token: обмен кода и refresh (grant_type) — для проверки параметров
-//   POST /__fake/google/expire-access — {email}: выданные аккаунту access token больше не принимаются (401), refresh — да
-//   POST /__fake/google/revoke      — отозвать доступ аккаунта: {email}
-//   POST /__fake/llm/fixtures       — {"<текст>": {tool, args} | {tools: [...]} | {error: status}}
-//   GET  /__fake/llm/requests       — все запросы к LLM
-//   POST /__fake/telegram/files     — {file_id, content}: файл для getFile и скачивания
-//   POST /__fake/stt/fixtures       — {"<содержимое аудио>": {text} | {error: status}}
-//   GET  /__fake/google/patches     — журнал PATCH событий: {calendar, id, sendUpdates, body}
-//   GET  /__fake/google/deletes     — журнал DELETE событий: {calendar, id, sendUpdates}
-//   POST /__fake/google/touch       — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
-//   GET  /__fake/google/events?email=… — календари аккаунта с событиями (для проверок)
-//   Календарь с полем list_error: <status> — events.list по нему отвечает этой ошибкой;
-//   list_error_times: <n> — первые n запросов events.list отвечают 503 (проверка повтора GET)
-//   POST /__fake/telegram/fail      — {text_contains, method?, status?, times?}: ближайшие times (1) вызовов method
-//                                     (sendMessage), чей текст содержит text_contains, отвечают ошибкой status (500)
-//                                     и не записываются в calls — сообщение не доставлено
-//   GET  /__fake/google/revocations — журнал отзывов токена через /google-oauth/revoke: {token, status}
-//   POST /__fake/google/revoke-fails — {status}: отзыв токена отвечает этой ошибкой (0 — снова работает)
-//   POST /__fake/outage             — {provider: llm | llm-backup | stt | stt-openai | gemini | vision | google-write, status}: провайдер отвечает
-//                                     этой ошибкой (0 — снова работает); проверка переключения на запасной;
-//                                     google-write — запись событий (insert/patch/delete) в Google
-//   GET  /__fake/stt/requests       — какой провайдер STT вызывался: [{via}]
-//   POST /__fake/voice/fixtures     — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
-//   GET  /__fake/voice/requests     — запросы мультимодального разбора: [{content}]
-//   POST /__fake/vision/fixtures    — {"<содержимое картинки>": {text, tool?, args?} | {no_event: true, text?} | {error: status}}:
-//                                     ответ на картинку (Gemini inlineData image/* или OpenAI image_url), US-66
-//   GET  /__fake/vision/requests    — запросы чтения картинок: [{via: openai | gemini, content, mimeType, caption?}]
-//   GET  /llm/v1/key                — OpenRouter: лимиты ключа (звено «openrouter» цепочки LLM в dev), панель «Квоты»
-//   GET  /llm-backup/user/balance   — DeepSeek: баланс (звено «deepseek»)
-//   POST /cf/client/v4/graphql      — GraphQL Analytics Cloudflare (CF_GRAPHQL_URL в dev): набор — по имени в запросе
-//                                     (aiInferenceAdaptiveGroups, workersInvocationsAdaptive, d1…, queueMessageOperations…)
-//   POST /__fake/quotas             — {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?,
-//                                     cf_ai? | cf_workers? | cf_d1? | cf_queues?: содержимое accounts[0], cf_error?: текст ошибки GraphQL}:
-//                                     ответы эндпоинтов остатков (status ≠ 0 — ошибка); сброс — к значениям по умолчанию
-//   GET  /__fake/quotas/requests    — запросы к эндпоинтам остатков: [{via, auth}] (проверка кеша и ключа)
-//   Ответы Groq (stt-openai) несут x-ratelimit-*-requests; LLM в outage 429 — x-ratelimit-limit/remaining/reset
-//   POST /__fake/reset              — сброс состояния
+//   POST /__fake/reset                — сброс состояния
+//   GET  /__fake/telegram/calls       — все вызовы Telegram с последнего сброса
+//   POST /__fake/telegram/files       — {file_id, content}: файл для getFile и скачивания
+//   POST /__fake/telegram/fail        — {text_contains, method?, status?, times?}: ближайшие times (1) вызовов method (sendMessage)
+//                                       с этим текстом отвечают ошибкой status (500) и не попадают в calls — не доставлено
+//   POST /__fake/google/accounts      — {email, calendars: [...]}; у календаря: list_error: <status> — events.list отвечает
+//                                       этой ошибкой; list_error_times: <n> — первые n events.list отвечают 503;
+//                                       shared: true — у аккаунтов с тем же id календаря одни и те же события
+//   POST /__fake/google/authorize     — «согласие»: {email, code_challenge?, code_challenge_method?} → {code}
+//   GET  /__fake/google/token-requests — все запросы к /token (обмен кода и refresh)
+//   POST /__fake/google/expire-access — {email}: выданные access token → 401, refresh работает
+//   POST /__fake/google/revoke        — {email}: отозвать доступ аккаунта
+//   GET  /__fake/google/revocations   — журнал /google-oauth/revoke: {token, status}
+//   POST /__fake/google/revoke-fails  — {status}: отзыв отвечает этой ошибкой (0 — снова работает)
+//   GET  /__fake/google/patches       — журнал PATCH: {calendar, id, sendUpdates, body}
+//   GET  /__fake/google/deletes       — журнал DELETE: {calendar, id, sendUpdates}
+//   POST /__fake/google/touch         — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
+//   GET  /__fake/google/events?email=… — календари аккаунта с событиями
+//   POST /__fake/outage               — {provider, status}: провайдер отвечает этой ошибкой (0 — снова работает). provider:
+//                                       llm | llm-backup | stt | stt-openai | gemini | vision | google-write (insert/patch/delete;
+//                                       403 — rateLimitExceeded, а не «нет прав») | google-watch; status 200 у llm/vision —
+//                                       ошибка в теле без choices, как OpenRouter при перегрузке
+//   POST /__fake/llm/fixtures         — {"<текст>": {tool, args, raw_arguments?} | {tools: [...]} | {error: status}}
+//   GET  /__fake/llm/requests         — все запросы к LLM
+//   POST /__fake/stt/fixtures         — {"<содержимое аудио>": {text} | {error: status}}
+//   GET  /__fake/stt/requests         — [{via}]
+//   POST /__fake/voice/fixtures       — {"<содержимое аудио>": {transcript, tool, args} | {no_speech: true} | {error: status}}
+//   GET  /__fake/voice/requests       — [{content}]
+//   POST /__fake/vision/fixtures      — {"<содержимое картинки>": {text, tool?, args?} | {no_event: true, text?} | {error: status}}
+//   GET  /__fake/vision/requests      — [{via: openai | gemini, content, mimeType, caption?}]
+//   POST /__fake/quotas               — {openrouter?: тело /key, deepseek?: тело /user/balance, openrouter_status?, deepseek_status?,
+//                                       cf_ai? | cf_workers? | cf_d1? | cf_queues?: accounts[0], cf_error?: текст ошибки GraphQL};
+//                                       status ≠ 0 — ошибка; reset возвращает значения по умолчанию
+//   GET  /__fake/quotas/requests      — [{via, auth}] (проверка кеша и ключа)
 //
-// Синхронизация и push Google (ADR-0005 §2, US-72):
-//   events.list с syncToken — изменения с момента токена (удалённые — status=cancelled); токен — st:<календарь>:<номер изменения>:<поколение>;
-//     с syncToken нельзя timeMin/timeMax/orderBy (400), просроченный токен — 410; без syncToken — ещё и nextSyncToken
-//   POST …/calendars/<id>/events/watch, POST …/channels/stop — каналы push (outage google-watch — watch отвечает ошибкой)
-//   Календарь с shared: true — общий: у аккаунтов с тем же id календаря одни и те же события (общий календарь семьи)
-//   POST /__fake/google/push        — {calendar, state?, token?}: Google шлёт уведомление в каждый канал календаря → {sent: [{id, status}]}
-//   POST /__fake/google/external    — {calendar, create?: событие, move?: {id, start, end}, update?: {id, …поля}, delete?: id}:
-//                                     изменение «не через бота» (человек в Google Календаре)
+// Синхронизация и push Google:
+//   events.list с syncToken — изменения с момента токена (удалённые — status=cancelled), токен st:<календарь>:<изменение>:<поколение>;
+//     с syncToken нельзя timeMin/timeMax/orderBy (400), просроченный — 410; полный список тоже отдаёт nextSyncToken
+//   POST …/calendars/<id>/events/watch, POST …/channels/stop — каналы push
+//   POST /__fake/google/push          — {calendar, state?, token?}: уведомление в каждый канал календаря → {sent: [{id, status}]}
+//   POST /__fake/google/external      — {calendar, create?: событие, move?: {id, start, end}, update?: {id, …поля}, delete?: id}:
+//                                       изменение «не через бота»
 //   POST /__fake/google/expire-sync-tokens — {calendar}: все выданные syncToken календаря → 410
-//   POST /__fake/google/page-size   — {size}: calendarList и events.list отдают по size записей с nextPageToken (0 — без страниц);
-//                                     nextSyncToken — только на последней странице, как у Google
-//   Outage google-write со статусом 403 — лимит запросов (reason rateLimitExceeded), а не «нет прав»
-//   GET  /__fake/google/channels    — {active: [{id, calendar, address, expiration}], stopped: [{id, resourceId}]}
-//   GET  /__fake/google/sync-requests — запросы синхронизации: [{calendar, mode: full | incremental | expired}]
+//   POST /__fake/google/page-size     — {size}: calendarList и events.list по size записей (0 — без страниц);
+//                                       nextSyncToken — только на последней странице, как у Google
+//   GET  /__fake/google/channels      — {active: [{id, calendar, address, expiration}], stopped: [{id, resourceId}]}
+//   GET  /__fake/google/sync-requests — [{calendar, mode: full | incremental | expired}]
 
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -77,7 +73,6 @@ interface TelegramCall {
   method: string;
   token: string;
   body: Record<string, unknown>;
-  /** message_id, который фейк выдал отправленному сообщению. */
   messageId?: number;
 }
 
@@ -92,35 +87,29 @@ interface GoogleEvent {
 
 interface GoogleCalendar {
   id: string;
-  /** Общий календарь: события — одни на все аккаунты с этим id. */
   shared?: boolean;
   summary: string;
   accessRole: string;
   primary?: boolean;
   timeZone?: string;
   events?: GoogleEvent[];
-  /** events.list этого календаря отвечает этой ошибкой (удалён, нет доступа, 5xx). */
   list_error?: number;
-  /** Столько ближайших events.list отвечают 503 — временный сбой. */
   list_error_times?: number;
 }
 
 type LlmFixture =
-  /** raw_arguments — строка аргументов как есть (для имитации битого JSON). */
+  /** raw_arguments — строка аргументов как есть, для битого JSON. */
   { tool: string; args?: Record<string, unknown>; raw_arguments?: string } | { tools: { tool: string; args?: Record<string, unknown> }[] } | { error: number };
 
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? "test-client-secret";
 
 let telegramCalls: TelegramCall[] = [];
 let nextMessageId = 1;
-/** accessValidFrom — access token с номером меньше не принимаются (expire-access). */
+/** accessValidFrom — access token с номером меньше не принимаются. */
 let googleAccounts = new Map<string, { calendars: GoogleCalendar[]; revoked?: boolean; accessValidFrom?: number }>();
-/** Номер последнего выданного по refresh access token (at-<email>~<n>). */
 let accessSeq = 0;
-/** Сбои Telegram, заказанные раннером (POST /__fake/telegram/fail). */
 let telegramFailures: { method: string; text: string; status: number; times: number }[] = [];
 let tokenRequests: Record<string, string>[] = [];
-/** Выданные коды авторизации: кому и с каким code_challenge (PKCE). */
 let authCodes = new Map<string, { email: string; challenge?: string; method?: string; used: boolean }>();
 let authCodeSeq = 1;
 let llmFixtures = new Map<string, LlmFixture>();
@@ -130,11 +119,9 @@ let llmRequests: unknown[] = [];
 let sttRequests: { via: string }[] = [];
 let voiceFixtures = new Map<string, { transcript?: string; tool?: string; args?: Record<string, unknown>; no_speech?: boolean; error?: number }>();
 let voiceRequests: { content: string }[] = [];
-// --- Картинки (US-66): ответ Gemini по содержимому файла ---
 type VisionFixture = { text?: string; tool?: string; args?: Record<string, unknown>; no_event?: boolean; error?: number };
 let visionFixtures = new Map<string, VisionFixture>();
 let visionRequests: { via: "openai" | "gemini"; content: string; mimeType: string; caption?: string }[] = [];
-// --- Эндпоинты остатков квот (панель «Квоты») ---
 const QUOTAS_DEFAULT = {
   openrouter: {
     data: {
@@ -151,7 +138,6 @@ const QUOTAS_DEFAULT = {
   deepseek: { is_available: true, balance_infos: [{ currency: "USD", total_balance: "4.20", granted_balance: "0.00", topped_up_balance: "4.20" }] } as unknown,
   openrouter_status: 0,
   deepseek_status: 0,
-  // GraphQL Analytics: содержимое viewer.accounts[0] по набору
   cf_ai: {
     aiInferenceAdaptiveGroups: [
       { dimensions: { modelId: "@cf/qwen/qwen3-30b-a3b-fp8" }, sum: { totalNeurons: 1200 } },
@@ -183,12 +169,9 @@ const QUOTAS_DEFAULT = {
 };
 let quotas = structuredClone(QUOTAS_DEFAULT);
 let quotaRequests: { via: string; auth: string }[] = [];
-/** Провайдер → статус ошибки, которой он сейчас отвечает (POST /__fake/outage). */
 let outages = new Map<string, number>();
-/** Размер страницы calendarList / events.list; 0 — всё одной страницей. */
 let googlePageSize = 0;
 
-/** Страница списка по pageToken «pg:<смещение>»; nextPageToken — если есть ещё. */
 function googlePage<T>(url: URL, items: T[]): { items: T[]; nextPageToken?: string } {
   if (!googlePageSize) return { items };
   const from = Number(/^pg:(\d+)$/.exec(url.searchParams.get("pageToken") ?? "")?.[1] ?? 0);
@@ -196,7 +179,6 @@ function googlePage<T>(url: URL, items: T[]): { items: T[]; nextPageToken?: stri
   return { items: items.slice(from, next), ...(next < items.length ? { nextPageToken: `pg:${next}` } : {}) };
 }
 
-/** Ответ Google на запись в outage: 403 — лимит запросов (как настоящий rateLimitExceeded), остальное — сбой. */
 function googleWriteOutage(res: ServerResponse, status: number) {
   if (status === 403)
     return send(res, 403, { error: { code: 403, message: "Rate Limit Exceeded", errors: [{ domain: "usageLimits", reason: "rateLimitExceeded" }] } });
@@ -205,25 +187,20 @@ function googleWriteOutage(res: ServerResponse, status: number) {
 let revocations: { token: string; status: number }[] = [];
 let revokeFailStatus = 0;
 
-// --- Синхронизация и push ---
-/** Номер последнего изменения событий (для syncToken). */
 let changeSeq = 0;
-/** Календарь → поколение syncToken: токены прежних поколений просрочены (410). */
+/** Токены прежних поколений просрочены (410). */
 let syncTokenGen = new Map<string, number>();
 const syncTokenOf = (calId: string) => `st:${calId}:${changeSeq}:${syncTokenGen.get(calId) ?? 0}`;
-/** События общих календарей по id календаря. */
 let sharedEvents = new Map<string, GoogleEvent[]>();
 let channels: { id: string; token?: string; address: string; resourceId: string; calendar: string; expiration?: number }[] = [];
 let stoppedChannels: { id: string; resourceId: string }[] = [];
 let syncRequests: { calendar: string; mode: string }[] = [];
 
-/** Событие изменилось — новый номер изменения и updated (для syncToken). */
 function bump(e: GoogleEvent): void {
   e._seq = ++changeSeq;
   e.updated = new Date().toISOString();
 }
 
-/** Календарь по id у любого аккаунта (для внешних изменений и push). */
 function findCalendar(id: string): GoogleCalendar | undefined {
   for (const acc of googleAccounts.values()) {
     const cal = acc.calendars.find((c) => c.id === id);
@@ -234,7 +211,6 @@ function findCalendar(id: string): GoogleCalendar | undefined {
 
 const publicEvent = ({ _seq: _s, ...e }: GoogleEvent) => e;
 
-/** Полночь даты `date` в поясе `tz`, мс UTC — для событий на весь день. */
 function zonedMidnight(date: string, tz: string): number {
   const guess = Date.parse(`${date}T00:00:00Z`);
   const parts = Object.fromEntries(
@@ -246,14 +222,13 @@ function zonedMidnight(date: string, tz: string): number {
   return guess - (asLocal - guess);
 }
 
-/** Локальное «2026-10-08T15:00:00» в поясе tz → мс UTC. */
 function zonedToUtc(local: string, tz: string): number {
   const [date, time] = local.split("T");
   const [h, m] = (time ?? "00:00").split(":").map(Number);
   return zonedMidnight(date!, tz) + (h! * 60 + m!) * 60_000;
 }
 
-/** Приводит время события к виду, который вернул бы Google: dateTime со смещением (здесь — в UTC). */
+/** Google вернул бы dateTime со смещением пояса календаря; фейк — в UTC. */
 function normalizeTimes(e: GoogleEvent, tz: string): GoogleEvent {
   const fix = (t: { dateTime?: string; date?: string; timeZone?: string } | undefined) =>
     t?.dateTime && !/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime) ? { ...t, dateTime: new Date(zonedToUtc(t.dateTime, t.timeZone ?? tz)).toISOString() } : t;
@@ -278,7 +253,6 @@ async function readForm(req: IncomingMessage): Promise<Record<string, string>> {
   return Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString("utf8")));
 }
 
-/** Аккаунт по access token; отозванный доступ и «просроченный» токен — undefined (401), как у Google. */
 function googleAccountByToken(req: IncomingMessage) {
   const m = /^Bearer at-([^~]+)(?:~(\d+))?$/.exec(req.headers.authorization ?? "");
   const account = m ? googleAccounts.get(m[1]!) : undefined;
@@ -308,7 +282,7 @@ function telegramResult(method: string, body: Record<string, unknown>): unknown 
       return { message_id: nextMessageId++, date: 0, chat: { id: body.chat_id, type: "private" }, text: body.text };
     case "editMessageText":
       return true;
-    // Админка: панель «здоровье» (webhook установлен на SUT, очередь пуста)
+    // Для панели «здоровье» админки
     case "getWebhookInfo":
       return { url: "http://dev:8787/telegram/webhook", has_custom_certificate: false, pending_update_count: 0 };
     default:
@@ -316,7 +290,6 @@ function telegramResult(method: string, body: Record<string, unknown>): unknown 
   }
 }
 
-/** Ответ на картинку (US-66) по фикстуре содержимого файла: вызов create_event | no_event с видимым текстом; null — ответить ошибкой. */
 function visionCall(
   via: "openai" | "gemini",
   content: string,
@@ -332,7 +305,6 @@ function visionCall(
     : { name: fx.tool ?? "create_event", args: { text: fx.text ?? "", ...(fx.args ?? {}) } };
 }
 
-/** Gemini на картинку: functionCall. */
 function visionAnswer(res: ServerResponse, body: { contents?: { parts?: { inlineData?: { mimeType?: string; data?: string }; text?: string }[] }[] }) {
   const parts = body.contents?.[0]?.parts ?? [];
   const img = parts.find((p) => p.inlineData)!.inlineData!;
@@ -344,7 +316,6 @@ function visionAnswer(res: ServerResponse, body: { contents?: { parts?: { inline
   });
 }
 
-/** OpenAI-совместимый (DeepSeek) на картинку: image_url data:URL → tool_calls. */
 function visionOpenAiAnswer(res: ServerResponse, body: { messages?: { role: string; content: unknown }[] }) {
   const content = body.messages?.find((m) => m.role === "user")?.content;
   const parts = Array.isArray(content) ? (content as { type: string; text?: string; image_url?: { url?: string } }[]) : [];
@@ -492,13 +463,12 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/vision/v1/chat/completions" && req.method === "POST") {
       const outage = outages.get("vision");
-      // 200 — как OpenRouter/DeepSeek при перегрузке: ошибка в теле, без choices
+      // Как OpenRouter/DeepSeek при перегрузке: ошибка в теле, без choices
       if (outage === 200) return send(res, 200, { error: { message: "fake upstream overload", code: 502 } });
       if (outage) return send(res, outage, { error: { message: "fake outage" } });
       return visionOpenAiAnswer(res, (await readJson(req)) as never);
     }
 
-    // --- Мультимодальный разбор голоса (Gemini generateContent): аудио → transcript + functionCall ---
     if (/^\/gemini\/v1beta\/models\/[^/]+:generateContent$/.test(url.pathname) && req.method === "POST") {
       const outage = outages.get("gemini");
       if (outage) return send(res, outage, { error: { code: outage, message: "fake outage" } });
@@ -520,7 +490,6 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    // --- STT, OpenAI-совместимый (Groq): multipart, аудио — файл в поле file ---
     if (url.pathname === "/stt-openai/audio/transcriptions" && req.method === "POST") {
       sttRequests.push({ via: "stt-openai" });
       const outage = outages.get("stt-openai");
@@ -530,7 +499,7 @@ const server = createServer(async (req, res) => {
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!/name="model"/.test(raw) || !/filename="voice\.ogg"/.test(raw))
         return send(res, 400, { error: { message: "fake stt: expected multipart with file and model" } });
-      // Содержимое «аудио» в тестах — короткая строка; ищем фикстуру, чей ключ есть в теле
+      // «Аудио» в тестах — короткая строка; ищем фикстуру, чей ключ есть в теле multipart
       const entry = [...sttFixtures.entries()].find(([content]) => raw.includes(`\r\n\r\n${content}\r\n`));
       if (!entry) return send(res, 400, { error: { message: "fake stt: no fixture for the uploaded file" } });
       const fx = entry[1];
@@ -543,7 +512,6 @@ const server = createServer(async (req, res) => {
       );
     }
 
-    // --- Whisper (Workers AI REST) ---
     if (url.pathname.startsWith("/stt/run/") && req.method === "POST") {
       sttRequests.push({ via: "stt" });
       const outage = outages.get("stt");
@@ -556,7 +524,6 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { success: true, result: { text: fx.text ?? "", transcription_info: { language: "ru", duration: 3 } } });
     }
 
-    // --- Файлы Telegram ---
     const tgFile = /^\/telegram\/file\/bot[^/]+\/voice\/(.+)\.oga$/.exec(url.pathname);
     if (tgFile) {
       const content = telegramFiles.get(decodeURIComponent(tgFile[1]!));
@@ -654,7 +621,6 @@ const server = createServer(async (req, res) => {
       return send(res, 200, acc?.calendars ?? []);
     }
 
-    // --- Остатки квот: OpenRouter /key, DeepSeek /user/balance ---
     if (url.pathname === "/__fake/quotas" && req.method === "POST") {
       quotas = { ...quotas, ...(await readJson(req)) } as typeof quotas;
       return send(res, 200, { ok: true });
@@ -683,22 +649,21 @@ const server = createServer(async (req, res) => {
               : "unknown";
       quotaRequests.push({ via: `cloudflare:${kind}`, auth: req.headers.authorization ?? "" });
       if (req.headers.authorization !== "Bearer test-llm-key") return send(res, 200, { data: null, errors: [{ message: "fake: authentication error" }] });
-      // Как настоящий API: ошибка доступа — HTTP 200 с errors
+      // Как настоящий API: ошибка — HTTP 200 с errors
       if (quotas.cf_error || kind === "unknown") return send(res, 200, { data: null, errors: [{ message: quotas.cf_error || "fake: unknown dataset" }] });
       const acc = { ai: quotas.cf_ai, workers: quotas.cf_workers, d1: quotas.cf_d1, queues: quotas.cf_queues }[kind];
       return send(res, 200, { data: { viewer: { accounts: [acc] } }, errors: null });
     }
 
-    // --- LLM (OpenAI-совместимый) ---
     const llmPath = /^\/(llm|llm-backup)\/v1\/chat\/completions$/.exec(url.pathname);
     if (llmPath && req.method === "POST") {
       const via = llmPath[1]!;
       const body = (await readJson(req)) as { messages?: { role: string; content: string }[] };
       llmRequests.push({ ...body, _via: via });
       const outage = outages.get(via);
-      // status 200 — как OpenRouter при перегрузке: HTTP 200, ошибка в теле, без choices
+      // Как OpenRouter при перегрузке: ошибка в теле, без choices
       if (outage === 200) return send(res, 200, { error: { message: "fake upstream overload", code: 502 } });
-      // 429 — как OpenRouter на исчерпанной суточной квоте бесплатных моделей: заголовки лимита
+      // Как OpenRouter на исчерпанной суточной квоте бесплатных моделей
       if (outage === 429 && via === "llm")
         return send(
           res,
@@ -730,7 +695,6 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    // --- Google OAuth ---
     if (url.pathname === "/google-oauth/token" && req.method === "POST") {
       const form = await readForm(req);
       tokenRequests.push(form);
@@ -747,7 +711,7 @@ const server = createServer(async (req, res) => {
       }
       // Как Google: код одноразовый, даже если обмен не удался
       issued.used = true;
-      // PKCE (RFC 7636): при согласии был challenge — нужен verifier, дающий тот же S256
+      // PKCE: при согласии был challenge — нужен verifier, дающий тот же S256
       if (issued.challenge) {
         const verifier = form.code_verifier ?? "";
         const s256 = createHash("sha256").update(verifier, "ascii").digest("base64url");
@@ -767,7 +731,7 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    // Отзыв токена (как oauth2.googleapis.com/revoke): снимает доступ аккаунта целиком
+    // Как у Google, снимает доступ аккаунта целиком
     if (url.pathname === "/google-oauth/revoke" && req.method === "POST") {
       const { token = "" } = await readForm(req);
       if (revokeFailStatus) {
@@ -782,7 +746,6 @@ const server = createServer(async (req, res) => {
       return send(res, 200, {});
     }
 
-    // --- Google Calendar API ---
     if (url.pathname === "/google/calendar/v3/users/me/calendarList") {
       const account = googleAccountByToken(req);
       if (!account) return send(res, 401, { error: { code: 401, message: "Invalid Credentials" } });
@@ -906,7 +869,7 @@ const server = createServer(async (req, res) => {
         cal.list_error_times--;
         return send(res, 503, { error: { code: 503, message: "fake transient error" } });
       }
-      // Синхронизация по syncToken: только изменения (и удалённые), окно и порядок с ним не принимаются
+      // Как у Google: окно и порядок вместе с syncToken не принимаются
       const syncToken = url.searchParams.get("syncToken");
       if (syncToken) {
         if (["timeMin", "timeMax", "orderBy", "updatedMin", "q"].some((k) => url.searchParams.has(k)))

@@ -1,10 +1,8 @@
-// Тексты: событие из чужого контента — пересланное (US-65), фото/скриншот (US-66), файл .ics (US-67);
-// сводки «Завтра» и «Неделя» (US-70, R1).
+// Событие из чужого контента (пересланное, фото, .ics) и сводки «Завтра» и «Неделя».
 
 import type { Messages } from "./types";
 
 export const ingestMessages = {
-  // --- Пересланное → событие (US-65) ---
   forwardEventButton: { ru: "📅 Создать событие из этого", en: "📅 Create an event from this" },
   forwardEventStarted: { ru: "📅 Создаю событие из пересланного…", en: "📅 Creating an event from the forwarded message…" },
   forwardedLooksEvent: {
@@ -21,7 +19,6 @@ export const ingestMessages = {
     ru: "Не нашёл в сообщении даты и времени. Когда поставить «{title}»? Например: «завтра в 15».",
     en: "I didn't find a date or time in it. When should I schedule “{title}”? For example: “tomorrow at 3pm”.",
   },
-  // --- Фото / скриншот (US-66) ---
   imageTooBig: { ru: "Картинка слишком большая — пришлите поменьше (до 5 МБ).", en: "The image is too large — please send a smaller one (up to 5 MB)." },
   imageUnavailable: {
     ru: "Сейчас не могу читать картинки — перешлите текст сообщения или напишите событие словами.",
@@ -36,7 +33,6 @@ export const ingestMessages = {
     en: "I didn't find anything that looks like an event with a date in the image.",
   },
   imageWrongFormat: { ru: "Читаю картинки JPEG, PNG и WebP.", en: "I can read JPEG, PNG and WebP images." },
-  // --- Файл .ics (US-67) ---
   icsConfirmOne: { ru: "Добавить в календарь?", en: "Add to your calendar?" },
   icsConfirmMany: { ru: "Добавить в календарь событий: {n}?", en: "Add {n} events to your calendar?" },
   icsAddButton: { ru: "Добавить", en: "Add" },
@@ -59,7 +55,6 @@ export const ingestMessages = {
   },
   icsTooBig: { ru: "Файл слишком большой для приглашения (больше 256 КБ).", en: "The file is too large for an invitation (over 256 KB)." },
   icsDownloadFailed: { ru: "Не смог получить файл, пришлите ещё раз.", en: "I couldn't get the file, please send it again." },
-  // --- Сводки «Завтра» и «Неделя» (US-70, R1) ---
   digestTomorrowGreeting: { ru: "🌙 Что завтра:", en: "🌙 Here is tomorrow:" },
   digestTomorrowEmpty: { ru: "🌙 Завтра встреч нет.", en: "🌙 No events tomorrow." },
   digestWeekGreeting: { ru: "🗓 Ваша неделя:", en: "🗓 Your week:" },

@@ -1,19 +1,12 @@
-// Распознавание речи — цепочка провайдеров (основной → запасные):
-//   kind "openai"     — OpenAI-совместимый `/audio/transcriptions` (Groq: whisper-large-v3-turbo), multipart;
-//   kind "workers-ai" — Whisper на Workers AI через REST `/ai/run/<model>` (OpenAI-совместимого
-//                       `/audio/transcriptions` у Workers AI нет — проверено 2026-10-04).
-// В тестах адреса указывают на фейк.
-//
-// Замер Workers AI (2026-10-04): OGG/Opus из Telegram принимается как есть; vad_filter убирает «Thank you.» на тишине;
-// жёсткий language ломает английские голосовые; initial_prompt на качество названий не влияет.
-// У Groq vad_filter нет — тишину ловит стоп-лист галлюцинаций ниже.
+// Два kind STT: у Workers AI нет OpenAI-совместимого `/audio/transcriptions` — только REST `/ai/run/<model>` (проверено).
+// Замер Workers AI: OGG/Opus из Telegram принимается как есть; жёсткий language ломает английские голосовые — язык не задаём.
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 
 export interface SttConfig {
   /** Имя для журнала и /admin: «groq», «workers-ai». Нет — адрес. */
   name?: string;
-  /** Нет — "workers-ai" (как было до цепочек). */
+  /** Нет — "workers-ai". */
   kind?: "workers-ai" | "openai";
   baseUrl: string;
   apiKey: string;
@@ -26,7 +19,6 @@ export interface Transcript {
   text: string;
   language?: string;
   durationSec?: number;
-  /** Заголовки лимитов (Groq: x-ratelimit-*) — для панели «Квоты». */
   rateHeaders?: Record<string, string>;
 }
 
@@ -34,7 +26,6 @@ export async function transcribe(cfg: SttConfig, audio: ArrayBuffer): Promise<Tr
   return cfg.kind === "openai" ? transcribeOpenAi(cfg, audio) : transcribeWorkersAi(cfg, audio);
 }
 
-/** Цепочка: ошибка провайдера — следующий. Все упали — ошибка со списком причин. */
 export async function transcribeChain(chain: SttConfig[], audio: ArrayBuffer): Promise<{ transcript: Transcript; via: SttConfig; failed: string[] }> {
   const failed: string[] = [];
   for (const cfg of chain) {
@@ -47,7 +38,6 @@ export async function transcribeChain(chain: SttConfig[], audio: ArrayBuffer): P
   throw new SttChainError(failed);
 }
 
-/** Все провайдеры цепочки упали; failed — «имя: причина» по каждому (для журнала US-13). */
 export class SttChainError extends Error {
   constructor(readonly failed: string[]) {
     super(failed.join("; ") || "no STT providers configured");
@@ -63,6 +53,7 @@ async function transcribeWorkersAi(cfg: SttConfig, audio: ArrayBuffer): Promise<
     {
       method: "POST",
       headers: { authorization: `Bearer ${cfg.apiKey}`, "content-type": "application/json" },
+      // vad_filter убирает «Thank you.» на тишине (замер); у Groq его нет — тишину ловит HALLUCINATIONS
       body: JSON.stringify({ audio: btoa(binary), vad_filter: true }),
     },
     TIMEOUTS.stt,
@@ -77,7 +68,7 @@ async function transcribeWorkersAi(cfg: SttConfig, audio: ArrayBuffer): Promise<
   };
 }
 
-/** OpenAI-совместимый API (Groq): multipart, язык — автоопределение, verbose_json — чтобы узнать язык. */
+/** verbose_json — чтобы узнать язык (сам язык не задаём: автоопределение). */
 async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Transcript> {
   const form = new FormData();
   // Telegram присылает OGG/Opus; расширение подсказывает провайдеру формат
@@ -102,26 +93,21 @@ async function transcribeOpenAi(cfg: SttConfig, audio: ArrayBuffer): Promise<Tra
   };
 }
 
-/**
- * Известные ошибки Whisper в командах — только явный список (как опечатки в парсере дат), без нечёткой правки:
- * «Рисование Аня от Мини» (голос, 2026-10-05) — «отмени», разрезанное на два слова; «Созван с …» — «созвон»
- * (спайк на синтетическом голосе, 2026-10-05).
- */
+/** Только явный список, без нечёткой правки (как опечатки в парсере дат): «Рисование Аня от Мини» — «отмени», разрезанное надвое. */
 const TRANSCRIPT_FIXES: [RegExp, string][] = [
   [/(?<!\p{L})от\s+м[еи]н(и|ь|ей)(?!\p{L})/giu, "отмени"],
   [/(?<!\p{L})созван(?!\p{L})/giu, "созвон"],
-  // Синтетический замер 2026-10-06 (docs/research/voice-synth-eval.md): стабильно, 6 из 6
+  // Синтетический замер (docs/research/voice-synth-eval.md): стабильно, 6 из 6
   [/(?<!\p{L})тем\s+лидом(?!\p{L})/giu, "тимлидом"],
   [/(?<!\p{L})спеты(?!\p{L})/giu, "с Петей"],
 ];
 
 export function fixTranscript(text: string): string {
-  // Заглавная буква исходного слова сохраняется: «Созван с …» → «Созвон с …»
   const keepCase = (to: string) => (m: string) => (m[0] !== m[0]!.toLowerCase() ? to[0]!.toUpperCase() + to.slice(1) : to);
   return TRANSCRIPT_FIXES.reduce((t, [re, to]) => t.replace(re, keepCase(to)), text);
 }
 
-/** Типичные «галлюцинации» Whisper на тишине и шуме — считаем, что ничего не сказано (US-10). */
+/** Типичные «галлюцинации» Whisper на тишине и шуме — считаем, что ничего не сказано. */
 const HALLUCINATIONS = [
   /^продолжение следует/i,
   /субтитр/i,

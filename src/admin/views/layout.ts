@@ -3,7 +3,7 @@
 import { SECURITY_HEADERS } from "../../pages";
 
 export const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-/** Для содержимого <pre>: кавычки внутри элемента безопасны и нужны в YAML для копирования как есть. */
+// Кавычки внутри <pre> безопасны и нужны в YAML для копирования как есть.
 export const escPre = (v: string) => v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 
 export const fmtTime = (ms: number | null | undefined) => (ms ? `${new Date(ms).toISOString().replace("T", " ").slice(0, 16)} UTC` : "—");
@@ -22,7 +22,7 @@ export const usd = (micro: number) => {
   return `$${v.toFixed(v < 1 ? 4 : 2)}`;
 };
 
-/** Ячейка с готовым HTML (уже экранированным). */
+// Уже экранированный HTML.
 export interface Html {
   html: string;
 }
@@ -89,7 +89,6 @@ ${opts.body}
       ...SECURITY_HEADERS,
       // Свой Origin в POST форм (при no-referrer браузер шлёт Origin: null) — по нему проверка в auth.ts:sameOrigin
       "referrer-policy": "same-origin",
-      // Формы админки — только на себя
       "content-security-policy": `${SECURITY_HEADERS["content-security-policy"]}; form-action 'self'`,
     },
   });

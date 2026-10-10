@@ -1,7 +1,5 @@
-// Русские подписи для таблиц админки — чистый модуль (импортируют юнит-тесты, без D1).
-// Полнота FEATURE_LABELS по типу Feature проверяется при компиляции в views/usage.ts.
+// Чистый модуль: импортируют юнит-тесты. Полнота FEATURE_LABELS проверяется при компиляции в views/usage.ts.
 
-/** Функции бота (US-64, src/db/features.ts). Новая функция без подписи — ошибка компиляции в views/usage.ts. */
 export const FEATURE_LABELS = {
   list: "Расписание (US-20)",
   find: "Поиск встречи (US-21)",
@@ -22,8 +20,7 @@ export const FEATURE_LABELS = {
   assign: "Поручение участнику дома (US-91)",
 } as const satisfies Record<string, string>;
 
-/** Подпись функции; неизвестная (старая запись, функция из соседней ветки) — ключ как есть. */
+// Неизвестная (старая запись, функция из соседней ветки) — ключ как есть.
 export const featureLabel = (f: string): string => (Object.hasOwn(FEATURE_LABELS, f) ? FEATURE_LABELS[f as keyof typeof FEATURE_LABELS] : f);
 
-/** Источник вызова LLM (usage_events.result_json.source, src/bot/ingest.ts). */
 export const SOURCE_LABELS: Record<string, string> = { forward: "пересланное → LLM (US-65)", image: "фото → vision (US-66)" };

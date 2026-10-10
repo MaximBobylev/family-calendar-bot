@@ -1,5 +1,4 @@
-// US-40 / US-41 / US-43: чистый расчёт изменения события по фрагментам из текста (перенос, длительность, детали).
-// Без ввода-вывода (tech-debt #10); карточка — modify-view.ts, сценарий — modify-event.ts.
+// Расчёт изменения по фрагментам из текста, без ввода-вывода.
 
 import type { CalendarEvent, EventRef, EventReminders } from "../calendar/model";
 import { parseDateFragment } from "../dates";
@@ -11,19 +10,18 @@ import type { EventRequest } from "./find-event";
 
 export type ModifyRequest = EventRequest;
 
-/** Вариант изменения — хранится в карточке. */
 export interface Change {
   start?: Moment;
   end?: Moment;
   title?: string;
-  /** "" — убрать. */
+  // "" — убрать
   location?: string;
-  /** "" — убрать. */
+  // "" — убрать
   description?: string;
   reminders?: EventReminders;
 }
 
-/** Нет напоминаний у события в Google — значит, как в календаре. */
+// Событие без напоминаний в Google — значит, как в календаре по умолчанию
 export const DEFAULT_REMINDERS: EventReminders = { useDefault: true, overrides: [] };
 
 export interface ModifyCardPayload {
@@ -40,22 +38,17 @@ export interface ModifyCardPayload {
   oldEnd: Moment;
   notify: boolean;
   options: Change[];
-  /** Кнопки «только эту / все» вместо «подтвердить». */
   askScope: boolean;
-  /** Пояс календаря события, если он не текущий пояс пользователя — новое время и в нём (US-07). */
   calendarTz?: string;
 }
 
 const plus = addMinutes;
 const diff = minutesBetween;
 
-// --- Расчёт изменений ---------------------------------------------------------
-
 export type ChangeResult = { options: Change[] } | { error: "nothingToChange" | "notUnderstood" | "inPast" | "allDayTime" };
 
 export function computeChange(e: CalendarEvent, req: ModifyRequest, nowLocal: Moment, tz: string): ChangeResult {
   const s = req.spans;
-  // «Добавь описание» дописывает к существующему, «измени описание» — заменяет (US-41)
   const description =
     req.newDescription !== undefined && req.appendDescription && e.description && req.newDescription
       ? `${e.description}\n${req.newDescription}`

@@ -1,4 +1,3 @@
-// Панель «здоровье» — главная страница админки: всё ли живо за 10 секунд (docs/admin-console.md #1).
 // Пороги — общие с алертами владельцу (src/ops/alert-rules.ts): светофор и алерт краснеют одинаково.
 
 import type {
@@ -36,7 +35,6 @@ export interface HealthView {
   lastHourly?: OpsValue;
   totals: Totals;
   byDay: UpdatesDay[];
-  /** Сводка синхронизации — подробно на /admin/sync. */
   sync: { summary: SyncSummary; notices: NoticeStats; jobs: KindStats[] };
 }
 

@@ -1,5 +1,4 @@
-// US-93: семейная часть дайджеста — чьи календари (участник без Google получает сводку по общим календарям дома через
-// Google владельца) и блок «Ваши дела сегодня» (поручения участнику, US-91). Подписи «для кого / отводит» — familyLabeler.
+// Участник дома без своего Google получает сводку по общим календарям дома через аккаунт владельца.
 
 import { whenOfAssignment } from "../bot/assign/view";
 import { GoogleCalendarProvider } from "../calendar/google-provider";
@@ -14,19 +13,16 @@ import { membershipOf } from "../db/households";
 import { privateScope } from "../bot/household/scope";
 import type { User } from "../db/users";
 
-/** Есть из чего собрать сводку: свой Google или дом (общие календари владельца). */
 export async function hasDigestSource(db: D1Database, userId: string): Promise<boolean> {
   return (await hasGoogleAccount(db, userId)) || (await membershipOf(db, userId)) !== null;
 }
 
-/** Календари для сводки — те же, что в личном чате (privateScope): свои или общие календари дома через аккаунт владельца. */
 export async function digestProvider(ctx: AppContext, user: User): Promise<CalendarProvider | null> {
   const scope = await privateScope(ctx, user.id);
   if (scope) return scope.calendarIds.length ? new GoogleCalendarProvider(ctx.config, ctx.db, scope.ownerUserId, ctx.clock, scope.calendarIds) : null;
   return (await hasGoogleAccount(ctx.db, user.id)) ? new GoogleCalendarProvider(ctx.config, ctx.db, user.id, ctx.clock) : null;
 }
 
-/** «📌 Ваши дела сегодня / завтра:» — открытые поручения участнику со сроком в этот день; нет — null. */
 export async function assignmentsBlock(
   ctx: AppContext,
   user: User,

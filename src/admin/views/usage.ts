@@ -1,4 +1,3 @@
-// Расход AI по пользователям (псевдонимы) и итоги против лимитов (config.ts: USAGE_LIMITS, COST_ESTIMATES).
 // Стоимость — из usage_events.cost_micro_usd (пишется в момент вызова, ADR-0004), а не по ценам в админке.
 
 import type { Feature } from "../../db/features";
@@ -7,12 +6,11 @@ import type { DateFixDay, FeatureRow, InlineStats, ModelUsage, SourceUsage, User
 import { type FEATURE_LABELS, featureLabel, SOURCE_LABELS } from "../labels";
 import { esc, fmtTime, raw, table, usd } from "./layout";
 
-/** Каждой функции US-64 — подпись: новое значение Feature без строки в labels.ts не скомпилируется. */
+// Новое значение Feature без подписи в labels.ts не скомпилируется.
 type UnlabelledFeature = Exclude<Feature, keyof typeof FEATURE_LABELS>;
 const ALL_FEATURES_LABELLED: [UnlabelledFeature] extends [never] ? true : UnlabelledFeature = true;
 void ALL_FEATURES_LABELLED;
 
-/** Функции «контент → событие» (US-65–67) — отдельная секция. */
 const INGEST_FEATURES: Feature[] = ["forward_event", "image_event", "ics_import"];
 
 export interface UsageView {
@@ -23,12 +21,10 @@ export interface UsageView {
   features: FeatureRow[];
   bySource: SourceUsage[];
   inline: InlineStats;
-  /** Правки даты после карточки по дням (tech-debt #26). */
   dateFixes: DateFixDay[];
   limits: UsageLimits;
 }
 
-/** «45 / 60», красным — от 80% лимита. */
 function vsLimit(n: number, limit: number) {
   return raw(`<span class="${n >= limit * 0.8 ? "err" : ""}">${n} / ${limit}</span>`);
 }
@@ -79,7 +75,6 @@ ${table(
 )}`;
 }
 
-/** Доля правок от созданных: «3 / 40 (7,5%)». */
 const share = (n: number, of: number) => (of ? `${n} / ${of} (${((n / of) * 100).toFixed(1).replace(".", ",")}%)` : String(n));
 
 function dateFixSection(days: DateFixDay[]): string {

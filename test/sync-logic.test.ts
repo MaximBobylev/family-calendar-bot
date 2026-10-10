@@ -14,7 +14,7 @@ import {
   type SourceEvent,
 } from "../src/sync/logic";
 
-// «Сейчас» — ср 7 октября 2026, 10:00 МСК
+// Среда, как в приёмочных сценариях
 const NOW = Date.parse("2026-10-07T07:00:00Z");
 const TZ = "Europe/Moscow";
 

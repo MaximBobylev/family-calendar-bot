@@ -1,5 +1,3 @@
-// Ближайшее «ЧЧ:ММ» по местному времени — время отправки утреннего дайджеста (US-70).
-
 import { describe, expect, it } from "vitest";
 import { nextDailyAt, nextWeeklyAt, parseHhmm } from "../src/dates/daily";
 
@@ -7,7 +5,6 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 describe("nextDailyAt", () => {
   it.each([
-    // сейчас (UTC), пояс, время → ближайший момент
     ["2026-10-07T07:00:00Z", "Europe/Moscow", "08:00", "2026-10-08T05:00:00.000Z"],
     ["2026-10-07T04:59:00Z", "Europe/Moscow", "08:00", "2026-10-07T05:00:00.000Z"],
     ["2026-10-07T05:00:00Z", "Europe/Moscow", "08:00", "2026-10-08T05:00:00.000Z"],
@@ -31,7 +28,7 @@ describe("parseHhmm", () => {
 });
 
 describe("nextWeeklyAt", () => {
-  // ср 7 октября 2026; 0 — пн, 6 — вс (US-70, «Неделя»)
+  // Сейчас — среда; дни недели: 0 — пн, 6 — вс
   it.each([
     ["2026-10-07T07:00:00Z", "Europe/Moscow", 6, "20:00", "2026-10-11T17:00:00.000Z"],
     ["2026-10-07T07:00:00Z", "Europe/Moscow", 0, "08:00", "2026-10-12T05:00:00.000Z"],

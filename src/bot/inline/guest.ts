@@ -1,6 +1,4 @@
-// US-95: общее для inline-карточки — токен события, кнопка «Добавить себе», счётчик на сообщении, гостевые ссылки
-// (шаблон Google Calendar и .ics без OAuth) и маршрут /ics/<токен>. Посторонние (не в allowlist и не в доме) сюда
-// попадают прямо из webhook (gate.ts): без записи апдейта в inbox и без регистрации — как ответ «бот закрыт».
+// Посторонние (не в allowlist и не в доме) попадают сюда прямо из webhook (gate.ts): без inbox и без регистрации.
 
 import { GOOGLE_CALENDAR_TEMPLATE_URL } from "../../config";
 import { utcToLocal } from "../../dates/calendar";
@@ -17,12 +15,10 @@ export async function inlineToken(secret: string, authorTg: number, e: InlineEve
   return [...sig.slice(0, 10)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Кнопка под карточкой в чате. */
 export const inlineKeyboard = (token: string, locale: string): ReplyMarkup => ({
   inline_keyboard: [[{ text: t("inlineAddButton", locale), callback_data: inlineCallbackData(token) }]],
 });
 
-/** Учесть нажатие под карточкой и обновить счётчик «Добавили себе: N» (только при новом нажавшем). */
 export async function countPress(ctx: AppContext, cq: TgCallbackQuery, token: string, e: InlineEvent): Promise<void> {
   if (!cq.inline_message_id) return;
   const now = ctx.clock.now();
@@ -32,7 +28,6 @@ export async function countPress(ctx: AppContext, cq: TgCallbackQuery, token: st
   await ctx.telegram.editInlineMessageText(cq.inline_message_id, text, inlineKeyboard(token, e.locale));
 }
 
-/** Сообщение со ссылками «добавить без бота»: шаблон Google Calendar и .ics; note — что дальше (зависит от доступа). */
 export function guestLinks(
   ctx: AppContext,
   e: InlineEvent,
@@ -56,10 +51,7 @@ export function guestLinks(
   return { text, markup: { inline_keyboard: buttons } };
 }
 
-/**
- * Посторонний нажал «Добавить себе»: callback может открыть только t.me/<бот>?start=… — открываем личный чат,
- * где /start add_<токен> пришлёт ссылки (replyGuestStart). true — нажатие было на inline-карточке.
- */
+// Callback может открыть только t.me/<бот>?start=… — так и открываем личный чат, где /start add_<токен> пришлёт ссылки.
 export async function answerGuestPress(ctx: AppContext, cq: TgCallbackQuery): Promise<boolean> {
   const token = parseInlineCallback(cq.data);
   if (!token) return false;
@@ -74,7 +66,6 @@ export async function answerGuestPress(ctx: AppContext, cq: TgCallbackQuery): Pr
   return true;
 }
 
-/** Посторонний открыл бота по ссылке карточки (/start add_<токен>): ссылки без OAuth вместо «бот закрыт». */
 export async function replyGuestStart(ctx: AppContext, message: TgMessage): Promise<boolean> {
   if (message.chat.type !== "private") return false;
   const token = parseAddStart(message.text);
@@ -90,7 +81,6 @@ export async function replyGuestStart(ctx: AppContext, message: TgMessage): Prom
   return true;
 }
 
-/** GET /ics/<токен> — файл события для Apple Календаря, Outlook и др.; нет токена или срок вышел — 404. */
 export async function serveIcs(ctx: AppContext, path: string): Promise<Response> {
   const token = /^\/ics\/([0-9a-f]{20})(?:\.ics)?$/.exec(path)?.[1];
   const e = token ? await loadInlineEvent(ctx.db, token, ctx.clock.now()) : null;

@@ -1,8 +1,8 @@
-// US-95: события inline-карточек по токену и счётчик «Добавили себе» (migrations/0015_inline_events.sql).
+// События inline-карточек по токену и счётчик «Добавили себе» (US-95).
 
 import type { InlineEvent } from "../bot/inline/logic";
 
-/** Сохранить событие карточки; повторный inline-запрос с тем же событием лишь продлевает срок (токен детерминирован). */
+/** Токен детерминирован: повторный inline-запрос с тем же событием лишь продлевает срок. */
 export async function saveInlineEvent(
   db: D1Database,
   a: { token: string; createdByTg: number; event: InlineEvent; now: number; expiresAt: number },
@@ -16,13 +16,12 @@ export async function saveInlineEvent(
     .run();
 }
 
-/** Событие карточки; null — нет такого токена или срок вышел. */
 export async function loadInlineEvent(db: D1Database, token: string, now: number): Promise<InlineEvent | null> {
   const row = await db.prepare("SELECT payload_json FROM inline_events WHERE token = ? AND expires_at > ?").bind(token, now).first<{ payload_json: string }>();
   return row ? (JSON.parse(row.payload_json) as InlineEvent) : null;
 }
 
-/** Нажатие «Добавить себе» под конкретным сообщением; возвращает число нажавших (каждый — один раз) и было ли это новым. */
+/** Каждый нажавший считается один раз. */
 export async function recordInlineAdd(
   db: D1Database,
   a: { inlineMessageId: string; telegramId: number; token: string; now: number },

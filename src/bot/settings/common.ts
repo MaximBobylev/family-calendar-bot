@@ -1,5 +1,4 @@
-// /settings: общие действия меню — показать меню, список календарей, смена сводки, ссылка «Подключить».
-// Используются и кнопками (callbacks.ts), и вводом текстом (input.ts).
+// Общие для кнопок (callbacks.ts) и ввода текстом (input.ts).
 
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
 import { googleAccountEmail } from "../../db/accounts";
@@ -30,7 +29,7 @@ export async function showSettings(ctx: AppContext, user: User, chatId: number):
   await ctx.telegram.sendMessage(chatId, s.text, { inline_keyboard: s.buttons }, { html: true });
 }
 
-/** Ссылка «Подключить» для уже подключённого: переподключение того же аккаунта сохраняет настройки (tech-debt #19). */
+// Переподключение того же аккаунта сохраняет настройки (tech-debt #19).
 export async function sendReconnect(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const row = await googleAccountEmail(ctx.db, user.id);
   const text = row ? t("reconnectPrompt", user.locale, { email: row.email ?? "Google" }) : t("connectPrompt", user.locale);

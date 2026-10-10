@@ -1,5 +1,4 @@
-// Админка, итерация 3: сводка синхронизации и пороги «устарел» (src/ops/sync-health.ts), светофор панели,
-// подписи функций US-64 и псевдонимы чатов — чистые функции.
+// Админка R1: свежесть синхронизации (src/ops/sync-health.ts), светофор панели, подписи функций, псевдонимы чатов.
 
 import { describe, expect, it } from "vitest";
 import { chatPseudonym, pseudonym, pseudonymKey } from "../src/admin/mask";

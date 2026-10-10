@@ -1,5 +1,3 @@
-// Алерты владельцу (src/ops/alert-rules.ts): правила по счётчикам, дедупликация переходов, тексты без PII.
-
 import { describe, expect, it } from "vitest";
 import { type AlertInputs, type AlertState, alertText, decide, evaluateRules, isAlertMinute, REMIND_MS, type RuleResult } from "../src/ops/alert-rules";
 

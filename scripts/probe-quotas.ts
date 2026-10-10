@@ -1,8 +1,8 @@
-// Живая проверка эндпоинтов остатков квот (панель «Квоты», src/ops/quota-rules.ts) — ручной запуск, не тест:
+// Остатки квот провайдеров вживую (панель «Квоты»):
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/probe-quotas.ts
 // Только бесплатные эндпоинты: OpenRouter /key, DeepSeek /user/balance, GraphQL Cloudflare (Workers AI, Workers, D1,
 // Queues) — квоту моделей не тратит. CF_WORKERS_PLAN=paid — лимиты Paid (по умолчанию Free).
-// Печатает разобранные числа; ключи и метки ключей — никогда.
+// Ключи и метки ключей не печатать.
 import {
   type CfPlan,
   cfWindow,

@@ -1,5 +1,5 @@
-// /settings (US-04): нажатия кнопок меню «st:<раздел>:<значение>» — сообщение правится на месте.
-// Настройка идемпотентна, карточка в D1 не нужна; значения проверяются по белым спискам (screens.ts).
+// Нажатия «st:<раздел>:<значение>» правят сообщение на месте. Настройка идемпотентна — карточка в D1 не нужна;
+// значения проверяются по белым спискам (screens.ts).
 
 import { TZ_PRESETS } from "../../dates/timezone";
 import { AWAIT_TTL_MS, mergeDialogState } from "../../db/conversations";
@@ -33,7 +33,7 @@ export function parseSettingsCallback(data: string | undefined): { section: stri
   return m ? { section: m[1]!, ...(m[2] ? { value: m[2] } : {}) } : null;
 }
 
-/** Нажатие кнопки в меню настроек. Возвращает текст всплывающего ответа на нажатие. */
+// Возвращает текст всплывающего ответа на нажатие.
 export async function handleSettingsCallback(
   ctx: AppContext,
   user: User,
@@ -163,7 +163,6 @@ export async function handleSettingsCallback(
       u = await setDigest(ctx, u, null);
       saved = true;
       break;
-    // US-70, R1: «Завтра» — переключатель, «Неделя» — нет / вс 20:00 / пн 08:00; экран остаётся открытым
     case "digtm": {
       const on = !u.settings.tomorrowDigest;
       await updateSettings(ctx.db, user.id, { tomorrowDigest: on || undefined });
@@ -195,7 +194,6 @@ export async function handleSettingsCallback(
       );
       await ctx.telegram.sendMessage(chatId, t("settingsAskDigestTime", l));
       return undefined;
-    // US-72, US-71: уведомления об изменениях и напоминания в Telegram
     case "ntf":
       screen = notifyScreen(u);
       break;

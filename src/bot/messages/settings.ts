@@ -1,9 +1,8 @@
-// Тексты: /settings (US-04, US-06, US-07, US-42), утренняя сводка (US-70), подписи напоминаний.
+// /settings, утренняя сводка, подписи напоминаний.
 
 import type { Messages } from "./types";
 
 export const settingsMessages = {
-  // --- Утренний дайджест (US-70) ---
   digestGreeting: { ru: "☀️ Доброе утро! Вот что сегодня:", en: "☀️ Good morning! Here is your day:" },
   settingsDigest: { ru: "☀️ Утренняя сводка: в {time}", en: "☀️ Morning summary: at {time}" },
   settingsDigestOff: { ru: "☀️ Утренняя сводка: выключена", en: "☀️ Morning summary: off" },
@@ -20,7 +19,6 @@ export const settingsMessages = {
     ru: "Не понял время «{value}». Напишите, например, 7:45 — или выберите в /settings.",
     en: "I didn't get the time “{value}”. Type e.g. 7:45, or pick one in /settings.",
   },
-  // --- /settings (US-04, US-06, US-07, US-42) ---
   settingsTitle: { ru: "⚙️ <b>Настройки</b>", en: "⚙️ <b>Settings</b>" },
   settingsCalendar: { ru: "🗓 Календарь по умолчанию: {value}", en: "🗓 Default calendar: {value}" },
   settingsTz: { ru: "🌍 Часовой пояс: {value} (сейчас {time})", en: "🌍 Time zone: {value} (now {time})" },

@@ -1,5 +1,4 @@
-// Учёт использования + журнал распознанного (US-13, ADR-0004): одна запись на вызов STT/LLM.
-// По ней же — лимиты на пользователя (tech-debt #4).
+// Одна запись на вызов STT/LLM: журнал распознанного (US-13) и основа лимитов на пользователя (tech-debt #4).
 
 import { DAY_MS, HOUR_MS, type UsageWindow } from "../limits";
 
@@ -11,7 +10,7 @@ export interface UsageRecord {
   tokensIn?: number;
   tokensOut?: number;
   audioMs?: number;
-  /** Оценка стоимости, микродоллары (limits.ts). */
+  /** Оценка по прайсу (limits.ts), не фактический счёт. */
   costMicroUsd?: number;
   text?: string;
   result?: unknown;
@@ -43,7 +42,6 @@ export async function recordUsage(db: D1Database, r: UsageRecord): Promise<void>
     .run();
 }
 
-/** Вызовы пользователя этого вида за последний час и сутки — для лимитов (tech-debt #4). Индекс usage_events_user_time. */
 export async function usageWindow(db: D1Database, userId: string, kind: UsageRecord["kind"], now: number): Promise<UsageWindow> {
   const row = await db
     .prepare(
@@ -66,7 +64,7 @@ export interface ProviderToday {
   audio_ms_utc: number;
 }
 
-/** Расход по провайдерам за «сегодня» — для оценок квот (src/ops/quotas.ts). Ошибки цепочки (provider = chain) не тратят квоту провайдера. */
+/** Ошибки цепочки (provider = chain) не тратят квоту провайдера. */
 export async function usageTodayByProvider(db: D1Database, utcStart: number, altStart: number): Promise<ProviderToday[]> {
   const { results } = await db
     .prepare(

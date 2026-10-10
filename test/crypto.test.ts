@@ -6,7 +6,7 @@ const OTHER = btoa(String.fromCharCode(...new Uint8Array(32).fill(8)));
 const RING: KeyRing = [KEY];
 const AAD = "account:a1";
 
-/** Шифротекст в формате до v1 (без префикса и AAD) — как лежат записи в проде до tech-debt #8. */
+// Формат до v1 (без префикса и AAD): такие записи ещё лежат в проде и должны расшифровываться.
 async function legacySeal(plain: string, keyB64: string): Promise<string> {
   const raw = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
   const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt"]);

@@ -1,4 +1,4 @@
-// Метрика качества дат (tech-debt #26): «создано из карточки» и «дату поправили сразу после» — счётчики для /admin/usage.
+// Метрика качества дат (tech-debt #26): «создано из карточки» против «дату поправили сразу после».
 
 import type { DateFixKind } from "../bot/date-fix-logic";
 
@@ -12,7 +12,6 @@ export interface DateMetric {
   now: number;
 }
 
-/** Best-effort: сбой учёта не ломает ответ пользователю (как recordFeature). */
 export async function recordDateMetric(db: D1Database, m: DateMetric): Promise<void> {
   try {
     await db

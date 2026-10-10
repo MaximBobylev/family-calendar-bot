@@ -1,6 +1,4 @@
-// Алерты владельцу в Telegram (docs/admin-console.md, итерация 2; tech-debt #7): раз в 5 минут из cron
-// (в TEST_MODE — POST /__test/alerts) собрать счётчики, оценить правила (alert-rules.ts) и отправить переходы.
-// Никогда не бросает: сбой алертов не должен ронять cron.
+// Никогда не бросает: сбой алертов не должен ронять cron. В TEST_MODE запускается через POST /__test/alerts.
 
 import { inboxHealth, jobsLag, syncCalendars } from "../admin/queries";
 import { webhookStatus } from "../admin/webhook";
@@ -39,7 +37,6 @@ export async function collectAlertInputs(ctx: AppContext, now: number): Promise<
   };
 }
 
-/** Оценить правила и отправить владельцу начало / напоминание / окончание. Возвращает отправленные ключи. */
 export async function runAlerts(ctx: AppContext): Promise<string[]> {
   const sent: string[] = [];
   const started = Date.now(); // только длительность для лога, не «сейчас» логики

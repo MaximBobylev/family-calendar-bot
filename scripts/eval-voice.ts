@@ -1,13 +1,10 @@
-// Замер двух голосовых конвейеров на синтетическом шумном наборе (scripts/voice-synth.py) — ручной запуск, не тест.
-//   A — как сейчас в проде: Groq Whisper → isEmptySpeech → fixTranscript → OpenRouter Nemotron free (reasoning off) → effectiveIntent;
-//   B — мультимодальный: Gemini напрямую (src/voice/understand.ts) → транскрипт + интент / no_speech → effectiveIntent;
-//   C — мультимодальный через OpenRouter (kind openai-audio, input_audio ogg; тот же VOICE_TOOLS/правила): модель —
-//       VOICE_OR_MODEL, поля запроса — VOICE_OR_EXTRA (по умолчанию reasoning off; прод их не передаёт — вклеиваем в fetch).
-// Запуск (ключи есть только в сервисе deploy; квоты — общие с продом, см. CLAUDE.md):
+// Замер голосовых конвейеров на синтетическом шумном наборе (scripts/voice-synth.py). Тратит квоты прода — только
+// с разрешения владельца, сначала --dry-run. A — прод: Whisper → текстовая LLM; B — Gemini по аудио напрямую;
+// C — мультимодальная модель через OpenRouter: VOICE_OR_MODEL, поля запроса — VOICE_OR_EXTRA (по умолчанию reasoning off).
 //   docker compose run --rm --entrypoint npx deploy tsx scripts/eval-voice.ts [папка=reports/voice-synth] \
 //     [--dry-run] [--only A|B|C] [--files a.ogg,b.ogg] [--filter подстрока] [--limit N] [--resume [--retry-errors]] [--report] [--results файл.jsonl]
 //   --dry-run — только оценка вызовов по провайдерам, без сети; --resume — пропустить уже записанное в results.jsonl
-//   (--retry-errors — кроме ошибок: повторить их; в сводке последняя запись по файлу заменяет прежнюю);
+//   (--retry-errors — ошибки повторить; в сводке последняя запись по файлу заменяет прежнюю);
 //   --report — только сводка по results.jsonl. Живой журнал — <папка>/live.log. Фразы — testdata/voice/phrases.yaml.
 // Итоги — docs/research/voice-synth-eval.md.
 
@@ -20,8 +17,6 @@ import { type Intent, parseIntent } from "../src/nlu/intents";
 import type { LlmConfig } from "../src/nlu/llm";
 import { fixTranscript, isEmptySpeech, type SttConfig, transcribe } from "../src/stt/whisper";
 import { understandVoiceChain, type VoiceConfig } from "../src/voice/understand";
-
-// --- Аргументы ------------------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
 const flag = (name: string) => argv.includes(name);
@@ -36,8 +31,6 @@ const pipelines = (only ? [only] : ["A", "B"]) as Pipeline[];
 type Pipeline = "A" | "B" | "C";
 const LIVE = join(dir, "live.log");
 const RESULTS = join(dir, opt("--results") ?? "results.jsonl");
-
-// --- Набор ----------------------------------------------------------------------------------------
 
 interface Phrase {
   id: string;
@@ -69,10 +62,8 @@ if (filter) items = items.filter((i) => i.file.includes(filter));
 const limit = Number(opt("--limit") ?? 0);
 if (limit) items = items.slice(0, limit);
 
-// Календари — как в testdata/nlu/intents.yaml (названия + алиасы, как передаёт бот)
+// Как в testdata/nlu/intents.yaml: названия и алиасы
 const CALENDARS = ["Иван", "Семья", "общий", "Работа", "work", "Праздники"];
-
-// --- Результаты -----------------------------------------------------------------------------------
 
 interface Result {
   file: string;
@@ -103,7 +94,6 @@ const done: Result[] = existsSync(RESULTS)
       .map((l) => JSON.parse(l) as Result)
   : [];
 
-/** По каждому (конвейер, файл) — последняя запись: повтор после ошибки заменяет её. */
 function latest(rs: Result[]): Result[] {
   return [...new Map(rs.map((r) => [`${r.pipeline}|${r.file}`, r])).values()];
 }
@@ -113,7 +103,7 @@ function live(line: string): void {
   console.log(line);
 }
 
-/** Ключевые слова, пережившие распознавание: без регистра, ё=е, с допуском на окончания (sameWord). */
+// С допуском на окончания
 function keywordRecall(keywords: string[], transcript: string): { hit: number; missed: string[] } {
   const words = normalizeWords(transcript);
   const missed = keywords.filter((k) => {
@@ -136,8 +126,6 @@ function grade(r: Result, item: Item): Result {
   const { hit, missed } = keywordRecall(p.keywords, r.transcript ?? "");
   return { ...r, kwHit: hit, kwTotal: p.keywords.length, missed, intentOk: r.intent === p.intent };
 }
-
-// --- Провайдеры -----------------------------------------------------------------------------------
 
 const groq: SttConfig = {
   name: "groq",
@@ -171,7 +159,7 @@ const orVoice: VoiceConfig = {
 // Прод (viaOpenAiAudio) не передаёт поля провайдера; для замера вклеиваем их в тело запросов с аудио к OpenRouter
 const OR_VOICE_EXTRA: Record<string, unknown> = process.env.VOICE_OR_EXTRA ? JSON.parse(process.env.VOICE_OR_EXTRA) : { reasoning: { enabled: false } };
 const realFetch = globalThis.fetch;
-// OpenRouter бывает отвечает 200 с {"error":{…}} (провайдер перегружен) — прод принял бы это за no_speech; в замере это сбой
+// OpenRouter бывает отвечает 200 с {"error":{…}} — прод принял бы это за no_speech; в замере это сбой
 globalThis.fetch = async (input, init) => {
   if (!String(input).startsWith(orVoice.baseUrl)) return realFetch(input, init);
   const audio = typeof init?.body === "string" && init.body.includes('"input_audio"');
@@ -189,12 +177,11 @@ const short = (e: unknown) =>
     .replace(/\s+/g, " ")
     .slice(0, 200);
 
-/** Провайдер: счётчик вызовов, пауза между вызовами, одна повторная попытка после 429/503 (60 с), отключение после 5 сбоев подряд. */
 class Provider {
   calls = 0;
   failStreak = 0;
   dead = false;
-  /** Длительность последнего вызова — без паузы между вызовами и ожидания после 429 (задержка самого провайдера). */
+  // Без паузы и ожидания после 429 — задержка самого провайдера
   lastMs = 0;
   private last = 0;
   constructor(
@@ -272,8 +259,6 @@ async function runB(item: Item, audio: ArrayBuffer, pl: "B" | "C" = "B"): Promis
   }
 }
 
-// --- Сводка ---------------------------------------------------------------------------------------
-
 const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(0)}% (${a}/${b})` : "—");
 function quantile(xs: number[], q: number): string {
   if (!xs.length) return "—";
@@ -324,8 +309,6 @@ function summary(all: Result[]): void {
     );
 }
 
-// --- Запуск ---------------------------------------------------------------------------------------
-
 if (flag("--report")) {
   summary(latest(done));
   process.exit(0);
@@ -366,7 +349,7 @@ for (const [k, v] of Object.entries({ GROQ_API_KEY: groq.apiKey, OPENROUTER_API_
 
 live(`=== eval-voice: ${items.length} файлов × ${pipelines.join("+")}, LLM ${nemotron.model}, voice ${gemini.model}, C ${orVoice.model}`);
 const results: Result[] = flag("--resume") ? [...done] : [];
-// По файлу — оба конвейера подряд (условия сети одинаковые), строго последовательно
+// По файлу — все конвейеры подряд, чтобы условия сети были одинаковыми
 for (const item of items) {
   const buf = readFileSync(join(dir, item.file));
   const audio = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;

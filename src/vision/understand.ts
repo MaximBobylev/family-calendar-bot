@@ -1,9 +1,5 @@
-// US-66: фото/скриншот → событие. Модель за один запрос возвращает дословный видимый текст («text») и вызов create_event
-// (название, фрагмент даты, место) или no_event. Цепочка — config.vision (VISION_CHAIN; без него — Gemini из VOICE_CHAIN):
-//   kind "gemini" — generateContent, inlineData image/*;
-//   kind "openai" — OpenAI-совместимый chat/completions, image_url data:URL (DeepSeek на запуске, роадмап R3).
-// Даты считает НАШ парсер по тексту (ADR-0005; синтетика голоса 2026-10-05 показала: мультимодальная модель «исправляет»
-// время), от модели — название, место и структура даты `when` (её разрешает наш код, парсер текста проверяет — ревью дат, шаг 5).
+// Фото/скриншот → событие. Даты считает НАШ парсер по видимому тексту: мультимодальная модель «исправляет» время (синтетика голоса);
+// от модели — название, место и структура `when`, которую разрешает наш код и сверяет с разбором текста.
 
 import { fetchWithTimeout } from "../net/fetch";
 import { parseDateStructure } from "../dates/structured";
@@ -69,7 +65,6 @@ const TOOLS = [
   },
 ];
 
-/** Те же инструменты в формате OpenAI. */
 const OPENAI_TOOLS = TOOLS.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parametersJsonSchema } }));
 
 const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
@@ -77,7 +72,6 @@ const s = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefi
 /** Подпись — слова самого пользователя (инструкция, US-66); отдельной частью, как данные. */
 const captionPart = (caption: string) => `User's caption: ${JSON.stringify(caption.slice(0, 300))}`;
 
-/** Аргументы вызова → результат; не create_event — «события нет». */
 function toResult(name: string | undefined, a: Record<string, unknown>, tokensIn: number, tokensOut: number): VisionResult {
   const text = s(a.text) ?? "";
   if (name !== "create_event") return { noEvent: true, text, tokensIn, tokensOut };
@@ -150,13 +144,12 @@ async function viaOpenAi(cfg: VisionConfig, data: string, mimeType: string, capt
     usage?: { prompt_tokens?: number; completion_tokens?: number };
     error?: unknown;
   };
-  // 200 с ошибкой в теле и без choices — сбой провайдера, не ответ модели (tech-debt #24): пусть цепочка идёт дальше
+  // 200 с ошибкой в теле и без choices — сбой провайдера, не ответ модели: пусть цепочка идёт дальше
   if (j.error && !j.choices?.length) throw new Error(`vision 200 with error: ${JSON.stringify(j.error).slice(0, 300)}`);
   const call = j.choices?.[0]?.message?.tool_calls?.[0]?.function;
   return toResult(call?.name, call ? safeParse(call.arguments) : {}, j.usage?.prompt_tokens ?? 0, j.usage?.completion_tokens ?? 0);
 }
 
-/** Цепочка провайдеров: ошибка — следующий. Все упали — ошибка со списком причин. */
 export async function understandImageChain(
   chain: VisionConfig[],
   image: ArrayBuffer,

@@ -1,6 +1,4 @@
-// Ранний фильтр апдейтов в webhook — до записи в D1 и очереди (ревью безопасности/надёжности 2026-10-05):
-// посторонние не тратят квоты D1/Queues/AI. Доступ — allowlist (US-01 / ADR-0001) или членство в доме по приглашению
-// (US-90, ADR-0001 дополнение 2026-10-06). В группах — только обращённое к боту (privacy mode, US-94).
+// Фильтр до записи в D1 и очередь: посторонние не тратят квоты D1/Queues/AI.
 
 import { isMemberByTelegramId } from "../db/households";
 import type { TgMessage, TgUpdate } from "../telegram/types";
@@ -11,10 +9,7 @@ import { t } from "./messages";
 
 export type Gate = "process" | "ignore" | "not_allowed";
 
-/**
- * Доступ к боту: allowlist; участник дома (приглашённый — без allowlist); `/start home_<код>` в личном чате — код
- * проверит обработчик, до проверки посторонний не регистрируется. Посторонние в allowlist — только чтение D1.
- */
+// `/start home_<код>` пропускаем: код проверит обработчик, до проверки посторонний не регистрируется
 export async function hasAccess(ctx: AppContext, telegramId: number, message?: TgMessage): Promise<boolean> {
   if (ctx.config.allowedTelegramIds.has(String(telegramId))) return true;
   if (message?.chat.type === "private" && parseHomeStart(message.text)) return true;
@@ -22,7 +17,7 @@ export async function hasAccess(ctx: AppContext, telegramId: number, message?: T
 }
 
 export async function gateUpdate(ctx: AppContext, update: TgUpdate): Promise<Gate> {
-  // Бота добавили в группу (ревью R1 #13): приветствие — только если добавил человек с доступом; посторонним — молча
+  // Бота добавил в группу посторонний — молчим, без «нет доступа»
   if (update.my_chat_member) {
     const m = update.my_chat_member;
     if (m.from.is_bot || m.chat.type === "private" || m.chat.type === "channel") return "ignore";
@@ -32,17 +27,15 @@ export async function gateUpdate(ctx: AppContext, update: TgUpdate): Promise<Gat
   const from = message?.from ?? update.callback_query?.from;
   if (!from || from.is_bot || (!message && !update.callback_query)) return "ignore";
   if (message?.chat.type === "channel") return "ignore";
-  // Группа: только команды, упоминание @бота и ответы боту — остальную переписку не читаем (US-94)
   if (message && message.chat.type !== "private" && !isAddressedToBot(message, ctx.config.telegramBotUsername)) return "ignore";
   if (!(await hasAccess(ctx, from.id, message))) return "not_allowed";
   return "process";
 }
 
-/** Вежливый ответ посторонним — без хранения апдейта. */
 export async function replyToOutsider(ctx: AppContext, update: TgUpdate, gate: Gate): Promise<void> {
   const message = update.message;
   if (!message) {
-    // «📅 Добавить себе» под inline-карточкой (US-95) — постороннему ссылки без OAuth через личный чат
+    // Посторонний может нажать «📅 Добавить себе» под inline-карточкой (US-95)
     if (update.callback_query && !(gate === "not_allowed" && (await answerGuestPress(ctx, update.callback_query)))) {
       await ctx.telegram.answerCallbackQuery(update.callback_query.id);
     }

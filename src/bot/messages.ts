@@ -1,5 +1,4 @@
-// Тексты бота. Пока простой словарь RU/EN; позже — каталог i18n с ICU plural (ADR-0003).
-// Словарь разбит по областям в messages/*.ts (меньше конфликтов при параллельных правках); ключи не должны повторяться.
+// Ключи в messages/*.ts не должны повторяться: spread ниже молча перезапишет одинаковый ключ.
 
 import { accountMessages } from "./messages/account";
 import { assignMessages } from "./messages/assign";

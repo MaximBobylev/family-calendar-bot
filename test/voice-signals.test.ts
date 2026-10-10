@@ -1,5 +1,3 @@
-// Сигналы для повторного мультимодального разбора голосового (multimodal-voice, вариант D).
-
 import { describe, expect, it } from "vitest";
 import { isNotRight, similarTranscripts } from "../src/voice/signals";
 

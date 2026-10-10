@@ -1,5 +1,5 @@
-// Дом (US-90): участники, дети, общие календари, приглашения, привязка группового чата (US-94). Схема — ADR-0003,
-// миграции 0001 и 0011. Пользователь состоит максимум в одном доме (уникальный индекс household_members_one_home).
+// Дом (US-90): участники, дети, общие календари, приглашения, групповой чат (US-94).
+// Пользователь — максимум в одном доме (уникальный индекс household_members_one_home).
 
 export interface Household {
   id: string;
@@ -65,7 +65,7 @@ export async function getHousehold(db: D1Database, id: string): Promise<Househol
   return h ? { id: h.id, name: h.name ?? "", ownerUserId: h.owner_user_id } : null;
 }
 
-/** Участник какого-либо дома по Telegram id — доступ к боту без allowlist (приглашённые, ADR-0001 дополнение 2026-10-06). */
+/** Участник дома пускается в бота без allowlist (приглашённые, ADR-0001). */
 export async function isMemberByTelegramId(db: D1Database, telegramId: number): Promise<boolean> {
   const row = await db
     .prepare(
@@ -99,7 +99,7 @@ export async function householdCalendarIds(db: D1Database, householdId: string):
   return results.map((r) => r.calendar_id);
 }
 
-/** Включить/выключить общий календарь дома; только календарь самого владельца. Возвращает новое состояние или null. */
+/** Только календарь самого владельца; null — не его календарь. */
 export async function toggleHouseholdCalendar(db: D1Database, household: Household, calendarId: string): Promise<boolean | null> {
   const owned = await db
     .prepare(
@@ -118,8 +118,8 @@ export async function toggleHouseholdCalendar(db: D1Database, household: Househo
 }
 
 /**
- * Основной общий календарь дома (ревью R1, блокер 2): куда записываются события участников. Выбранный владельцем, если
- * он ещё общий; иначе — общий с правом записи, не основной (личный) календарь владельца, по названию. Нет общих — null.
+ * Куда записываются события участников. Выбранный владельцем, если он ещё общий; иначе — общий с правом записи,
+ * но не основной (личный) календарь владельца.
  */
 export async function householdDefaultCalendar(db: D1Database, householdId: string): Promise<string | null> {
   const row = await db
@@ -137,7 +137,6 @@ export async function householdDefaultCalendar(db: D1Database, householdId: stri
   return row?.id ?? null;
 }
 
-/** Сделать общий календарь основным для дома; только уже общий календарь. */
 export async function setHouseholdDefaultCalendar(db: D1Database, householdId: string, calendarId: string): Promise<boolean> {
   const res = await db
     .prepare(
@@ -149,7 +148,6 @@ export async function setHouseholdDefaultCalendar(db: D1Database, householdId: s
   return (res.meta.changes ?? 0) > 0;
 }
 
-/** Задать имя и другие имена участника дома (владелец — любому, участник — себе). false — такого участника нет. */
 export async function setMemberNameOf(db: D1Database, householdId: string, userId: string, name: string, aliases: string[]): Promise<boolean> {
   const res = await db
     .prepare("UPDATE household_members SET display_name = ?, aliases_json = ? WHERE household_id = ? AND user_id = ?")
@@ -158,7 +156,6 @@ export async function setMemberNameOf(db: D1Database, householdId: string, userI
   return (res.meta.changes ?? 0) > 0;
 }
 
-/** Добавить другое имя участнику («муж» — Ивану), если его ещё нет. */
 export async function addMemberAlias(db: D1Database, householdId: string, userId: string, alias: string): Promise<void> {
   await db
     .prepare(
@@ -208,7 +205,6 @@ export async function addMember(db: D1Database, a: { householdId: string; userId
     .run();
 }
 
-/** Убрать участника (не владельца). Возвращает, был ли он в доме. */
 export async function removeMember(db: D1Database, householdId: string, userId: string): Promise<boolean> {
   const res = await db.prepare("DELETE FROM household_members WHERE household_id = ? AND user_id = ? AND role <> 'owner'").bind(householdId, userId).run();
   return (res.meta.changes ?? 0) > 0;
@@ -227,7 +223,6 @@ export async function dependentsOf(db: D1Database, householdId: string): Promise
   return results.map((r) => ({ id: r.id, name: r.name, aliases: parseAliases(r.aliases_json) }));
 }
 
-/** Добавить ребёнка; тот же имя — обновить другие имена. */
 export async function upsertDependent(db: D1Database, householdId: string, name: string, aliases: string[]): Promise<void> {
   const existing = await db
     .prepare("SELECT id FROM dependents WHERE household_id = ? AND lower(name) = lower(?)")
@@ -248,8 +243,6 @@ export async function removeDependent(db: D1Database, householdId: string, id: s
   return row?.name ?? null;
 }
 
-// --- Приглашения ----------------------------------------------------------------
-
 export async function createInvite(
   db: D1Database,
   a: { code: string; householdId: string; createdBy: string; preset: string[]; now: number; ttlMs: number },
@@ -263,7 +256,7 @@ export async function createInvite(
     .run();
 }
 
-/** Действующее приглашение — не «гасит» его (проверка до регистрации постороннего). */
+/** Не «гасит» приглашение: проверка до регистрации постороннего. */
 export async function peekInvite(db: D1Database, code: string, now: number): Promise<Household | null> {
   const row = await db
     .prepare(
@@ -277,7 +270,6 @@ export async function peekInvite(db: D1Database, code: string, now: number): Pro
   return row ? { id: row.id, name: row.name ?? "", ownerUserId: row.owner_user_id } : null;
 }
 
-/** Одноразово «гасит» приглашение. null — уже использовано, истекло или неизвестно. */
 export async function consumeInvite(db: D1Database, code: string, userId: string, now: number): Promise<{ householdId: string; preset: string[] } | null> {
   const row = await db
     .prepare(
@@ -291,12 +283,7 @@ export async function consumeInvite(db: D1Database, code: string, userId: string
   return row ? { householdId: row.household_id, preset: parseAliases(row.aliases_json) } : null;
 }
 
-// --- Распустить дом, групповые чаты ------------------------------------------------
-
-/**
- * Распустить дом (владелец так решил или отключил бота, US-03): чаты отвязываются, участники, дети, календари дома
- * и приглашения удаляются. Явно по таблицам — не полагаясь только на ON DELETE CASCADE.
- */
+/** Явно по таблицам — не полагаясь только на ON DELETE CASCADE. */
 export function dissolveStatements(db: D1Database, householdIdsSql: string, param: string): D1PreparedStatement[] {
   return [
     db.prepare(`UPDATE conversations SET household_id = NULL WHERE household_id IN (${householdIdsSql})`).bind(param),
@@ -330,7 +317,6 @@ export async function linkConversation(db: D1Database, conversationId: string, h
   await db.prepare("UPDATE conversations SET household_id = ? WHERE id = ?").bind(householdId, conversationId).run();
 }
 
-/** Групповые чаты дома — для уведомлений (распущен дом). */
 export async function householdGroupChats(db: D1Database, householdId: string): Promise<string[]> {
   const { results } = await db
     .prepare("SELECT chat_id FROM conversations WHERE household_id = ? AND kind = 'group'")
@@ -339,7 +325,7 @@ export async function householdGroupChats(db: D1Database, householdId: string): 
   return results.map((r) => r.chat_id);
 }
 
-/** Автор и разговор карточки — нажатие в группе может сделать любой взрослый дома (US-94). */
+/** Нужен потому, что в группе карточку может нажать любой взрослый дома, а не только автор (US-94). */
 export async function cardOwner(db: D1Database, actionId: string): Promise<{ userId: string; conversationId: string } | null> {
   const row = await db
     .prepare("SELECT user_id, conversation_id FROM pending_actions WHERE id = ?")
@@ -348,7 +334,7 @@ export async function cardOwner(db: D1Database, actionId: string): Promise<{ use
   return row ? { userId: row.user_id, conversationId: row.conversation_id } : null;
 }
 
-/** Участник без своего Google живёт в поясе владельца дома (иначе — UTC по умолчанию). */
+/** Участник без своего Google иначе остался бы в UTC по умолчанию. */
 export async function adoptOwnerTimezone(db: D1Database, userId: string, ownerUserId: string): Promise<void> {
   await db
     .prepare(
@@ -360,7 +346,6 @@ export async function adoptOwnerTimezone(db: D1Database, userId: string, ownerUs
     .run();
 }
 
-/** Кто создал событие через бота (EventMeta, ADR-0003): видно участникам дома. */
 export async function recordEventCreator(
   db: D1Database,
   ref: { accountId: string; calendarId: string; providerEventId: string },

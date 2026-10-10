@@ -1,6 +1,4 @@
-// /home — экран дома (US-90): состав, дети, общие календари и основной общий; кнопки владельца (пригласить, календари,
-// имена участников, убрать участника с подтверждением, распустить) и участника (выйти). После создания — чек-лист
-// «Что дальше» (ревью R1 §4.4). Нажатия — callback_data «hm:<действие>[:<id>]», права проверяются на каждом нажатии.
+// Экран /home: callback_data «hm:<действие>[:<id>]», права проверяются на каждом нажатии, а не при показе кнопок.
 
 import { GoogleCalendarProvider } from "../../calendar/google-provider";
 import { hasGoogleAccount } from "../../db/accounts";
@@ -37,7 +35,6 @@ const cb = (op: string, arg?: string) => `hm:${op}${arg ? `:${arg}` : ""}`;
 
 export const isHouseholdCallback = (data: string | undefined) => !!data?.startsWith("hm:");
 
-/** Строка участника; «без Google» — техническая пометка, видна только владельцу (ревью R1 #29). */
 function memberLine(m: Member, locale: string, forOwner: boolean): string {
   const marks = [m.role === "owner" ? t("homeOwnerMark", locale) : "", m.hasGoogle || !forOwner ? "" : t("homeNoGoogleMark", locale)].filter(Boolean);
   const name = escapeHtml(m.displayName || "—");
@@ -47,7 +44,6 @@ function memberLine(m: Member, locale: string, forOwner: boolean): string {
 
 const rowsOf = <T>(items: T[], size: number): T[][] => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, i * size + size));
 
-/** Экран дома: текст (HTML) и кнопки по роли. Участники и дети — разными рядами (ревью R1 #9). */
 export async function homeScreen(ctx: AppContext, user: User, membership: Membership): Promise<Screen> {
   const { household } = membership;
   const locale = user.locale;
@@ -74,7 +70,6 @@ export async function homeScreen(ctx: AppContext, user: User, membership: Member
       { text: t("homeInviteButton", locale), callback_data: cb("inv") },
       { text: t("homeCalendarsButton", locale), callback_data: cb("cal") },
     ]);
-    // Взрослые: «✏️ Аня» (как называть) и «✖ Аня» (убрать — с подтверждением)
     for (const m of members.filter((x) => x.role !== "owner")) {
       buttons.push([
         { text: t("homeEditMemberButton", locale, { name: m.displayName || "—" }), callback_data: cb("nm", m.userId) },
@@ -86,7 +81,6 @@ export async function homeScreen(ctx: AppContext, user: User, membership: Member
     { text: t("homeEditMeButton", locale), callback_data: cb("nm") },
     { text: t("homeAddKidButton", locale), callback_data: cb("kidadd") },
   ]);
-  // Дети — отдельными рядами с 🧒
   buttons.push(
     ...rowsOf(
       kids.map((k) => ({ text: t("homeRemoveKidButton", locale, { name: k.name }), callback_data: cb("kid", k.id) })),
@@ -99,7 +93,6 @@ export async function homeScreen(ctx: AppContext, user: User, membership: Member
   return { text: lines.join("\n"), buttons };
 }
 
-/** Общие календари дома (из D1, без Google) и какой из них основной. */
 async function sharedCalendars(ctx: AppContext, household: Household): Promise<{ id: string; title: string; main: boolean }[]> {
   const ids = await householdCalendarIds(ctx.db, household.id);
   if (!ids.length) return [];
@@ -110,10 +103,8 @@ async function sharedCalendars(ctx: AppContext, household: Household): Promise<{
   return cals.map((c) => ({ id: c.id, title: c.title, main: c.id === main }));
 }
 
-/**
- * Выбор общих календарей: все календари владельца, отмеченные — общие; у общих — ⭐ «основной» (туда записываются события
- * участников, ревью R1 блокер 2). done — куда ведёт «Готово»: «done» — чек-лист после создания, «menu» — экран дома.
- */
+// ⭐ «основной» — туда записываются события участников (ревью R1 блокер 2). done: «done» — чек-лист после создания,
+// «menu» — экран дома.
 export async function calendarsScreen(ctx: AppContext, household: Household, locale: string, o: { done: "done" | "menu" } = { done: "menu" }): Promise<Screen> {
   const [all, shared, main] = await Promise.all([
     new GoogleCalendarProvider(ctx.config, ctx.db, household.ownerUserId, ctx.clock).calendars(),
@@ -131,7 +122,6 @@ export async function calendarsScreen(ctx: AppContext, household: Household, loc
   return { text: t("homeCalendarsPick", locale, { name: escapeHtml(household.name) }), buttons };
 }
 
-/** Чек-лист «Что дальше» после создания дома (ревью R1 §4.4): имя владельца (ждём ответа), пригласить, дети, чат, сводка. */
 function checklistScreen(user: User, household: Household, first: string): Screen {
   const l = user.locale;
   return {
@@ -147,7 +137,6 @@ function checklistScreen(user: User, household: Household, first: string): Scree
   };
 }
 
-/** /home в личном чате. */
 export async function showHome(ctx: AppContext, user: User, chatId: number): Promise<void> {
   const membership = await membershipOf(ctx.db, user.id);
   if (!membership) {
@@ -159,7 +148,6 @@ export async function showHome(ctx: AppContext, user: User, chatId: number): Pro
   await ctx.telegram.sendMessage(chatId, screen.text, { inline_keyboard: screen.buttons }, { html: true });
 }
 
-/** Нажатие кнопки экрана дома (только личный чат). */
 export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: TgCallbackQuery): Promise<void> {
   const [, op = "", arg = ""] = (cq.data ?? "").split(":");
   const locale = user.locale;
@@ -174,7 +162,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
     if (messageId) await ctx.telegram.editMessageText(chatId, messageId, text);
     else await ctx.telegram.sendMessage(chatId, text);
   };
-  // «🏠 Создать дом» из /start — ещё без дома: спросить название (ответ обычным сообщением)
   if (op === "new") {
     await ctx.telegram.answerCallbackQuery(cq.id);
     if (membership) await ctx.telegram.sendMessage(chatId, t("homeAlreadyIn", locale, { name: membership.household.name }));
@@ -184,7 +171,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
     }
     return;
   }
-  // Сводка «Завтра» одной кнопкой (ревью R1 #10) — и участнику, и владельцу
   if (op === "tmr") {
     await ctx.telegram.answerCallbackQuery(cq.id);
     await updateSettings(ctx.db, user.id, { tomorrowDigest: true });
@@ -209,7 +195,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
       await show(await homeScreen(ctx, user, membership));
       return;
     case "done": {
-      // Чек-лист; имя владельца — следующим сообщением
       const me = (await membersOf(ctx.db, household.id)).find((m) => m.userId === user.id);
       await awaitHome(ctx, user, chatId, { kind: "home_name" });
       await show(checklistScreen(user, household, me?.displayName ?? ""));
@@ -241,7 +226,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
       return;
     }
     case "role": {
-      // «муж, папа» / «жена, мама» к своему имени
       const me = (await membersOf(ctx.db, household.id)).find((m) => m.userId === user.id);
       if (!me) return;
       const roles = (arg === "w" ? t("homeRoleWife", locale) : t("homeRoleHusband", locale)).replace(/^\S+\s/, "").split(/,\s*/);
@@ -259,7 +243,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
       await ctx.telegram.sendMessage(chatId, t("homeAskKid", locale));
       return;
     case "rm": {
-      // Убрать взрослого — только после подтверждения (ревью R1 #9)
       const m = (await membersOf(ctx.db, household.id)).find((x) => x.userId === arg && x.role !== "owner");
       if (!m) return void (await show(await homeScreen(ctx, user, membership)));
       await show({
@@ -276,7 +259,6 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
     case "rmy": {
       const removed = (await membersOf(ctx.db, household.id)).find((m) => m.userId === arg && m.role !== "owner");
       if (removed) {
-        // Поручения на нём — снова у авторов, напоминания сняты (QA-06)
         await releaseMemberAssignments(ctx, household.id, removed.userId);
         if (await removeMember(ctx.db, household.id, removed.userId)) {
           await ctx.telegram.sendMessage(chatId, t("homeRemoved", locale, { name: removed.displayName }));
@@ -313,10 +295,7 @@ export async function handleHouseholdCallback(ctx: AppContext, user: User, cq: T
   }
 }
 
-/**
- * Распустить дом с уведомлением участников и групповых чатов (US-90; владелец решил сам или отключил бота — US-03,
- * [решение 2026-10-06]). Уведомления — до удаления: потом не узнать, кому писать. Открытые поручения — «Отменено» (QA-15).
- */
+// Уведомления — до удаления: потом не узнать, кому писать.
 export async function dissolveWithNotice(ctx: AppContext, household: Household, ownerId: string, locale: string): Promise<void> {
   const members = (await membersOf(ctx.db, household.id)).filter((m) => m.userId !== ownerId && m.telegramId);
   const groups = await householdGroupChats(ctx.db, household.id);
@@ -326,7 +305,7 @@ export async function dissolveWithNotice(ctx: AppContext, household: Household, 
   for (const chat of [...members.map((m) => m.telegramId!), ...groups]) await notify(ctx, chat, text);
 }
 
-/** Уведомление другому человеку — best-effort: он мог заблокировать бота. */
+// Best-effort: человек мог заблокировать бота.
 export async function notify(ctx: AppContext, chatId: string | number, text: string): Promise<void> {
   await ctx.telegram.sendMessage(chatId, text).catch((e) => console.warn("household notify failed", e instanceof Error ? e.message : e));
 }

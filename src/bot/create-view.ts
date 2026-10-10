@@ -1,5 +1,4 @@
-// US-30 / US-32: отображение карточки создания — тело события, варианты дат кнопками, выбор для 29–31 числа.
-// Чистые функции: текст и кнопки по готовым вариантам, без ввода-вывода (tech-debt #10).
+// Чистые функции: текст и кнопки карточки по готовым вариантам, без ввода-вывода.
 
 import { localToUtc, parts, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import type { InlineKeyboardButton } from "../telegram/types";
@@ -22,13 +21,11 @@ export function cardBody(o: CreateOption, today: Day, locale: string, showCalend
     if (zone) lines.push(zone);
   }
   if (o.location) lines.push(`📍 ${escapeHtml(o.location)}`);
-  // Источник из чужого контента (US-65…US-67) — первая строка описания
   if (o.description) lines.push(`📝 ${escapeHtml(firstLine(o.description))}`);
   if (showCalendar) lines.push(`🗓 ${escapeHtml(o.calendarTitle)}`);
   return lines.join("\n");
 }
 
-/** Карточка подтверждения: один вариант (+ пересечения), серия на 29–31 число или выбор из нескольких дат. */
 export function createCard(
   options: CreateOption[],
   actionId: string,
@@ -74,7 +71,6 @@ export function createCard(
       [{ text: t("cancelButton", locale), callback_data: callbackData(actionId, "x") }],
     ];
   } else {
-    // Неоднозначная дата: вместо «Создать» — кнопка на каждый вариант (US-30)
     const first = options[0]!;
     text = `${t("createChoose", locale)}\n\n<b>${escapeHtml(first.title)}</b>${showCalendar ? `\n🗓 ${escapeHtml(first.calendarTitle)}` : ""}`;
     buttons = [
@@ -85,15 +81,10 @@ export function createCard(
   return { text, buttons };
 }
 
-/**
- * «🌍 15:00 по Киеву = 16:00 по вашему времени (Europe/Moscow)» — время сказано в другом поясе (tech-debt #26);
- * иначе «🗓 В поясе календаря (Europe/Moscow): 11:00» — календарь в другом поясе, чем вы сейчас (поездка, US-07).
- */
 export function zoneLine(o: CreateOption, locale: string): string | undefined {
   if (!o.start || o.allDay) return undefined;
   if (!o.zone) return o.calendarTz ? calendarZoneLine(o.start, o.tz, o.calendarTz, locale) : undefined;
   const there = utcToLocal(localToUtc(o.start, o.tz), o.zone.tz);
-  // Сейчас у пояса то же смещение, что у нашего, — сказать нечего
   if (there.day === o.start.day && there.minutes === o.start.minutes) return undefined;
   return t("zoneNote", locale, {
     time: hhmm(there.minutes),
@@ -103,7 +94,6 @@ export function zoneLine(o: CreateOption, locale: string): string | undefined {
   });
 }
 
-/** Время в поясе календаря, если оно не совпадает с временем в текущем поясе (US-07: «оба времени в карточке»). */
 export function calendarZoneLine(start: Moment, tz: string, calendarTz: string, locale: string): string | undefined {
   const there = utcToLocal(localToUtc(start, tz), calendarTz);
   if (there.day === start.day && there.minutes === start.minutes) return undefined;

@@ -1,6 +1,5 @@
-// Схема и правила «структуры даты» для LLM (ревью парсера дат, шаг 4): модель раскладывает слова даты по полям, даты
-// считает наш код (src/dates/structured.ts, ADR-0005 п.3). Один текст — и для поля `when` в create_event, и для замера
-// scripts/eval-llm-dates.ts (режим B), чтобы замер мерил то, что в проде.
+// Схема и правила «структуры даты» для LLM: модель раскладывает слова по полям, даты считает код (src/dates/structured.ts).
+// Один текст — и для поля `when` в create_event, и для замера scripts/eval-llm-dates.ts, чтобы замер мерил то, что в проде.
 
 import { TYPOS } from "../dates/lexicon";
 import { STRUCT_ERRORS, STRUCT_PARTS, STRUCT_WEEKDAYS, STRUCT_WHICH } from "../dates/structured";
@@ -17,7 +16,6 @@ const TIME = {
 };
 const ABS = { type: "object", properties: { day: { type: "integer" }, month: { type: "integer" }, year: { type: "integer" } }, required: ["day"] };
 
-/** Одна трактовка (без вложенных alternatives). */
 const ONE_PROPERTIES = {
   error: { type: "string", enum: [...STRUCT_ERRORS] },
   day: {
@@ -58,7 +56,6 @@ const ONE_PROPERTIES = {
   timezone: { type: "string" },
 };
 
-/** JSON-схема структуры (параметр tool). */
 export const DATE_STRUCTURE_SCHEMA = {
   type: "object",
   properties: { ...ONE_PROPERTIES, alternatives: { type: "array", items: { type: "object", properties: ONE_PROPERTIES } } },
@@ -66,7 +63,7 @@ export const DATE_STRUCTURE_SCHEMA = {
 
 const typoList = [...TYPOS].map(([bad, good]) => `${bad}=${good}`).join(", ");
 
-/** Правила заполнения структуры (английский — так модели точнее; примеры фраз — по-русски и по-английски). */
+/** Английский — так модели точнее; примеры фраз — по-русски и по-английски. */
 export const DATE_STRUCTURE_RULES = `You do NOT compute dates: our code applies the calendar rules (hours without am/pm, past times, nearest weekday, ambiguity, time zones). Copy numbers as said. Omit fields that are not said.
 - error: "unparseable" — vague («на днях», «скоро», «в середине недели», «после работы»); deadlines («до пятницы», «к обеду», «к утру», «к концу недели/дня», «by the end of the week», «к следующей неделе», «EOD»); «в начале/середине/конце месяца/недели» when kind=point; unknown words; real words that only look like dates («пятно», «завтрак»); English «night» alone as a name («Jazz Night»); an unknown city/zone.
   "unsupported" — a date construct these fields cannot express EXACTLY (relative to an unknown event: «после отпуска», «за два дня до Пасхи», «в день зарплаты»; «каждый второй…» in a single event). NEVER squeeze such a phrase into a near field.

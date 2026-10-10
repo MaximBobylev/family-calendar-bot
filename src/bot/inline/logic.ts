@@ -1,5 +1,4 @@
-// US-95, чистый: inline-запрос «завтра 19:00 футбол» → событие(я) карточки, её текст, ссылка-шаблон Google Calendar,
-// файл .ics, разбор callback_data и deep link. Даты — детерминированным парсером из текста, без LLM (ADR-0005 п.3).
+// Чистый модуль; даты — детерминированным парсером из текста, без LLM (ADR-0005 п.3).
 
 import { addMinutes, formatDate, formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../../dates/calendar";
 import { durationToMinutes } from "../../dates/duration";
@@ -8,32 +7,27 @@ import { parseDateFragment, type ParseValue } from "../../dates";
 import { dateLabel, escapeHtml, hhmm } from "../format";
 import { t } from "../messages";
 
-/** Событие карточки — то, что хранится по токену (inline_events.payload_json). */
+// Хранится по токену в inline_events.payload_json.
 export interface InlineEvent {
   title: string;
   allDay: boolean;
-  /** UTC, мс — для события со временем. */
+  // UTC, мс.
   start?: number;
   end?: number;
-  /** «Весь день»: даты включительно, YYYY-MM-DD. */
+  // Даты включительно, YYYY-MM-DD.
   startDate?: string;
   endDate?: string;
-  /** Пояс автора: в нём показываем время на карточке и в ссылке-шаблоне. */
   tz: string;
   location?: string;
-  /** Язык карточки (автора). */
   locale: string;
 }
 
 const DAY_MS = 86_400_000;
-/** Длиннее — не название, а текст; Telegram ограничивает и сам запрос (256 символов). */
+// Длиннее — не название, а текст; сам запрос Telegram ограничивает 256 символами.
 const MAX_TITLE = 100;
 
-/**
- * Текст inline-запроса → варианты события (несколько — при неоднозначной дате: каждый — отдельный результат).
- * Без даты, с датой в прошлом или непонятной — пусто: карточку без времени добавить некуда.
- * Только дата — событие на весь день; повторения не поддерживаются (карточка — одно событие).
- */
+// Несколько вариантов — при неоднозначной дате. Без даты или в прошлом — пусто: карточку без времени добавить некуда.
+// Повторения не поддерживаются: карточка — одно событие.
 export function parseInlineQuery(query: string, nowUtc: number, tz: string, durationMin: number, locale: string): InlineEvent[] {
   const text = query.trim();
   if (!text) return [];
@@ -73,8 +67,6 @@ export function parseInlineQuery(query: string, nowUtc: number, tz: string, dura
   return values.map(toEvent).filter((e): e is InlineEvent => e !== null);
 }
 
-// --- Отображение -------------------------------------------------------------
-
 const EMOJI: [RegExp, string][] = [
   [/футбол|football|soccer/i, "⚽"],
   [/баскетбол|basketball/i, "🏀"],
@@ -90,12 +82,10 @@ const EMOJI: [RegExp, string][] = [
   [/самол[её]т|рейс|аэропорт|flight|airport/i, "✈️"],
 ];
 
-/** Значок по названию: «Футбол» → ⚽; по умолчанию — 📅. */
 export function titleEmoji(title: string): string {
   return EMOJI.find(([re]) => re.test(title))?.[1] ?? "📅";
 }
 
-/** Смещение пояса для момента: «UTC+3», «UTC-4:30», «UTC». */
 export function utcOffsetLabel(utcMs: number, tz: string): string {
   const local = utcToLocal(utcMs, tz);
   const offset = Math.round((local.day * DAY_MS + local.minutes * 60_000 - utcMs) / 60_000);
@@ -107,7 +97,7 @@ export function utcOffsetLabel(utcMs: number, tz: string): string {
 
 const dayOf = (date: string): Day => parseLocal(`${date}T00:00`).day;
 
-/** Время события на карточке — абсолютное: сообщение живёт в чате, «завтра» через день станет неправдой. */
+// Абсолютное время: сообщение живёт в чате, «завтра» через день станет неправдой.
 export function inlineWhen(e: InlineEvent, today: Day): string {
   if (e.allDay) {
     const from = dayOf(e.startDate!);
@@ -124,7 +114,6 @@ export function inlineWhen(e: InlineEvent, today: Day): string {
   return `${span} (${utcOffsetLabel(e.start!, e.tz)})`;
 }
 
-/** Текст сообщения-карточки в чате (HTML); added — счётчик «Добавили себе: N». */
 export function inlineCardText(e: InlineEvent, today: Day, added = 0): string {
   const lines = [`${titleEmoji(e.title)} <b>${escapeHtml(e.title)}</b>`, `🕒 ${inlineWhen(e, today)}`];
   if (e.location) lines.push(`📍 ${escapeHtml(e.location)}`);
@@ -132,7 +121,7 @@ export function inlineCardText(e: InlineEvent, today: Day, added = 0): string {
   return lines.join("\n");
 }
 
-/** Заголовок результата в списке inline — для автора, сейчас: «⚽ Футбол — завтра, 19:00». */
+// Для автора и сейчас — поэтому относительное («завтра»).
 export function inlineResultTitle(e: InlineEvent, nowUtc: number): string {
   const today = utcToLocal(nowUtc, e.tz).day;
   const day = e.allDay ? dayOf(e.startDate!) : utcToLocal(e.start!, e.tz).day;
@@ -141,18 +130,15 @@ export function inlineResultTitle(e: InlineEvent, nowUtc: number): string {
   return `${titleEmoji(e.title)} ${e.title} — ${rel}, ${time}`;
 }
 
-// --- Ссылка-шаблон Google Calendar и .ics -------------------------------------------
-
 const utcStamp = (ms: number) =>
   new Date(ms)
     .toISOString()
     .replace(/[-:]/g, "")
     .replace(/\.\d{3}/, "");
 const compactDate = (date: string) => date.replaceAll("-", "");
-/** Следующий день после YYYY-MM-DD — конец «весь день» в Google и iCalendar не включается. */
+// Конец «весь день» в Google и iCalendar не включается.
 const nextDate = (date: string) => formatDate(dayOf(date) + 1).replaceAll("-", "");
 
-/** Ссылка «добавить в Google Календарь» без OAuth: https://calendar.google.com/calendar/render?action=TEMPLATE&… */
 export function googleTemplateUrl(base: string, e: InlineEvent): string {
   const dates = e.allDay ? `${compactDate(e.startDate!)}/${nextDate(e.endDate!)}` : `${utcStamp(e.start!)}/${utcStamp(e.end!)}`;
   const q = new URLSearchParams({ action: "TEMPLATE", text: e.title, dates, ctz: e.tz });
@@ -184,7 +170,6 @@ export function foldIcsLine(line: string): string {
   return out.join("\r\n ");
 }
 
-/** Файл .ics с одним событием (METHOD:PUBLISH): Apple Календарь, Outlook, Google импортируют его без OAuth. */
 export function buildIcs(e: InlineEvent, uid: string, nowUtc: number): string {
   const when = e.allDay
     ? [`DTSTART;VALUE=DATE:${compactDate(e.startDate!)}`, `DTEND;VALUE=DATE:${nextDate(e.endDate!)}`]
@@ -207,24 +192,18 @@ export function buildIcs(e: InlineEvent, uid: string, nowUtc: number): string {
   return `${lines.map(foldIcsLine).join("\r\n")}\r\n`;
 }
 
-// --- Токены в Telegram ------------------------------------------------------
-
-/** callback_data кнопки «Добавить себе» на inline-сообщении: «ia:<токен>». */
 export const inlineCallbackData = (token: string) => `ia:${token}`;
 
 export function parseInlineCallback(data: string | undefined): string | null {
   return /^ia:([0-9a-f]{20})$/.exec(data ?? "")?.[1] ?? null;
 }
 
-/** Deep link в личный чат с ботом: t.me/<бот>?start=add_<токен>. */
 export const addStartLink = (botUsername: string, token: string) => `https://t.me/${botUsername}?start=add_${token}`;
 
-/** `/start add_<токен>` в личном чате — продолжение нажатия «Добавить себе». */
 export function parseAddStart(text: string | undefined): string | null {
   return /^\/start(?:@\w+)?\s+add_([0-9a-f]{20})$/.exec(text?.trim() ?? "")?.[1] ?? null;
 }
 
-/** Конец события (UTC) — от него считается срок хранения токена. */
 export function inlineEventEnd(e: InlineEvent): number {
   return e.allDay ? (dayOf(e.endDate!) + 1) * DAY_MS : e.end!;
 }

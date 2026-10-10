@@ -1,7 +1,5 @@
-// Извлечение фрагментов дат из всего сообщения — детерминированно, без LLM.
-// LLM (особенно маленькие модели) теряет части дат («завтра» из «завтра в 15:30») и не заполняет
-// длительность, поэтому даты берём из исходного текста: самые длинные куски, которые разбирает парсер.
-// Незнакомое слово («с Петей», «банк») обрывает кусок — названия в даты не попадают.
+// Фрагменты дат из всего сообщения, без LLM: маленькие модели теряют части дат и не заполняют длительность.
+// Берём самые длинные куски, которые разбирает парсер; незнакомое слово («с Петей») обрывает кусок — названия в даты не попадают.
 
 import { parseDateFragment } from "./index";
 import { FILLERS, MONTHS, WEEKDAYS, WEEKDAYS_PLURAL_DATIVE } from "./lexicon";
@@ -10,19 +8,14 @@ import type { ParseResult, ValueKind } from "./types";
 export interface ExtractedSpans {
   /** Все куски-моменты по порядку, склеенные: «в пятницу» + «в 15» → «в пятницу в 15». */
   point?: string;
-  /** Куски, из которых собран point, по отдельности: в тексте они могут стоять не подряд («в субботу … к 11») —
-   * из названия их вырезают по одному (QA R1 NLU, класс G). */
+  /** По отдельности: в тексте куски могут стоять не подряд («в субботу … к 11») — из названия их вырезают по одному. */
   pointParts?: string[];
-  /** Период для чтения расписания. */
   range?: string;
   duration?: string;
-  /** Дата сказана, но кусками, которые вместе не разбираются («через две недели … во вторник в 9»), или в конструкции,
-   * которую парсер не знает («в первый понедельник ноября»): point не даём — лучше спросить, чем угадать (ревью 2026-10-08). */
+  /** Дата сказана кусками, которые вместе не разбираются, или в незнакомой конструкции («в первый понедельник ноября»): point не даём — лучше спросить, чем угадать. */
   unsure?: true;
-  /** Время с поясом, которого мы не знаем («в 15 по Варне», «3pm Lagos time»): не отбрасываем молча, а спрашиваем
-   * время по своему поясу (tech-debt #26). Вместе с ним всегда `unsure`. */
+  /** Пояс не из словаря («в 15 по Варне», «3pm Lagos time»): не отбрасываем молча, а спрашиваем время по своему поясу. Всегда вместе с `unsure`. */
   unknownZone?: string;
-  /** Слова, вошедшие в даты, — чтобы убрать их из названия. */
   usedWords: Set<number>;
 }
 
@@ -32,7 +25,7 @@ const isUsable = (r: ParseResult) => !("error" in r) || r.error === "in_past";
 const NEGATION = /^(не|not)$/i;
 /** Порядковое перед днём недели: «в первый понедельник ноября», «last Friday of the month» — парсер этого не знает. */
 const ORDINAL = /^(перв|втор|трет|четв[её]рт|пят(ый|ая|ую|ое|ой)$|последн|first$|second$|third$|fourth$|fifth$|last$)/i;
-/** «16–28 июня», «6-20 JULY» — дни месяца диапазоном, а не время 16:28 (вёрстка афиш, tech-debt #28). */
+/** «16–28 июня» — дни месяца диапазоном (вёрстка афиш), а не время 16:28. */
 const DAY_SPAN = /^\d{1,2}\s*[–—-]\s*\d{1,2}$/;
 /** «7TH STREET», «2nd floor» — порядковое в адресе, а не число месяца. */
 const ADDRESS_ORDINAL = /^\d{1,3}(st|nd|rd|th)$/i;
@@ -48,11 +41,7 @@ const ANCHOR_AFTER = /^(после|after|before)$/i;
 const NOT_PLACES =
   /^(зум|zoom|скайп|skype|телеграм|telegram|ватсап|вотсап|whatsapp|вайбер|viber|телефон|видео|meet|teams|тимс|гугл|google|discord|дискорд|слак|slack|вк|vk)/i;
 
-/**
- * Пояс, которого нет в словаре, сразу после куска-момента: «… в 15 по Варне», «по пражскому времени» (известные пояса
- * парсер уже включил в кусок), «по времени Варны», «3pm Lagos time». Город узнаём по заглавной букве — «по работе»,
- * «по проекту» не пояс.
- */
+/** Пояс не из словаря после куска-момента (известные парсер уже включил в кусок). Город — по заглавной букве: «по работе» не пояс. */
 function unknownZoneAt(ws: string[], j: number): string | undefined {
   const a = ws[j];
   const b = ws[j + 1];
@@ -101,7 +90,7 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
         const after = ws[j] ?? "";
         if (kind === "point" && ORDINAL.test(before) && WEEKDAYS.has(ws[i]!.toLowerCase())) unsure = true;
         else if (kind === "point" && RELATIVE_START.test(ws[i]!) && ANCHOR_AFTER.test(after)) unsure = true;
-        // Отрицаемый кусок, дни диапазоном перед месяцем, порядковое в адресе — не дата события: слова съедаем молча
+        // Не дата события (отрицание, дни диапазоном перед месяцем, адрес): слова съедаем молча
         else if (!NEGATION.test(before) && !(kind === "point" && notEventDate(fragment, ws[j - 1]!, after, j - i))) {
           points.push(fragment);
           const zone = kind === "point" ? unknownZoneAt(ws, j) : undefined;
@@ -140,7 +129,6 @@ export function extractDateSpans(text: string, now: string, tz: string, kind: "p
   return out;
 }
 
-/** Слова, по которым событие без времени считается событием на весь день (US-31). */
 const ALL_DAY_PATTERNS = [
   /день рождени/i,
   /(?<!\p{L})др(?!\p{L})/iu,
@@ -163,13 +151,9 @@ export function looksAllDay(text: string): boolean {
   return ALL_DAY_PATTERNS.some((p) => p.test(text));
 }
 
-/** Название без слов, ушедших в даты; пустое или служебное («встреча») — нет названия. */
 const GENERIC_TITLES = new Set(["встреча", "встречу", "событие", "мероприятие", "meeting", "event", "напоминание"]);
 
-/**
- * Вырезать куски дат из текста, каждый по отдельности (первое вхождение, без регистра). Кусок, который уже вошёл в
- * вырезанный ранее («в субботу» после «в субботу к 11»), пропускаем — не задеть такое же слово в другом месте.
- */
+/** Кусок, уже вошедший в вырезанный ранее («в субботу» после «в субботу к 11»), пропускаем — не задеть такое же слово в другом месте. */
 export function removeFragments(text: string, fragments: (string | undefined)[]): string {
   let t = text;
   const removed: string[] = [];
@@ -195,20 +179,15 @@ export function cleanTitle(title: string | undefined, dateFragments: string[]): 
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-// --- Изменение события (US-40, US-41) ----------------------------------------
-
 export interface ModifySpans {
   /** Время/дата, по которым ищем само событие: «созвон **в 15**», «**в среду** встречу». */
   reference?: string;
   /** Новое время: «**на пятницу**», «**на 11**», «**на завтра в 15**». */
   target?: string;
-  /** Сдвиг: «на час позже», «на день раньше». */
   shift?: string;
-  /** Новая длительность: «сделай на полтора часа». */
   duration?: string;
 }
 
-/** «завтрашнюю встречу» → «завтра»: прилагательные-указатели дня. */
 const DAY_ADJECTIVES: [RegExp, string][] = [
   [/^завтрашн/i, "завтра"],
   [/^сегодняшн/i, "сегодня"],
@@ -262,27 +241,19 @@ export function extractModifySpans(text: string, now: string, tz: string): Modif
   return out;
 }
 
-// --- Повторения (US-32) -------------------------------------------------------
-
 export interface RecurrenceSpan {
-  /** «каждый понедельник в 10», «по будням до конца года» — правило для парсера (kind=recurrence). */
   span: string;
   /** Слова сообщения, вошедшие в правило, — убрать из названия (если span собран, а не вырезан как есть). */
   remove?: string[];
-  /** Текст без правила — из него берутся длительность и название. */
   rest: string;
 }
 
-/**
- * Правило повторения в сообщении: самый длинный кусок, который разбирается как повторение и при этом
- * не разбирается как обычная дата — «в понедельник» остаётся разовой встречей, «каждый понедельник» и
- * «по понедельникам» — серией.
- */
 /** Слово, без которого правила нет: «по 20 ноября» в «с 10 по 20 ноября» — не «каждый год 20 ноября». */
 const RECURRENCE_MARKER =
   /^(кажд|ежедневн|еженедельн|ежемесячн|ежегодн|будн|выходным|every|each|daily|weekly|monthly|yearly|annually|weekdays|weekends|месяца$|month$|раз$)/i;
 const isRecurrenceMarker = (w: string) => RECURRENCE_MARKER.test(w) || WEEKDAYS_PLURAL_DATIVE.has(w.toLowerCase());
 
+/** Кусок не должен разбираться как обычная дата: «в понедельник» — разовая встреча, «по понедельникам» — серия. */
 export function extractRecurrenceSpan(text: string, now: string, tz: string): RecurrenceSpan | undefined {
   const ws = words(text);
   const isFiller = (w: string) => FILLERS.has(w.toLowerCase()) || w.toLowerCase() === "во";
@@ -303,10 +274,7 @@ export function extractRecurrenceSpan(text: string, now: string, tz: string): Re
 /** «регулярную», «повторяющуюся», «еженедельную» встречу — признак серии, хотя день назван разово. */
 const REGULAR = /(?<!\p{L})(регулярн\p{L}*|повторяющ\p{L}*|еженедельн\p{L}*|recurring|regular|weekly)(?!\p{L})/iu;
 
-/**
- * «Создай регулярную встречу на понедельник в 3 часа дня» (голос, 2026-10-05): маркер серии отдельно от даты.
- * Если дата — день недели (с временем или без), правило = «каждый <день> …». Иначе не угадываем.
- */
+/** Маркер серии отдельно от даты («регулярную встречу на понедельник в 3»): правило — только для дня недели, иначе не угадываем. */
 function regularWeekday(text: string, now: string, tz: string): RecurrenceSpan | undefined {
   const marker = REGULAR.exec(text)?.[1];
   if (!marker) return undefined;

@@ -1,6 +1,5 @@
-// US-07 (R2): поездки и домашний пояс голосом/текстом — «Я в Тбилиси [до …]», «Я переехал в …», «Я вернулся», «Какой у меня
-// пояс?» (разбор — nlu/timezone-command.ts, до шага NLU); карточки «поездка / навсегда», «Не знаю», «Вернулись?»; задача
-// trip_check. Текущий пояс = поездка ?? дом (db/users.ts): даты, сводки и напоминания сами берут его.
+// Текущий пояс = поездка ?? дом (db/users.ts): даты, сводки и напоминания берут его сами.
+// Фразы без LLM разбирает nlu/timezone-command.ts ещё до шага NLU.
 
 import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
 import { attachMessage, createPendingAction, ensureConversation, mergeDialogState, AWAIT_TTL_MS, type PendingAction } from "../db/conversations";
@@ -23,7 +22,7 @@ export const TZ_MODE_CARD = "tz_mode";
 export const TZ_UNTIL_CARD = "tz_until";
 export const TZ_RETURN_CARD = "tz_return";
 export const TZ_CARDS = new Set([TZ_MODE_CARD, TZ_UNTIL_CARD, TZ_RETURN_CARD]);
-/** «Вернулись?» нажимают и через несколько дней — кнопки живут до следующего вопроса. */
+// «Вернулись?» нажимают и через несколько дней — кнопки живут до следующего вопроса
 const RETURN_CARD_TTL_MS = TRIP_RECHECK_MS;
 
 interface ModePayload {
@@ -37,11 +36,9 @@ interface ReturnPayload {
 
 const timeIn = (ctx: AppContext, tz: string) => hhmm(utcToLocal(ctx.clock.now(), tz).minutes);
 const localNow = (ctx: AppContext, tz: string) => formatMoment(utcToLocal(ctx.clock.now(), tz));
-/** «вс, 11 октября» по поясу поездки. */
 const dayText = (ctx: AppContext, day: string, tz: string, locale: string) =>
   dateLabel(parseLocal(`${day}T00:00`).day, utcToLocal(ctx.clock.now(), tz).day, locale);
 
-/** Фраза о поясе — обработана (true); иначе это обычная команда. */
 export async function handleTimezoneCommand(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string): Promise<boolean> {
   const cmd = parseTimezoneCommand(text);
   if (!cmd) return false;
@@ -49,10 +46,7 @@ export async function handleTimezoneCommand(ctx: AppContext, user: User, chatId:
   return true;
 }
 
-/**
- * Интент set_timezone от LLM — фраза, которую не узнал разбор без LLM (город не из словаря, другая формулировка). Пояс:
- * город из словаря, иначе IANA-имя от модели после проверки (Intl); не знаем — подсказка про /settings, не угадываем.
- */
+// IANA-имя от модели — только после проверки (Intl); не знаем пояс — подсказка про /settings, не угадываем
 export async function handleTimezoneIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, intent: SetTimezoneIntent): Promise<void> {
   if (intent.action === "where" || intent.action === "return") {
     await applyTimezoneCommand(ctx, user, chatId, conversationId, { kind: intent.action });
@@ -94,7 +88,6 @@ async function applyTimezoneCommand(ctx: AppContext, user: User, chatId: number,
       await moveHome(ctx, user, chatId, cmd.tz);
       return;
     case "trip": {
-      // Пояс поездки — домашний: это возвращение
       if (cmd.tz === user.home_tz) {
         await returnHome(ctx, user, chatId);
         return;
@@ -129,7 +122,6 @@ async function applyTimezoneCommand(ctx: AppContext, user: User, chatId: number,
 const untilPart = (ctx: AppContext, until: string | undefined, tz: string, locale: string) =>
   until ? t("tzUntilPart", locale, { day: dayText(ctx, until, tz, locale) }) : "";
 
-/** Включить поездку: пояс, вопрос «Вернулись?», сводки по новому поясу; без даты — спросить «До какого числа?». */
 async function startTrip(ctx: AppContext, user: User, chatId: number, conversationId: string, tz: string, until: string | undefined): Promise<void> {
   const l = user.locale;
   const now = ctx.clock.now();
@@ -148,7 +140,6 @@ async function startTrip(ctx: AppContext, user: User, chatId: number, conversati
   await mergeDialogState(ctx.db, conversationId, user.id, { awaiting: { kind: "trip_until", expiresAt: now + AWAIT_TTL_MS } }, now);
 }
 
-/** Ответ на «До какого числа?»: дата — запомнить; не дата — false (это новая команда). */
 export async function answerTripUntil(ctx: AppContext, user: User, chatId: number, text: string): Promise<boolean> {
   const trip = user.trip;
   if (!trip) return false;
@@ -184,7 +175,6 @@ async function moveHome(ctx: AppContext, user: User, chatId: number, tz: string,
   else await ctx.telegram.sendMessage(chatId, text);
 }
 
-/** Нажатие на карточке пояса. Карточка уже «забрана» атомарно. */
 export async function confirmTimezone(ctx: AppContext, user: User, action: PendingAction, choice: string): Promise<void> {
   const l = user.locale;
   const { chatId } = action.payload as { chatId: number };
@@ -217,7 +207,6 @@ export async function confirmTimezone(ctx: AppContext, user: User, action: Pendi
   }
 }
 
-/** Задача «Вернулись?»: в день окончания поездки или раз в неделю без даты. */
 export async function runTripCheckJob(ctx: AppContext, job: DueJob): Promise<void> {
   const user = job.user_id ? await findUserById(ctx.db, job.user_id) : null;
   const trip = user?.trip;

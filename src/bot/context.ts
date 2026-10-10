@@ -1,4 +1,4 @@
-// Всё, что нужно обработчикам: конфиг, часы, БД, Telegram. Собирается один раз на запрос / пачку.
+// Собирается один раз на запрос или пачку из очереди.
 
 import type { Clock } from "../clock";
 import type { Config } from "../config";
@@ -10,12 +10,9 @@ export interface AppContext {
   clock: Clock;
   db: D1Database;
   telegram: TelegramApi;
-  /** Только при обработке апдейта из inbox: что сделано прошлыми попытками (tech-debt #5). */
+  // Только при обработке апдейта из inbox: что сделано прошлыми попытками (tech-debt #5)
   progress?: UpdateProgress;
-  /**
-   * Календари дома вместо своих (US-90, US-94): участник без Google или групповой чат дома — чтение и запись идут
-   * через аккаунт владельца, только по общим календарям дома. Нет — свои календари пользователя.
-   */
+  // Участник без Google или групповой чат дома: чтение и запись через аккаунт владельца, только общие календари дома
   calendarScope?: CalendarScope;
 }
 
@@ -24,7 +21,6 @@ export interface CalendarScope {
   householdName: string;
   ownerUserId: string;
   calendarIds: string[];
-  /** Основной общий календарь дома — туда записываются события по умолчанию (ревью R1, блокер 2). */
   defaultCalendarId?: string;
 }
 

@@ -1,15 +1,4 @@
-// Админка (docs/admin-console.md, первая итерация): серверный HTML в том же Worker, путь /admin*.
-//   GET  /admin                       — здоровье (webhook, inbox, задачи, дайджесты, cron)
-//   GET  /admin/journal               — журнал распознанного, замаскированный; фильтры u, kind, outcome, intent
-//   GET  /admin/journal/:id           — запись: маска, replay дат, «В тест»
-//   POST /admin/journal/:id/reveal    — показать текст строки: причина обязательна, запись в admin_audit
-//   GET  /admin/sync                  — синхронизация Google, уведомления US-72, напоминания US-71 (итерация 3)
-//   GET  /admin/households            — дома: псевдонимы и счётчики (итерация 3)
-//   GET  /admin/households/:id        — дом: участники, приглашения (счётчики), групповые чаты (c-xxxxxx)
-//   GET  /admin/usage                 — расход AI по псевдонимам, против лимитов; контент → событие, inline
-//   GET  /admin/quotas                — остатки квот и балансов провайдеров (API, заголовки вызовов, оценка по журналу)
-//   GET  /admin/audit                 — журнал действий операторов
-// Вход — HTTP Basic (auth.ts); без JS, CSP default-src 'none'.
+// Серверный HTML в том же Worker, путь /admin*: без JS, CSP default-src 'none'. Вход — HTTP Basic (auth.ts).
 
 import type { AppContext } from "../bot/context";
 import { OPS_LAST_HOURLY, OPS_LAST_TICK } from "../db/ops-state";
@@ -33,9 +22,7 @@ import { webhookStatus } from "./webhook";
 import { datesSnippet, extractSnippet, localNow, replay } from "./yaml-snippet";
 
 const JOURNAL_PAGE = 50;
-/** Поля интентов с фрагментами дат, как их вырезала LLM, — для сравнения с извлечением сейчас. */
 const DATE_SLOTS = ["start", "range", "duration"];
-/** Задачи панели «Синхронизация». */
 const SYNC_KINDS = [SYNC_JOB, PUSH_SYNC_JOB, WATCH_RENEW_JOB, NOTIFY_FLUSH_JOB, TG_REMINDER_JOB];
 
 type Pseudo = (userId: string | null) => Promise<string>;
@@ -91,8 +78,6 @@ export async function handleAdmin(ctx: AppContext, request: Request, url: URL): 
   return new Response("Not found", { status: 404 });
 }
 
-// --- Здоровье ---------------------------------------------------------------------------------------
-
 async function health(ctx: AppContext, now: number, pseudo: Pseudo) {
   const db = ctx.db;
   const [webhook, inbox, failures, jobs, lag, problems, digests, ops, totals, byDay, syncRows, notices, syncJobs] = await Promise.all([
@@ -128,8 +113,6 @@ async function health(ctx: AppContext, now: number, pseudo: Pseudo) {
   };
 }
 
-// --- Синхронизация и дома (итерация 3) -------------------------------------------------------------------
-
 async function sync(ctx: AppContext, now: number) {
   const [rows, errors, jobs, notices, reminderUsers] = await Promise.all([
     q.syncCalendars(ctx.db),
@@ -162,12 +145,9 @@ async function householdDetail(ctx: AppContext, id: string, now: number, pseudo:
     ),
     invites,
     chats: await Promise.all(chats.map((c) => chatPseudonym(key, c))),
-    // US-91/92/93 (поручения): секция со счётчиками assignments по статусам — сюда
     sections: [],
   });
 }
-
-// --- Журнал -------------------------------------------------------------------------------------------
 
 async function journalList(ctx: AppContext, url: URL, pseudo: Pseudo): Promise<string> {
   const p = url.searchParams;
@@ -290,8 +270,6 @@ async function reveal(
   });
   return render("Запись журнала", "/admin/journal", journalDetailBody(await detailView(row, pseudo, { auditId, reason: fullReason })));
 }
-
-// --- Расход и аудит -------------------------------------------------------------------------------------
 
 async function usage(ctx: AppContext, now: number, pseudo: Pseudo): Promise<string> {
   const dayStart = now - (now % 86_400_000);

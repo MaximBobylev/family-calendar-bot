@@ -1,57 +1,46 @@
-// Остатки квот провайдеров и платформы Cloudflare (docs/admin-console.md, «Квоты»): чистые функции — ответ API,
-// GraphQL Analytics (Workers AI, Workers, D1, Queues), заголовки лимитов
-// последнего вызова или журнал → строки панели и алерта. Ключей и их меток (label) здесь нет и быть не должно.
+// Чистые функции: ответ API, заголовки лимитов или журнал → строки панели и алерта. Ключей и их меток (label) здесь
+// нет и быть не должно.
 
 import { localToUtc, utcToLocal } from "../dates/calendar";
 
 const DAY_MS = 86_400_000;
 
-/** Откуда число: бесплатный эндпоинт провайдера, заголовки последнего настоящего вызова или наш журнал. */
+// estimate — по нашему журналу, не по данным провайдера.
 export type QuotaSource = "api" | "headers" | "estimate";
 export type QuotaLevel = "ok" | "warn" | "crit" | "unknown";
 
 export interface QuotaRow {
   provider: string;
   metric: string;
-  /** Осталось; null — провайдер не сообщает. */
   remaining: number | null;
   limit: number | null;
   used?: number | null;
-  /** «запр.», «$», «neurons», «с аудио», «вызовов». */
   unit: string;
   resetAt: number | null;
   source: QuotaSource;
-  /** Когда получены данные (запрос API, вызов с заголовками; для оценки — сейчас). */
   at: number | null;
   level: QuotaLevel;
-  /** Ниже порога алерта (src/ops/alert-rules.ts: quota_low). */
   alert?: boolean;
   note?: string;
 }
 
-/** Меньше этой доли остатка — жёлтый. */
 export const WARN_SHARE = 0.2;
-/** OpenRouter: бесплатных запросов на сегодня меньше — алерт (из 50 в сутки без покупки кредитов). */
+// Из 50 бесплатных в сутки (без покупки кредитов).
 export const OPENROUTER_FREE_ALERT = 10;
-/** DeepSeek: баланс ниже — алерт (USD; для CNY — в 7 раз больше). */
 export const DEEPSEEK_ALERT_USD = 1;
 const CNY_PER_USD = 7;
-/** Workers AI Free: neurons в сутки на аккаунт, сброс в 00:00 UTC (по документации). */
+// На аккаунт, сброс в 00:00 UTC (по документации).
 export const WORKERS_AI_FREE_NEURONS = 10_000;
-/** Израсходовано больше этой доли — алерт. */
 export const WORKERS_AI_ALERT_SHARE = 0.8;
-/** Цена neuron у Workers AI: $0.011 за 1000 → 11 микродолларов (COST_ESTIMATES — тот же прайс). */
+// $0.011 за 1000 neurons; должен совпадать с прайсом COST_ESTIMATES в config.ts.
 export const NEURON_MICRO_USD = 11;
-/** Groq Free, whisper-large-v3-turbo: секунд аудио в сутки (ASD) — на 2026-10, другие тарифы — больше. */
+// Groq Free, whisper-large-v3-turbo, на 2026-10; на других тарифах больше.
 export const GROQ_FREE_AUDIO_SEC_DAY = 28_800;
-/** Бесплатные дневные квоты Gemini сбрасываются в полночь по Тихоокеанскому времени. */
 export const GEMINI_RESET_TZ = "America/Los_Angeles";
 
-/** Полночь UTC, начинающая сутки `now`, и следующая. */
 export const utcDayStart = (now: number) => now - (now % DAY_MS);
 export const nextUtcMidnight = (now: number) => utcDayStart(now) + DAY_MS;
 
-/** Начало суток в поясе и следующая полночь там же. */
 export function zoneDay(now: number, tz: string): { start: number; next: number } {
   const day = utcToLocal(now, tz).day;
   return { start: localToUtc({ day, minutes: 0 }, tz), next: localToUtc({ day: day + 1, minutes: 0 }, tz) };
@@ -68,13 +57,8 @@ const num = (v: unknown): number | null => {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 };
 
-// --- OpenRouter: GET {base}/key ------------------------------------------------------------------------
-
-/**
- * GET /api/v1/key (openrouter.ai/docs/api-reference/limits): free_model_daily_requests — бесплатные модели за сутки UTC
- * (50 без покупки кредитов, 1000 — после ≥ $10); limit / limit_remaining — лимит ключа в $, если задан.
- * Нет free_model_daily_requests (старый ответ) — лимит по is_free_tier, израсходовано — по журналу (`journalToday`).
- */
+// free_model_daily_requests — за сутки UTC: 50 без покупки кредитов, 1000 — после ≥ $10. Нет поля (старый ответ) —
+// лимит по is_free_tier, расход — по журналу.
 export function parseOpenRouterKey(json: unknown, now: number, journalToday: number): QuotaRow[] {
   const d = (json as { data?: Record<string, unknown> } | null)?.data;
   if (!d || typeof d !== "object") throw new Error("неожиданный ответ /key");
@@ -130,9 +114,6 @@ export function parseOpenRouterKey(json: unknown, now: number, journalToday: num
   return rows;
 }
 
-// --- DeepSeek: GET {base}/user/balance -------------------------------------------------------------------
-
-/** GET /user/balance (api-docs.deepseek.com): is_available и баланс по валютам; лимита нет — порог алерта. */
 export function parseDeepSeekBalance(json: unknown, now: number): QuotaRow[] {
   const j = json as {
     is_available?: unknown;
@@ -161,15 +142,12 @@ export function parseDeepSeekBalance(json: unknown, now: number): QuotaRow[] {
   });
 }
 
-// --- Workers AI: GraphQL Analytics или оценка по журналу ------------------------------------------------------
-
-/** Аккаунт Cloudflare из адреса Workers AI (…/client/v4/accounts/<id>/ai…) → GraphQL того же API; иначе (фейк) — null. */
+// Иной адрес, чем …/client/v4/accounts/<id>/ai (фейк в тестах), — null.
 export function cloudflareGraphql(baseUrl: string): { url: string; accountTag: string } | null {
   const m = /^(https:\/\/[^/]+)\/client\/v4\/accounts\/([0-9a-f]{16,64})\/ai(?:\/|$)/.exec(baseUrl);
   return m ? { url: `${m[1]}/client/v4/graphql`, accountTag: m[2]! } : null;
 }
 
-/** Запрос neurons за интервал: набор aiInferenceAdaptiveGroups, сумма totalNeurons по моделям. */
 export function neuronsQuery(accountTag: string, from: number, to: number): string {
   return JSON.stringify({
     query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: {accountTag: $a}) {
@@ -178,10 +156,7 @@ export function neuronsQuery(accountTag: string, from: number, to: number): stri
   });
 }
 
-/**
- * Первый аккаунт из ответа GraphQL Analytics. errors (нет права Account Analytics: Read, неизвестное поле) — исключение
- * с текстом первой ошибки: так строка панели покажет причину.
- */
+// errors (нет права Account Analytics: Read, неизвестное поле) — исключение с текстом: строка панели покажет причину.
 export function gqlAccount(json: unknown): Record<string, unknown> {
   const j = json as { data?: { viewer?: { accounts?: Record<string, unknown>[] } } | null; errors?: { message?: string }[] | null } | null;
   if (j?.errors?.length) throw new Error(String(j.errors[0]?.message ?? "graphql error").slice(0, 200));
@@ -194,12 +169,10 @@ type Groups = { dimensions?: Record<string, unknown>; sum?: Record<string, unkno
 const groups = (acc: Record<string, unknown>, name: string): Groups => (Array.isArray(acc[name]) ? (acc[name] as Groups) : []);
 const sumOf = (gs: Groups, part: "sum" | "max", field: string) => gs.reduce((a, g) => a + (num(g[part]?.[field]) ?? 0), 0);
 
-/** Ответ GraphQL → сумма neurons. Ошибка доступа (у токена нет Account Analytics: Read) — исключение с текстом. */
 export function parseNeurons(json: unknown): number {
   return sumOf(groups(gqlAccount(json), "aiInferenceAdaptiveGroups"), "sum", "totalNeurons");
 }
 
-/** Оценка neurons по журналу: стоимость вызовов Workers AI считается по прайсу Workers AI (config.ts COST_ESTIMATES). */
 export const neuronsFromCost = (costMicroUsd: number) => costMicroUsd / NEURON_MICRO_USD;
 
 export function workersAiRow(usedNeurons: number, source: QuotaSource, now: number, note?: string): QuotaRow {
@@ -221,30 +194,21 @@ export function workersAiRow(usedNeurons: number, source: QuotaSource, now: numb
   };
 }
 
-// --- Платформа Cloudflare: Workers, D1, Queues (GraphQL Analytics) ---------------------------------------------
-
-/**
- * Тариф аккаунта Workers. Через GraphQL его не узнать (а REST /subscriptions требует права Billing) — задаётся
- * в wrangler.jsonc (vars.CF_WORKERS_PLAN), по умолчанию Free.
- */
+// Через GraphQL тариф не узнать, а REST /subscriptions требует права Billing — поэтому vars.CF_WORKERS_PLAN.
 export type CfPlan = "free" | "paid";
 
-/**
- * Лимиты тарифов (developers.cloudflare.com, 2026-10): Free — в сутки, сброс 00:00 UTC; Paid — включено в месяц
- * (сверх — платно, не отказ). Workers Paid: 10 млн запросов/мес; D1 Paid: 25 млрд чтений и 50 млн записей строк/мес;
- * Queues: Free 10 000 операций/сутки, Paid 1 млн/мес. Хранилище D1 — 5 ГБ на обоих (на Paid — включено).
- */
+// developers.cloudflare.com, 2026-10: Free — в сутки, сброс 00:00 UTC; Paid — включено в месяц (сверх — платно,
+// не отказ). cpuMs — на один вызов.
 export const CF_LIMITS = {
   free: { requests: 100_000, cpuMs: 10, d1Read: 5_000_000, d1Write: 100_000, d1Bytes: 5e9, queueOps: 10_000 },
   paid: { requests: 10_000_000, cpuMs: 30_000, d1Read: 25_000_000_000, d1Write: 50_000_000, d1Bytes: 5e9, queueOps: 1_000_000 },
 } as const satisfies Record<CfPlan, Record<string, number>>;
 
-/** Израсходовано больше этой доли суточного (Paid — месячного включённого) — алерт quota_low. */
 export const CF_ALERT_SHARE = 0.8;
 
 const MB = 1_000_000;
 
-/** Окно счёта: Free — сутки UTC; Paid — календарный месяц UTC (цикл оплаты может начинаться с другого числа). */
+// Paid — календарный месяц UTC, хотя цикл оплаты может начинаться с другого числа.
 export function cfWindow(plan: CfPlan, now: number): { from: number; reset: number; label: string } {
   if (plan === "free") return { from: utcDayStart(now), reset: nextUtcMidnight(now), label: "в сутки" };
   const d = new Date(now);
@@ -253,7 +217,6 @@ export function cfWindow(plan: CfPlan, now: number): { from: number; reset: numb
 
 const isoDate = (t: number) => new Date(t).toISOString().slice(0, 10);
 
-/** Workers: запросы, ошибки и подзапросы по скриптам аккаунта; CPU p50/p99 (мкс) — по каждому скрипту. */
 export function workersQuery(accountTag: string, from: number, to: number): string {
   return JSON.stringify({
     query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: {accountTag: $a}) {
@@ -263,7 +226,7 @@ export function workersQuery(accountTag: string, from: number, to: number): stri
   });
 }
 
-/** D1: строки и запросы по базам за окно; размер баз — максимум за последние сутки (метрика дневная). */
+// Размер баз — за последние сутки: метрика хранилища дневная.
 export function d1Query(accountTag: string, from: number, to: number): string {
   return JSON.stringify({
     query: `query($a: String!, $from: Date!, $to: Date!, $sfrom: Date!) { viewer { accounts(filter: {accountTag: $a}) {
@@ -274,7 +237,6 @@ export function d1Query(accountTag: string, from: number, to: number): string {
   });
 }
 
-/** Queues: оплачиваемые операции (запись, чтение, удаление — по 64 КБ; повтор — ещё чтение) по типу. */
 export function queuesQuery(accountTag: string, from: number, to: number): string {
   return JSON.stringify({
     query: `query($a: String!, $from: Time!, $to: Time!) { viewer { accounts(filter: {accountTag: $a}) {
@@ -288,7 +250,6 @@ export interface WorkersStats {
   requests: number;
   errors: number;
   scripts: number;
-  /** Наш Worker; null — запросов за окно не было. */
   ours: { requests: number; errors: number; subrequests: number; cpuP50Ms: number | null; cpuP99Ms: number | null } | null;
 }
 
@@ -325,7 +286,6 @@ export interface D1Stats {
   rowsWritten: number;
   queries: number;
   databases: number;
-  /** Сумма размеров баз; null — данных о хранилище нет. */
   bytes: number | null;
 }
 
@@ -333,7 +293,6 @@ export function parseD1(json: unknown): D1Stats {
   const acc = gqlAccount(json);
   const a = groups(acc, "d1AnalyticsAdaptiveGroups");
   const st = groups(acc, "d1StorageAdaptiveGroups");
-  // Размер — максимум по каждой базе за окно, затем сумма баз
   const size = new Map<string, number>();
   for (const g of st) {
     const id = String(g.dimensions?.databaseId ?? "?");
@@ -365,7 +324,6 @@ export function parseQueues(json: unknown): QueueStats {
 
 const planNote = (plan: CfPlan) => (plan === "free" ? "тариф Workers Free" : "тариф Workers Paid: сверх включённого — платно");
 
-/** Строка «израсходовано из лимита» платформы: алерт — больше 80%. */
 function usageRow(provider: string, metric: string, used: number, limit: number, unit: string, resetAt: number | null, at: number, note: string): QuotaRow {
   const left = Math.max(0, limit - used);
   return {
@@ -463,9 +421,7 @@ export function queuesRows(s: QueueStats, plan: CfPlan, at: number): QuotaRow[] 
   ];
 }
 
-// --- Заголовки лимитов (Groq и др.) ---------------------------------------------------------------------------
-
-/** Длительность Groq «2m59.56s», «7.66s», «1h2m3s», «250ms» → мс; не разобрали — null. */
+// Формат Groq: «2m59.56s», «7.66s», «1h2m3s», «250ms».
 export function parseDuration(s: string | undefined): number | null {
   if (!s) return null;
   const t = s.trim();
@@ -481,10 +437,7 @@ export function parseDuration(s: string | undefined): number | null {
   return pos === t.length && pos > 0 ? Math.round(ms) : null;
 }
 
-/**
- * Groq (console.groq.com/docs/rate-limits): x-ratelimit-*-requests — запросы в СУТКИ (RPD), *-tokens — токены в минуту.
- * Числа на момент того вызова — с тех пор могли уменьшиться.
- */
+// У Groq x-ratelimit-*-requests — запросы в СУТКИ (RPD), а *-tokens — в минуту. Числа — на момент того вызова.
 export function groqRows(h: Record<string, string>, seenAt: number): QuotaRow[] {
   const get = (k: string) => h[k] ?? h[k.toLowerCase()];
   const limit = num(get("x-ratelimit-limit-requests"));
@@ -506,7 +459,7 @@ export function groqRows(h: Record<string, string>, seenAt: number): QuotaRow[] 
   ];
 }
 
-/** Секунды аудио Groq за сутки UTC по журналу против бесплатного ASD — оценка: окно Groq может быть скользящим. */
+// Оценка: окно Groq может быть скользящим, а мы считаем сутки UTC.
 export function groqAudioRow(audioMsToday: number, now: number): QuotaRow {
   const used = Math.round(audioMsToday / 1000);
   const left = Math.max(0, GROQ_FREE_AUDIO_SEC_DAY - used);
@@ -525,7 +478,6 @@ export function groqAudioRow(audioMsToday: number, now: number): QuotaRow {
   };
 }
 
-/** Gemini: API остатка нет, лимит бесплатного тарифа зависит от модели и виден только в AI Studio — показываем расход. */
 export function geminiRow(callsToday: number, now: number): QuotaRow {
   return {
     provider: "Gemini",
@@ -542,7 +494,6 @@ export function geminiRow(callsToday: number, now: number): QuotaRow {
   };
 }
 
-/** Что не так — для алерта quota_low: «OpenRouter: 4 запр. из 50». Пусто — всё в порядке. */
 export function lowQuotas(rows: QuotaRow[]): string[] {
   const n = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
   return rows

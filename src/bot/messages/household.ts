@@ -1,4 +1,4 @@
-// Тексты: дом и участники (US-90), бот в групповом чате (US-94).
+// Дом и участники, бот в групповом чате.
 
 import type { Messages } from "./types";
 
@@ -164,7 +164,6 @@ export const householdMessages = {
     ru: "👤 Автор: {name}",
     en: "👤 Added by: {name}",
   },
-  // US-94: групповой чат
   groupNotLinked: {
     ru: "Этот чат пока не привязан к дому. Владелец дома или взрослый с Google может привязать его командой /home link. По личным делам — напишите мне в личные сообщения.",
     en: "This chat isn't linked to a household yet. The household owner or an adult with Google can link it with /home link. For personal matters, message me directly.",

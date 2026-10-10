@@ -1,10 +1,9 @@
-// US-67: событие из .ics → то, что создаём и показываем: время в поясе пользователя, конец по DTEND/DURATION
-// или длительности по умолчанию. Чистый модуль (юнит-тесты test/ics.test.ts).
+// Событие из .ics → что создаём (US-67): время в поясе пользователя, конец по DTEND/DURATION или длительности по умолчанию.
 
 import { addMinutes, type Day, localToUtc, type Moment, parseLocal, utcToLocal } from "../dates/calendar";
 import type { IcsEvent, IcsTime } from "./parse";
 
-/** Событие к созданию: локальное время — в поясе `tz` (поясе пользователя). */
+/** Локальное время — в поясе пользователя `tz`. */
 export interface IcsItem {
   title?: string;
   allDay: boolean;

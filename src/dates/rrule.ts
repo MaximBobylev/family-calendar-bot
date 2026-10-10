@@ -1,4 +1,4 @@
-// Повторения (US-32): ближайшие даты по нашему правилу (Recurrence), RRULE для Google, описание словами.
+// Повторения: ближайшие даты по правилу Recurrence, RRULE для Google, описание словами.
 // Правило задаёт парсер (kind=recurrence) — здесь только детерминированная арифметика.
 
 import { daysInMonth, formatDate, localToUtc, makeDay, parts, startOfWeek, weekday, type Day, type Moment } from "./calendar";
@@ -68,10 +68,7 @@ function intervalOk(r: Recurrence, day: Day, anchor: Day): boolean {
   }
 }
 
-/**
- * Даты повторений начиная с `from` (включительно). Первая подходящая дата — «якорь» интервала,
- * как DTSTART у RRULE. `limit` — сколько вернуть.
- */
+/** Первая подходящая дата начиная с `from` — «якорь» интервала, как DTSTART у RRULE. */
 export function occurrences(r: Recurrence, from: Day, limit: number): Day[] {
   const until = untilDay(r);
   let anchor: Day | undefined;
@@ -89,10 +86,7 @@ export function occurrences(r: Recurrence, from: Day, limit: number): Day[] {
 
 const RRULE_DAY: Record<Weekday, string> = { MO: "MO", TU: "TU", WE: "WE", TH: "TH", FR: "FR", SA: "SA", SU: "SU" };
 
-/**
- * RRULE для Google. `start` — первое вхождение (DTSTART); `allDay` — событие на весь день (UNTIL — дата),
- * иначе UNTIL — конец дня `until` в поясе `tz`, в UTC (требование RFC 5545 при DTSTART с поясом).
- */
+/** UNTIL: при allDay — дата, иначе конец дня `until` в поясе `tz`, в UTC (RFC 5545 требует при DTSTART с поясом). */
 export function toRRule(r: Recurrence, start: Moment, tz: string, allDay: boolean): string {
   const parts_: string[] = [`FREQ=${r.freq.toUpperCase()}`];
   if (r.interval && r.interval > 1) parts_.push(`INTERVAL=${r.interval}`);
@@ -123,8 +117,6 @@ export function toRRule(r: Recurrence, start: Moment, tz: string, allDay: boolea
   return `RRULE:${parts_.join(";")}`;
 }
 
-// --- Описание словами --------------------------------------------------------
-
 const RU_DAY_ACC: Record<Weekday, string> = { MO: "понедельник", TU: "вторник", WE: "среду", TH: "четверг", FR: "пятницу", SA: "субботу", SU: "воскресенье" };
 const RU_DAY_DAT_PL: Record<Weekday, string> = {
   MO: "понедельникам",
@@ -149,7 +141,6 @@ const EN_DAY: Record<Weekday, string> = { MO: "Monday", TU: "Tuesday", WE: "Wedn
 
 const sameSet = (a: Weekday[], b: Weekday[]) => a.length === b.length && a.every((x) => b.includes(x));
 
-/** «Каждый понедельник», «По будням», «Раз в 2 недели по четвергам», «В первый понедельник месяца», «Каждый год 3 марта». */
 export function describeRecurrence(r: Recurrence, start: Day, locale: string): string {
   const en = locale === "en";
   const n = r.interval ?? 1;

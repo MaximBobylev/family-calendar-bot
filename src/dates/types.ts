@@ -3,7 +3,6 @@
 
 /** Локальное время без смещения: "2026-10-07T12:00". */
 export type LocalDateTime = string;
-/** Локальная дата: "2026-10-07". */
 export type LocalDate = string;
 
 export type ValueKind = "point" | "range" | "shift" | "duration" | "recurrence";
@@ -14,12 +13,10 @@ export type DayPart = "morning" | "day" | "afternoon" | "late_afternoon" | "even
 export type Weekday = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";
 
 export interface ParseInput {
-  /** Сырой фрагмент, вырезанный LLM. */
   text: string;
   kind: ValueKind;
   /** «Сейчас» — локальное время в `tz`. */
   now: LocalDateTime;
-  /** IANA-пояс пользователя. */
   tz: string;
 }
 

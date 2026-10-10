@@ -16,7 +16,7 @@ import {
 } from "../src/bot/inline/logic";
 import { makeDay } from "../src/dates/calendar";
 
-// «Сейчас» — ср 7 октября 2026, 10:00 МСК
+// Среда, как в приёмочных сценариях
 const NOW = Date.parse("2026-10-07T07:00:00Z");
 const MSK = "Europe/Moscow";
 const TODAY = makeDay(2026, 10, 7);

@@ -1,6 +1,4 @@
-// Клиент LLM по OpenAI-совместимому протоколу (chat/completions + tools).
-// Один протокол у Workers AI, Groq, OpenRouter, DeepInfra — fallback-провайдеры отличаются только адресом
-// и ключом (ADR-0002); в тестах адрес указывает на фейк (ADR-0006).
+// Один OpenAI-совместимый протокол у Workers AI, Groq, OpenRouter, DeepInfra: провайдеры отличаются только адресом и ключом (ADR-0002).
 
 import { fetchWithTimeout, TIMEOUTS } from "../net/fetch";
 
@@ -10,12 +8,11 @@ export interface LlmConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** Поля запроса провайдера: OpenRouter `reasoning`, Gemma `chat_template_kwargs` и т.п. */
   extraBody?: Record<string, unknown>;
   /** Оценка цены, $ за 1M токенов; нет — COST_ESTIMATES (Workers AI). Бесплатные — 0. */
   inPerM?: number;
   outPerM?: number;
-  /** false — разбор команды без структуры даты `when` (промпт втрое короче; запасной Workers AI, tech-debt #27а). */
+  /** false — без структуры даты `when`: промпт втрое короче (запасной Workers AI). */
   dateStructure?: boolean;
 }
 
@@ -27,7 +24,7 @@ export interface ToolDefinition {
 export interface ToolCall {
   name: string;
   arguments: Record<string, unknown>;
-  /** Аргументы как пришли (строка JSON) — для замеров (scripts/eval-intents.ts). */
+  /** Строка JSON как пришла — для замеров. */
   rawArguments?: string;
 }
 
@@ -41,7 +38,6 @@ export interface LlmResult {
   toolCalls: ToolCall[];
   tokensIn: number;
   tokensOut: number;
-  /** Заголовки лимитов провайдера (x-ratelimit-*, retry-after) — для замеров и журнала. */
   rateHeaders?: Record<string, string>;
 }
 
@@ -77,7 +73,7 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
         ],
         tools,
         tool_choice: "required",
-        // Запас под структуру даты `when` в create_event (≈ 50–100 токенов, ревью дат шаг 4)
+        // Запас под структуру даты `when` в create_event (≈ 50–100 токенов)
         max_tokens: opts.maxTokens ?? 400,
         ...cfg.extraBody,
         ...opts.extraBody,
@@ -91,7 +87,7 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
     usage?: { prompt_tokens?: number; completion_tokens?: number };
     error?: { message?: string; code?: number | string };
   };
-  // OpenRouter иногда отвечает 200 с ошибкой в теле и без choices (перегрузка провайдера, 2026-10-08) —
+  // OpenRouter иногда отвечает 200 с ошибкой в теле и без choices (перегрузка провайдера) —
   // это сбой провайдера, а не «модель не вызвала инструмент»: пусть цепочка попробует следующего
   if (json.error && !json.choices?.length) {
     throw new LlmHttpError(`llm 200 with error: ${JSON.stringify(json.error).slice(0, 300)}`, 502, rateHeadersOf(res));
@@ -105,10 +101,7 @@ export async function callTools(cfg: LlmConfig, system: string, user: string, to
   };
 }
 
-/**
- * Аргументы tool call. Маленькие модели иногда возвращают битый JSON
- * (Qwen3: `{"start":"завтра в 15:30","title":"Созвон с Петей', "}`) — тогда достаём пары ключ-значение.
- */
+/** Маленькие модели иногда возвращают битый JSON (Qwen3: `{"start":"завтра в 15:30","title":"Созвон с Петей', "}`) — тогда достаём пары ключ-значение. */
 export function safeParse(s: string): Record<string, unknown> {
   try {
     const v = JSON.parse(s) as unknown;

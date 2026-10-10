@@ -1,4 +1,4 @@
-// Тексты: общие — «пока не умею», лимиты (tech-debt #4), недоступность Google/LLM, кнопки и состояния карточек.
+// Общие тексты: «пока не умею», лимиты, недоступность Google/LLM, кнопки и состояния карточек.
 
 import type { Messages } from "./types";
 
@@ -15,7 +15,6 @@ export const commonMessages = {
     ru: "Не могу разобрать команду сейчас, попробуйте чуть позже.",
     en: "I can't process commands right now, please try again a bit later.",
   },
-  // --- Лимиты на пользователя (tech-debt #4) ---
   llmLimitHour: {
     ru: "Слишком много команд за последний час — лимит {limit}. Продолжим через {minutes} мин.",
     en: "Too many commands in the last hour — the limit is {limit}. Let's continue in {minutes} min.",

@@ -1,4 +1,4 @@
-// Лимит вызовов LLM/STT на пользователя перед внешним вызовом (tech-debt #4): исчерпан — вежливый ответ.
+// Лимит проверяется до внешнего вызова: исчерпан — вежливый ответ без вызова LLM/STT (tech-debt #4).
 
 import { usageWindow } from "../../db/usage";
 import type { User } from "../../db/users";
@@ -11,7 +11,6 @@ const LIMIT_MESSAGES = {
   stt: { hour: "sttLimitHour", day: "sttLimitDay" },
 } as const;
 
-/** Лимит вызовов LLM/STT на пользователя (tech-debt #4): исчерпан — вежливый ответ и никакого внешнего вызова. */
 export async function withinLimit(ctx: AppContext, user: User, kind: "llm" | "stt", chatId: number): Promise<boolean> {
   const now = ctx.clock.now();
   const verdict = checkLimit(ctx.config.limits[kind], await usageWindow(ctx.db, user.id, kind, now), now);

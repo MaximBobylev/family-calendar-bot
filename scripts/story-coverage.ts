@@ -1,16 +1,14 @@
-// Трассировка «история → сценарии → код»: для каждой US-xx из docs/user-stories.md — сколько приёмочных
-// сценариев (acceptance/scenarios, поле story) и какие файлы src/ на неё ссылаются в комментариях.
-// Без сети и без запуска бота. Использование:
+// US-xx из docs/user-stories.md → число приёмочных сценариев и файлы кода по docs/architecture-map.md (не по комментариям:
+// ссылка на историю в коде права на существование не даёт).
 //   docker compose run --rm test npm run -s stories [-- --missing]   (--missing — только истории без сценариев)
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 const root = join(import.meta.dirname, "..");
 const missingOnly = process.argv.includes("--missing");
 
-// Истории: «### US-30. Создать разовое событие» (суффиксы вида «(P2)», «(R1)» остаются в названии)
 const stories = [...readFileSync(join(root, "docs/user-stories.md"), "utf8").matchAll(/^### (US-\d+[a-z]?)\. (.+)$/gm)].map((m) => ({
   id: m[1]!,
   title: m[2]!.trim(),
@@ -24,15 +22,24 @@ for (const f of readdirSync(scenarioDir).filter((f) => f.endsWith(".yaml"))) {
   }
 }
 
-function walk(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
+/** «US-65/66/67», «US-65–67», «US-10a» → отдельные id. */
+function storyIds(line: string): string[] {
+  const ids: string[] = [];
+  for (const m of line.matchAll(/US-(\d+)([a-z]?)((?:\/\d+[a-z]?)*)(?:[–-](\d+))?/g)) {
+    ids.push(`US-${m[1]}${m[2]}`);
+    for (const n of (m[3] ?? "").split("/").filter(Boolean)) ids.push(`US-${n}`);
+    if (m[4]) for (let k = Number(m[1]) + 1; k <= Number(m[4]); k++) ids.push(`US-${String(k).padStart(2, "0")}`);
+  }
+  return ids;
 }
 const codeRefs = new Map<string, string[]>();
-for (const file of walk(join(root, "src")).filter((f) => f.endsWith(".ts"))) {
-  // \b после номера: US-10 не должен засчитываться за US-10a и наоборот
-  for (const id of new Set(readFileSync(file, "utf8").match(/US-\d+[a-z]?\b/g) ?? [])) {
-    codeRefs.set(id, [...(codeRefs.get(id) ?? []), relative(root, file)]);
-  }
+for (const line of readFileSync(join(root, "docs/architecture-map.md"), "utf8").split("\n")) {
+  const ids = storyIds(line);
+  if (!ids.length) continue;
+  const paths = [
+    ...line.matchAll(/(?<![\w/])`?((?:src\/)?(?:bot|db|dates|nlu|sync|jobs|ops|calendar|google|admin|voice|vision|stt|ics|telegram|net)\/[\w./{},*-]+)/g),
+  ].map((m) => (m[1]!.startsWith("src/") ? m[1]! : `src/${m[1]}`).replace(/[.,]+$/, ""));
+  for (const id of ids) codeRefs.set(id, [...new Set([...(codeRefs.get(id) ?? []), ...paths])]);
 }
 
 const rows = stories.filter((s) => !missingOnly || !byStory.get(s.id));

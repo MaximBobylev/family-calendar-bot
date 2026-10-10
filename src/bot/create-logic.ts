@@ -1,5 +1,4 @@
-// US-30 / US-32: чистая логика создания — черновик → варианты события (даты, длительность, серия, календарь).
-// Без ввода-вывода: только парсер дат и правила, поэтому покрывается юнит-тестами (tech-debt #10).
+// Черновик → варианты события без ввода-вывода (только парсер дат и правила) — поэтому покрыто юнит-тестами.
 
 import { findCalendarByName } from "../calendar/match";
 import type { CalendarInfo, EventRef } from "../calendar/model";
@@ -15,42 +14,36 @@ import type { CreateEventIntent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
 import { t } from "./messages";
 
-/** Черновик создания: то, что сказал пользователь (фрагменты), — до разрешения дат. */
+// Фрагменты, как их сказал пользователь, — до разрешения дат
 export interface CreateDraft {
   startText?: string;
-  /** Дата словами LLM (`start`), если она не совпадает с найденной в тексте: второе мнение — варианты кнопками. */
+  // `start` от LLM, не совпавший с найденным в тексте: второе мнение — варианты кнопками
   altStartText?: string;
-  /** Структура даты от LLM (`when`, разрешает наш код): второе мнение вместо `start`, когда модель её дала (ревью дат, шаг 4). */
+  // Структура даты от LLM (`when`, разрешает наш код): второе мнение вместо `start`, когда модель её дала
   altWhen?: DateStructure;
-  /** Пересланное и фото (шаг 5): дата модели — первым вариантом, наш парсер — проверка (расходятся — оба кнопками). */
+  // Пересланное и фото: дата модели — первым вариантом, наш парсер — проверка
   llmFirst?: true;
-  /** Правило повторения как сказано: «каждый понедельник в 10» (US-32). */
   recurrenceText?: string;
   title?: string;
   durationText?: string;
   allDay?: boolean;
   calendar?: string;
   location?: string;
-  /** Откуда событие: пересланное, фото (US-65, US-66) — пишется в описание. */
   description?: string;
-  /** Ответственный и «для кого» (US-92) — в event_meta после создания. */
   family?: EventFamily;
-  /** Пояс, которого мы не знаем («по Варне»): даты нет — спрашиваем время по своему поясу (tech-debt #26). */
+  // Пояс, которого мы не знаем («по Варне»): спрашиваем время по своему поясу
   unknownZone?: string;
-  /** Откуда дата и как она сошлась с LLM — для метрики правок даты `date_fix` (tech-debt #26). */
+  // Только для метрики правок даты date_fix (tech-debt #26)
   dateCheck?: DateCheckInfo;
 }
 
-/** Источник даты в карточке: команда (текст/голос), пересланное, фото. */
 export type DateSource = "message" | "forward" | "image";
 export interface DateCheckInfo {
   source: DateSource;
   agreement: StartAgreement;
-  /** Чем было второе мнение LLM: структура `when` или строка `start` (нет — none). */
   llm?: LlmDateSide;
 }
 
-/** Разрешённый вариант события — хранится в карточке. */
 export interface CreateOption {
   calendarId: string;
   calendarTitle: string;
@@ -65,44 +58,36 @@ export interface CreateOption {
   location?: string;
   description?: string;
   series?: SeriesInfo;
-  /** Время сказано в другом поясе («в 15 по Киеву») — в карточке показываем и его (tech-debt #26). */
+  // Время сказано в другом поясе («в 15 по Киеву»)
   zone?: NamedZone;
-  /** Пояс календаря, если он не текущий пояс пользователя (поездка, другой город) — в карточке и его время (US-07). */
   calendarTz?: string;
-  /** Вариант из `start` от LLM (второе мнение), а не из нашего куска — выбор его = наш парсер ошибся (date_fix). */
+  // Вариант из второго мнения LLM: выбор его = наш парсер ошибся (date_fix)
   fromLlm?: true;
 }
 
-/** Повторение: готовый RRULE и то, что показываем в карточке. */
 export interface SeriesInfo {
   rrule: string;
-  /** «Каждый понедельник». */
   text: string;
-  /** Ближайшие даты, начиная с первой (она же начало серии). */
   next: Day[];
-  /** Вариант для 29–31 числа (выбирается кнопкой): пропускать короткие месяцы или ставить на последний день. */
   shortMonths?: "skip" | "last_day";
 }
 
 export interface CreateCardPayload {
   chatId: number;
   options: CreateOption[];
-  /** Календарь назван другим именем (алиасом), а не названием — учёт функций (US-64). */
+  // Только для учёта функций (US-64)
   viaAlias?: boolean;
-  /** Ответственный и «для кого» (US-92). */
   family?: EventFamily;
-  /** Источник даты и исход сверки с LLM — для метрики date_fix (tech-debt #26). */
   dateCheck?: DateCheckInfo;
 }
 
-/** Календарь найден по алиасу: по одним названиям (без алиасов) это имя его не находит. */
 export function namedByAlias(cal: CalendarInfo, name: string | undefined): boolean {
   return !!name && cal.aliases.length > 0 && !findCalendarByName([{ ...cal, aliases: [] }], name);
 }
 
 export interface TitleQuestionPayload {
   ref: EventRef;
-  /** Текущее название — чтобы переименование можно было отменить (US-61). */
+  // Чтобы переименование можно было отменить (US-61)
   title: string;
 }
 
@@ -117,8 +102,6 @@ export function draftFromIntent(i: CreateEventIntent): CreateDraft {
   };
 }
 
-// --- Разрешение черновика --------------------------------------------------
-
 const normWords = (text: string) =>
   text
     .toLowerCase()
@@ -127,30 +110,20 @@ const normWords = (text: string) =>
     .map((w) => w.replace(/^[.:]+|[.:]+$/g, ""))
     .filter(Boolean);
 
-/**
- * Дата из текста (наш парсер) и дата словами от LLM (`start`) — сверка (ревью 2026-10-08, шаг 1). Наш кусок —
- * основной; `start` — второе мнение, если он скопирован из текста (каждое слово есть в тексте — не выдумка) и
- * не часть нашего куска («в 15» при «завтра в 15»). Нашего куска нет — `start`, как раньше (ADR-0005 п.3).
- */
+// Наш кусок — основной; `start` от LLM — второе мнение, только если скопирован из текста (каждое слово есть в тексте —
+// не выдумка) и не часть нашего куска («в 15» при «завтра в 15»). Нашего куска нет — `start`.
 export function pickStart(text: string, point: string | undefined, llmStart: string | undefined): Pick<CreateDraft, "startText" | "altStartText"> {
   return startCheck(text, point, llmStart).pick;
 }
 
-/**
- * Как сошлись наш кусок и LLM — для лога `date_check` (ревью 2026-10-08, шаг 3: доля расхождений). llm_unsure — модель
- * сама сказала «не выражается / не разобрал» в структуре `when`.
- */
+// llm_unsure — модель сама сказала в структуре `when` «не выражается / не разобрал»
 export type StartAgreement = "none" | "ours_only" | "llm_only" | "agree" | "llm_invented" | "differ" | "llm_unsure";
 export type LlmDateSide = "when" | "start" | "none";
 
-/** Значения результата как множество — для «совпали ли» наш кусок и структура. */
 const valueKeys = (r: ParseResult) => ("error" in r ? [] : "ambiguous" in r ? r.ambiguous : [r]).map((v) => JSON.stringify(v)).sort();
 
-/**
- * Сверка с LLM (ревью дат, шаги 4–5): есть структура `when` — она второе мнение (даты считает наш код, ADR-0005 п.3);
- * нет (бесплатная модель её не дала или испортила) — как раньше, строка `start` (startCheck). Сравниваются итоговые даты,
- * а не слова. llmFirst — пересланное и фото: дата модели первой, наш парсер проверяет.
- */
+// Структуры `when` нет, когда бесплатная модель её не дала или испортила, — тогда сверка по строке `start`.
+// Структуру сравниваем по итоговым датам, а не по словам.
 export function llmDateCheck(
   text: string,
   point: string | undefined,
@@ -191,25 +164,24 @@ export function startCheck(
   return { pick: { startText: point, altStartText: llm }, agreement: "differ" };
 }
 
-/** Больше вариантов в карточке не показываем: дальше это уже не выбор, а шум. */
+// Дальше это уже не выбор, а шум
 const MAX_OPTIONS = 4;
 
 export type Resolution =
   | { kind: "options"; options: CreateOption[] }
-  /** startText — что сохранить в черновике для ответа (дата из структуры LLM словами «02.11.2026»), если не исходный кусок. */
+  // startText — дата из структуры LLM словами («02.11.2026»): её дополнит ответ на вопрос
   | { kind: "ask"; question: "askWhen" | "askTime" | "inPast" | "askZoneTime"; keepStart: boolean; startText?: string }
   | { kind: "reply"; text: string };
 
 export type CalendarResolution = CalendarInfo | { error: "notFound" | "readOnly"; name: string } | { error: "noWritable" };
 
-/** Календарь для создания: по имени/алиасу или по умолчанию. noWritable — записать некуда (все только для чтения). */
 export function resolveCalendar(calendars: CalendarInfo[], name: string | undefined): CalendarResolution {
   const fallback = calendars.find((c) => c.isDefault && c.writable) ?? calendars.find((c) => c.writable);
   if (name) {
     const cal = findCalendarByName(calendars, name);
     if (cal && !cal.writable) return { error: "readOnly", name: cal.title };
     if (cal) return cal;
-    // Не нашли, а предложить нечего — без пустого списка «Ваши календари: .»
+    // Предложить нечего — иначе ответ с пустым списком «Ваши календари: .»
     return fallback ? { error: "notFound", name } : { error: "noWritable" };
   }
   return fallback ?? { error: "noWritable" };
@@ -271,7 +243,6 @@ export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: C
     fromParsed(parseDateFragment({ text, kind: "point", now: formatMoment(now), tz }), namedZone(text), fromLlm);
 
   const ours: Resolution = draft.startText ? fromText(draft.startText, false) : { kind: "ask", question: "askWhen", keepStart: false };
-  // Второе мнение LLM: структура `when` (резолвит наш код), иначе строка `start`
   const alt = draft.altWhen
     ? fromParsed(resolveDateStructure(draft.altWhen, "point", now, tz), draft.altWhen.timezone ? zoneByTz(draft.altWhen.timezone) : undefined, true)
     : draft.altStartText
@@ -287,7 +258,6 @@ export function resolveDraft(draft: CreateDraft, now: Moment, tz: string, cal: C
   return { kind: "options", options: [...first, ...second.filter((o) => !seen.has(key(o)))].slice(0, MAX_OPTIONS) };
 }
 
-/** Длительность и «весь день» из черновика. */
 function resolveLength(
   draft: CreateDraft,
   now: Moment,
@@ -326,7 +296,6 @@ function optionBase(draft: CreateDraft, cal: CalendarInfo, tz: string, locale: s
 
 const SERIES_PREVIEW = 3;
 
-/** Серия (US-32): первая дата правила не раньше «сейчас» — начало серии; время — из правила. */
 function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string, cal: CalendarInfo, locale: string, defaultDuration: number): Resolution {
   const parsed = parseDateFragment({ text, kind: "recurrence", now: formatMoment(now), tz });
   if (!("recurrence" in parsed)) return { kind: "ask", question: "askWhen", keepStart: false };
@@ -337,7 +306,6 @@ function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string
   if (!r.time && !allDay) return { kind: "ask", question: "askTime", keepStart: true };
 
   const minutes = r.time ? Number(r.time.slice(0, 2)) * 60 + Number(r.time.slice(3)) : 0;
-  // Сегодняшнее вхождение — только если его время ещё не прошло
   const from = allDay || minutes > now.minutes ? now.day : now.day + 1;
   const next = occurrences(r, from, SERIES_PREVIEW);
   if (next.length === 0) return { kind: "reply", text: t("seriesNoDates", locale) };
@@ -357,7 +325,6 @@ function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string
       ? { ...base, allDay: true, startDay: first, endDay: first, series }
       : { ...base, allDay: false, start, end, startDay: start.day, endDay: end.day, series };
   };
-  // 29–31 число: в коротких месяцах такого дня нет — спрашиваем, пропускать или ставить на последний день
   if (r.warning === "skips_short_months" && !r.count && !r.until) {
     const variants = (["skip", "last_day"] as const).map((short_months) => ({ ...r, short_months }));
     return { kind: "options", options: variants.map((v) => option(v, occurrences(v, from, SERIES_PREVIEW))) };
@@ -365,10 +332,7 @@ function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string
   return { kind: "options", options: [option(r, next)] };
 }
 
-/**
- * День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 врача» — время без дня относится к нему.
- * Только время («в 12:30», «на 15», «к 9»), день разговора не в прошлом → «12.10.2026 в 12:30»; иначе undefined.
- */
+// US-60: «Есть что-то 12 октября?» → «поставь на 12:30 врача» — время без дня относится к 12 октября
 export function withConversationDay(point: string, lastDay: string | undefined, today: Day): string | undefined {
   if (!lastDay) return undefined;
   const day = parseLocal(`${lastDay}T00:00`).day;

@@ -1,9 +1,8 @@
-// Тексты: уведомления об изменениях в календаре (US-72), напоминания в Telegram (US-71), их настройки в /settings.
+// Уведомления об изменениях в календаре, напоминания в Telegram и их настройки.
 
 import type { Messages } from "./types";
 
 export const notifyMessages = {
-  // --- Уведомления об изменениях (US-72) ---
   noticeCreated: { ru: "➕ Новое: «{title}» — {when}", en: "➕ New: “{title}” — {when}" },
   noticeMoved: { ru: "🔁 Перенесено: «{title}» — {when} (было {was})", en: "🔁 Moved: “{title}” — {when} (was {was})" },
   noticeMovedNoWas: { ru: "🔁 Перенесено: «{title}» — {when}", en: "🔁 Moved: “{title}” — {when}" },
@@ -12,11 +11,9 @@ export const notifyMessages = {
   noticeOrganizer: { ru: "👤 Организатор: {name}", en: "👤 Organizer: {name}" },
   noticeSummary: { ru: "📋 Изменения в календаре ({count}):", en: "📋 Calendar changes ({count}):" },
   noticeSummaryMore: { ru: "…и ещё {count}", en: "…and {count} more" },
-  // --- Напоминание в Telegram (US-71) ---
   tgReminder: { ru: "⏰ Через {minutes} мин: <b>{title}</b>\n🕒 {when}", en: "⏰ In {minutes} min: <b>{title}</b>\n🕒 {when}" },
   tgReminderPlace: { ru: "📍 {place}", en: "📍 {place}" },
   tgReminderLink: { ru: "🔗 {url}", en: "🔗 {url}" },
-  // --- /settings → «Уведомления» ---
   settingsNotifyButton: { ru: "📣 Уведомления", en: "📣 Notifications" },
   settingsNotifyOn: { ru: "📣 Об изменениях в календаре: включены", en: "📣 Calendar change alerts: on" },
   settingsNotifyOff: { ru: "📣 Об изменениях в календаре: выключены", en: "📣 Calendar change alerts: off" },
