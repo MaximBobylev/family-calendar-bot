@@ -3,7 +3,7 @@
 // US-32: серии. Здесь — сценарий (I/O); черновик → варианты — create-logic.ts, карточка — create-view.ts.
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
-import { localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
+import { formatDate, localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
 import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
 import { type Feature, recordFeature } from "../db/features";
@@ -202,7 +202,13 @@ export async function confirmCreate(
     );
     await attachUndoMessage(ctx.db, undo.undoId, Number(action.messageId));
   }
-  await mergeDialogState(ctx.db, action.conversationId, user.id, { lastEvent: { ref: created.ref, at: ctx.clock.now() } }, ctx.clock.now());
+  await mergeDialogState(
+    ctx.db,
+    action.conversationId,
+    user.id,
+    { lastEvent: { ref: created.ref, at: ctx.clock.now() }, lastDay: { day: formatDate(o.startDay), at: ctx.clock.now() } },
+    ctx.clock.now(),
+  );
   // Метрика date_fix (tech-debt #26): другой вариант / пересоздание на другую дату; запомнить карточку для «нет, в 16»
   await dateFixOnCreated(ctx, action, action.payload, Number(choice.slice(1)), created.ref);
   const features: Feature[] = ["create", ...(o.series ? ["recurring" as const] : []), ...(action.payload.viaAlias ? ["alias" as const] : [])];

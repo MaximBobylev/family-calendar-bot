@@ -35,6 +35,8 @@ export interface DialogState {
     | { kind: "trip_until"; expiresAt: number };
   /** Последний показанный список — для «перенеси вторую» (US-60). */
   lastList?: { refs: StoredRef[]; at: number };
+  /** День разговора (US-60): последний показанный один день или день созданного события, «YYYY-MM-DD» в поясе пользователя. */
+  lastDay?: { day: string; at: number };
   /** Последнее созданное/изменённое событие — для «её», «эту встречу» (US-60). */
   lastEvent?: { ref: StoredRef; at: number };
   /** Последнее голосовое — переслушать мультимодальной моделью, если текстовый путь ошибся (multimodal-voice, вариант D). */

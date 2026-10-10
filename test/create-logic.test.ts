@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarInfo } from "../src/calendar/model";
 import { formatMoment, parseLocal } from "../src/dates/calendar";
-import { type CreateOption, llmDateCheck, pickStart, resolveCalendar, resolveDraft, startCheck } from "../src/bot/create-logic";
+import { type CreateOption, llmDateCheck, pickStart, resolveCalendar, resolveDraft, startCheck, withConversationDay } from "../src/bot/create-logic";
 import type { DateStructure } from "../src/dates/structured";
 
 // «Сейчас» — ср 7 октября 2026, 10:00 (как в приёмочных сценариях).
@@ -247,4 +247,20 @@ describe("начало серии при разных «сейчас» (корп
     expect(first("по будням в 9 до конца года", "2026-12-31T18:00")).toContain("ни одной даты"));
   it("в день перехода времени (Берлин, 01:30) «каждое воскресенье в 10» — сегодня", () =>
     expect(first("каждое воскресенье в 10", "2026-10-25T01:30", "Europe/Berlin")).toBe("2026-10-25T10:00"));
+});
+
+describe("withConversationDay — день разговора (US-60)", () => {
+  const today = parseLocal("2026-10-10T10:00").day;
+  it.each([
+    ["в 12:30", "12.10.2026 в 12:30"],
+    ["на 12.30", "12.10.2026 на 12.30"],
+    ["к 9", "12.10.2026 к 9"],
+    ["в 3 часа дня", "12.10.2026 в 3 часа дня"],
+  ])("%s → %s", (point, want) => expect(withConversationDay(point, "2026-10-12", today)).toBe(want));
+  it.each(["завтра в 12:30", "в пятницу в 15", "14 октября в 10", "через 2 часа", "через час", "вечером"])(
+    "день назван или нет времени — %s как сказано",
+    (point) => expect(withConversationDay(point, "2026-10-12", today)).toBeUndefined(),
+  );
+  it("день разговора в прошлом — обычные правила", () => expect(withConversationDay("в 12:30", "2026-10-09", today)).toBeUndefined());
+  it("без дня разговора", () => expect(withConversationDay("в 12:30", undefined, today)).toBeUndefined());
 });

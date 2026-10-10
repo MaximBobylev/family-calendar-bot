@@ -3,7 +3,7 @@
 
 import { formatMoment, parseLocal, utcToLocal } from "../dates/calendar";
 import { cleanTitle, extractDateSpans, extractModifySpans, extractRecurrenceSpan, looksAllDay } from "../dates/extract";
-import { mergeDialogState } from "../db/conversations";
+import { CONTEXT_TTL_MS, getDialogState, mergeDialogState } from "../db/conversations";
 import { log } from "../log";
 import { recordFeature } from "../db/features";
 import type { User } from "../db/users";
@@ -17,7 +17,7 @@ import { assignOverride } from "./assign/logic";
 import { assignmentApplies, startAssign } from "./assign/start";
 import type { AppContext } from "./context";
 import { draftFromIntent, startCreate, type CreateDraft } from "./create-event";
-import { llmDateCheck } from "./create-logic";
+import { llmDateCheck, withConversationDay } from "./create-logic";
 import { startDelete } from "./delete-event";
 import { lookupEvent } from "./event-lookup";
 import type { EventRequest } from "./find-event";
@@ -59,13 +59,26 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       // Повторение (US-32): правило вырезаем целиком, длительность ищем в остатке
       const rec = extractRecurrenceSpan(famText, localNow, user.tz);
       const spans = extractDateSpans(rec ? rec.rest : famText, localNow, user.tz, "point");
+      // День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 врача» = 12 октября; LLM этого контекста
+      // не видит — её второе мнение тогда не спрашиваем
+      const state = !rec && spans.point ? await getDialogState(ctx.db, conversationId, user.id) : undefined;
+      const fresh = state?.lastDay && ctx.clock.now() - state.lastDay.at < CONTEXT_TTL_MS ? state.lastDay.day : undefined;
+      const inContext = spans.point ? withConversationDay(spans.point, fresh, parseLocal(localNow).day) : undefined;
+      const point = inContext ?? spans.point;
       // Сверка с LLM (ревью 2026-10-08): структура `when` (или `start`) — второе мнение; разные даты — варианты кнопками
       // Незнакомый пояс («в 15 по Варне»): LLM его тоже не пересчитает — спрашиваем время по своему поясу
-      const llm = spans.unknownZone ? {} : { start: intent.start, ...(intent.when ? { when: intent.when } : {}) };
-      const check = rec ? undefined : llmDateCheck(famText, spans.point, llm, parseLocal(localNow), user.tz);
+      const llm = spans.unknownZone || inContext ? {} : { start: intent.start, ...(intent.when ? { when: intent.when } : {}) };
+      const check = rec ? undefined : llmDateCheck(famText, point, llm, parseLocal(localNow), user.tz);
       if (check) {
         const unknownZone = spans.unknownZone ? true : undefined;
-        log("date_check", { source: "message", llm: check.llm, agreement: check.agreement, unsure: spans.unsure, unknown_zone: unknownZone });
+        log("date_check", {
+          source: "message",
+          llm: check.llm,
+          agreement: check.agreement,
+          unsure: spans.unsure,
+          unknown_zone: unknownZone,
+          ...(inContext ? { context_day: true } : {}),
+        });
       }
       const start = check?.pick ?? {};
       const startText = start.startText;

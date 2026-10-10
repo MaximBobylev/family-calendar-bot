@@ -1010,13 +1010,14 @@ function parseLocalMoment(s: string): Moment {
   return { day: makeDay(y!, m!, day!), minutes: h! * 60 + min! };
 }
 
-/** Что есть во фрагменте: дата и/или время. null — фрагмент не разбирается. */
-export function fragmentParts(tokens: Token[]): { hasDate: boolean; hasTime: boolean } | null {
+/** Что есть во фрагменте: дата и/или время; relative — «через 2 часа». null — фрагмент не разбирается. */
+export function fragmentParts(tokens: Token[]): { hasDate: boolean; hasTime: boolean; relative: boolean } | null {
   try {
     const ast = parseAst(tokens);
     return {
-      hasDate: !!(ast.date || ast.dateRange || ast.period || ast.week),
+      hasDate: !!(ast.date || ast.dateRange || ast.period || ast.week || ast.vagueWeek),
       hasTime: !!(ast.time || ast.interval || ast.relMinutes !== undefined),
+      relative: ast.relMinutes !== undefined,
     };
   } catch {
     return null;

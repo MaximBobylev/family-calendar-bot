@@ -3,11 +3,13 @@
 
 import { findCalendarByName } from "../calendar/match";
 import type { CalendarInfo, EventRef } from "../calendar/model";
-import { addMinutes, formatMoment, parseLocal, type Day, type Moment } from "../dates/calendar";
+import { addMinutes, formatMoment, parseLocal, parts, type Day, type Moment } from "../dates/calendar";
 import { durationToMinutes } from "../dates/duration";
+import { fragmentParts } from "../dates/point";
 import { parseDateFragment, type ParseResult, type ParseValue, type Recurrence } from "../dates";
 import { describeRecurrence, occurrences, toRRule } from "../dates/rrule";
 import { type DateStructure, resolveDateStructure, structureHasValue } from "../dates/structured";
+import { tokenize } from "../dates/tokenize";
 import { namedZone, type NamedZone, zoneByTz } from "../dates/zone";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
@@ -361,4 +363,18 @@ function resolveSeries(draft: CreateDraft, text: string, now: Moment, tz: string
     return { kind: "options", options: variants.map((v) => option(v, occurrences(v, from, SERIES_PREVIEW))) };
   }
   return { kind: "options", options: [option(r, next)] };
+}
+
+/**
+ * День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 врача» — время без дня относится к нему.
+ * Только время («в 12:30», «на 15», «к 9»), день разговора не в прошлом → «12.10.2026 в 12:30»; иначе undefined.
+ */
+export function withConversationDay(point: string, lastDay: string | undefined, today: Day): string | undefined {
+  if (!lastDay) return undefined;
+  const day = parseLocal(`${lastDay}T00:00`).day;
+  if (day < today) return undefined;
+  const p = fragmentParts(tokenize(point));
+  if (!p || p.hasDate || !p.hasTime || p.relative) return undefined;
+  const { year, month, date } = parts(day);
+  return `${String(date).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year} ${point}`;
 }

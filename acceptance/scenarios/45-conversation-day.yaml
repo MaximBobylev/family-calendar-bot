@@ -1,0 +1,70 @@
+# US-60: день разговора — «Есть что-то 12 октября?» → «Нет» → «Поставь на 12.30 встречу с врачом» = 12 октября 12:30.
+# Время без дня относится к последнему показанному дню (или дню созданного события) в окне контекста 15 минут.
+# «Сейчас» — сб 10 октября 2026, 10:00 МСК.
+
+- id: conversation-day-from-empty-day-view
+  story: US-60
+  steps:
+    - &setup
+      - clock: "2026-10-10T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - id: ivan@gmail.com
+              summary: "Иван"
+              accessRole: owner
+              primary: true
+              timeZone: Europe/Moscow
+              events:
+                - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-13T10:00:00+03:00" }, end: { dateTime: "2026-10-13T11:00:00+03:00" } }
+      - llm:
+          "Есть что-то 12 октября?": { tool: list_events, args: { range: "12 октября" } }
+          "Что у меня на следующей неделе?": { tool: list_events, args: { range: "на следующей неделе" } }
+          # Модель контекста не видит и считает «сегодня» — её мнение в этом случае не спрашиваем
+          "Поставь на 12.30 встречу с врачом": { tool: create_event, args: { start: "на 12.30", title: "Встреча с врачом", when: { time: { hour: 12, minute: 30 } } } }
+          "И ещё в 15 созвон с Петей": { tool: create_event, args: { start: "в 15", title: "Созвон с Петей" } }
+          "Поставь завтра в 12.30 стрижку": { tool: create_event, args: { start: "завтра в 12.30", title: "Стрижку" } }
+    - telegram: { from: 1001, text: "Есть что-то 12 октября?" }
+    - expect_telegram:
+        - { text_contains: ["12 октября"] }
+    - telegram: { from: 1001, text: "Поставь на 12.30 встречу с врачом" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Встреча с врачом</b>", "пн, 12 октября, 12:30–13:30"], text_not_contains: ["Когда именно?"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events: [{ summary: "Встреча с врачом", start: "2026-10-12T12:30:00+03:00", end: "2026-10-12T13:30:00+03:00" }]
+    # Созданное событие продлевает день разговора
+    - telegram: { from: 1001, text: "И ещё в 15 созвон с Петей" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+        - { text_contains: ["Создать событие?", "<b>Созвон с Петей</b>", "пн, 12 октября, 15:00–16:00"] }
+    # День назван — как сказано
+    - telegram: { from: 1001, text: "Поставь завтра в 12.30 стрижку" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Создать событие?", "вс, 11 октября, 12:30–13:30"] }
+
+- id: conversation-day-expires-and-period-resets
+  story: US-60
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Есть что-то 12 октября?" }
+    # Через 20 минут окно контекста закрыто — «на 12.30» снова по обычным правилам (сегодня)
+    - clock: "2026-10-10T07:20:00Z"
+    - telegram: { from: 1001, text: "Поставь на 12.30 встречу с врачом" }
+    - expect_telegram:
+        - { text_contains: ["Встреч нет"] }
+        - { text_contains: ["Создать событие?", "сб, 10 октября, 12:30–13:30"] }
+    # Неделя — не один день: день разговора сбрасывается
+    - telegram: { from: 1001, text: "Есть что-то 12 октября?" }
+    - telegram: { from: 1001, text: "Что у меня на следующей неделе?" }
+    - telegram: { from: 1001, text: "Поставь на 12.30 встречу с врачом" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["12 октября"] }
+        - { text_contains: ["Планёрка"] }
+        - { text_contains: ["Создать событие?", "сб, 10 октября, 12:30–13:30"] }

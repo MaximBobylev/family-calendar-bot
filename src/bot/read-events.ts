@@ -2,7 +2,7 @@
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { DAY_PART_BOUNDS } from "../dates/lexicon";
-import { formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
+import { formatDate, formatMoment, localToUtc, parseLocal, utcToLocal, type Day, type Moment } from "../dates/calendar";
 import { parseDateFragment, type ParseValue } from "../dates";
 import { mergeDialogState } from "../db/conversations";
 import { familyLabeler } from "./assign/family";
@@ -104,7 +104,15 @@ export async function readEvents(
     events.filter((e) => e.endDay >= period.fromDay && Math.max(e.startDay, period.fromDay) <= period.toDay),
     period.fromDay,
   );
-  await mergeDialogState(ctx.db, args.conversationId, args.userId, { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() } }, ctx.clock.now());
+  // День разговора (US-60): «Есть что-то 12 октября?» → «поставь на 12:30 …» — только один день; период его сбрасывает
+  const lastDay = period.fromDay === period.toDay ? { day: formatDate(period.fromDay), at: ctx.clock.now() } : undefined;
+  await mergeDialogState(
+    ctx.db,
+    args.conversationId,
+    args.userId,
+    { lastList: { refs: ordered.map((e) => e.ref), at: ctx.clock.now() }, lastDay },
+    ctx.clock.now(),
+  );
   const defaultId = calendars.find((c) => c.isDefault)?.id;
   const family = await familyLabeler(ctx.db, args.userId, ordered, locale);
   const messages = formatEvents(events, period.fromDay, period.toDay, now.day, locale, (id) => !only && calendars.length > 1 && id !== defaultId, family);
