@@ -29,6 +29,8 @@ export interface ForwardOrigin {
 export interface ForwardCardPayload extends ForwardOrigin {
   chatId: number;
   text: string;
+  /** Несколько дел (US-62): по нажатию это сообщение станет списком. */
+  many?: true;
 }
 
 export function forwardOrigin(origin: unknown): ForwardOrigin {
@@ -55,17 +57,17 @@ export async function proposeForwarded(
   origin: ForwardOrigin = {},
 ): Promise<void> {
   const stored = text.slice(0, MAX_STORED_LEN);
+  const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
+  const many = !!multiForwardPieces(stored, nowLocal, user.tz);
   const id = await createPendingAction(ctx.db, {
     conversationId,
     userId: user.id,
     kind: FORWARD_CARD,
-    payload: { chatId, text: stored, ...origin } satisfies ForwardCardPayload,
+    payload: { chatId, text: stored, ...origin, ...(many ? { many: true } : {}) } satisfies ForwardCardPayload,
     now: ctx.clock.now(),
   });
   // Без нажатия ничего не выполняется при любом порядке кнопок — поэтому, если в тексте есть дата,
   // «Создать событие» первым и без вопроса безопасности в заголовке
-  const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
-  const many = !!multiForwardPieces(stored, nowLocal, user.tz);
   const looksEvent = many || !!foreignDateSpans(stored, nowLocal, user.tz).point;
   const l = user.locale;
   const limit = looksEvent ? MAX_SHOWN_EVENT_LEN : MAX_SHOWN_LEN;
@@ -101,7 +103,7 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
   const run = choice === "run";
   const event = choice === "ev";
   // Несколько дел — это же сообщение станет списком (US-62)
-  const many = event && !!multiForwardPieces(text, formatMoment(utcToLocal(ctx.clock.now(), user.tz)), user.tz);
+  const many = event && !!action.payload.many;
   if (action.messageId && !many) {
     const shown = escapeHtml(text.length > MAX_SHOWN_LEN ? `${text.slice(0, MAX_SHOWN_LEN)}…` : text);
     await ctx.telegram.editMessageText(

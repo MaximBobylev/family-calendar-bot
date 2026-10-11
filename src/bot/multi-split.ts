@@ -74,21 +74,28 @@ export function splitMessage(text: string, now: string, tz: string, opts: { fore
   const groups: { start: number; end: number }[] = [];
   const borrowOf = new Map<number, number>();
   let pendingStart: number | undefined;
+  // Даты группы меняет только приклеенный кусок со своей датой — без него разбор не повторяем (extract квадратичный)
+  let lastDates: Info | undefined;
+  const lastGroupDates = () => {
+    const g = groups.at(-1)!;
+    lastDates ??= analyze(src.slice(g.start, g.end), now, tz);
+    return lastDates;
+  };
   for (const [i, r] of raws.entries()) {
     const info = infos[i]!;
     const source = enumerationSource(i, raws, infos);
-    const last = groups.at(-1);
     const standalone =
       source !== undefined ||
-      (info.titled &&
-        (info.hasDate || info.marker || info.startsWithOther) &&
-        !(last && refines(analyze(src.slice(last.start, last.end), now, tz), info, now, tz)));
+      (info.titled && (info.hasDate || info.marker || info.startsWithOther) && !(groups.length && refines(lastGroupDates(), info, now, tz)));
     if (standalone) {
       if (source !== undefined) borrowOf.set(groups.length, source);
+      lastDates = pendingStart === undefined ? info : undefined;
       groups.push({ start: pendingStart ?? r.start, end: r.end });
       pendingStart = undefined;
-    } else if (groups.length) groups.at(-1)!.end = r.end;
-    else pendingStart ??= r.start;
+    } else if (groups.length) {
+      groups.at(-1)!.end = r.end;
+      if (info.hasDate) lastDates = undefined;
+    } else pendingStart ??= r.start;
   }
   if (pendingStart !== undefined) {
     if (groups.length) groups[0]!.start = pendingStart;
