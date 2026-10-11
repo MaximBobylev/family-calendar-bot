@@ -7,7 +7,7 @@ import type { User } from "../db/users";
 import type { TgCallbackQuery } from "../telegram/types";
 import { ASSIGN_CARD, ASSIGN_WHO_CARD, type AssignCardPayload, type AssignWhoPayload, confirmAssign, confirmWho } from "./assign/start";
 import type { AppContext } from "./context";
-import { CREATE_CARD, confirmCreate, type CreateCardPayload } from "./create-event";
+import { CREATE_CARD, confirmCreate, type CreateCardPayload, pressCreateYearly } from "./create-event";
 import { DELETE_CARD, confirmDelete, proposeDelete } from "./delete-event";
 import { runCommand } from "./dialog";
 import { confirmTimezone, TZ_CARDS } from "./timezone";
@@ -75,7 +75,7 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
     await ctx.telegram.answerCallbackQuery(cq.id);
     return;
   }
-  if (await pressMulti(ctx, user, cq, parsed.actionId, parsed.choice)) return;
+  if ((await pressMulti(ctx, user, cq, parsed.actionId, parsed.choice)) || (await pressCreateYearly(ctx, user, cq, parsed.actionId, parsed.choice))) return;
   const claim = await claimCard(ctx.db, parsed.actionId, user.id, ctx.clock.now(), (kind) => RETRYABLE.has(kind));
   if (!claim.ok) {
     const key = BUSY_ANSWER[claim.verdict];

@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarInfo } from "../src/calendar/model";
 import { formatMoment, parseLocal } from "../src/dates/calendar";
-import { type CreateOption, llmDateCheck, pickStart, resolveCalendar, resolveDraft, startCheck, withConversationDay } from "../src/bot/create-logic";
+import {
+  type CreateOption,
+  isBirthdayOption,
+  llmDateCheck,
+  pickStart,
+  resolveCalendar,
+  resolveDraft,
+  startCheck,
+  withConversationDay,
+} from "../src/bot/create-logic";
 import type { DateStructure } from "../src/dates/structured";
 
 // Среда, как в приёмочных сценариях.
@@ -263,4 +272,17 @@ describe("withConversationDay — день разговора (US-60)", () => {
   );
   it("день разговора в прошлом — обычные правила", () => expect(withConversationDay("в 12:30", "2026-10-09", today)).toBeUndefined());
   it("без дня разговора", () => expect(withConversationDay("в 12:30", undefined, today)).toBeUndefined());
+});
+
+describe("isBirthdayOption (US-31, R2)", () => {
+  it("день рождения с датой без времени — ежегодный; со временем или серией — нет", () => {
+    const [allDay] = options(resolve({ startText: "12 ноября", title: "День рождения Пети", allDay: true }));
+    expect(isBirthdayOption(allDay!)).toBe(true);
+    const [timed] = options(resolve({ startText: "в субботу в 15", title: "День рождения Пети" }));
+    expect(isBirthdayOption(timed!)).toBe(false);
+    const [series] = options(resolve({ recurrenceText: "каждый год 12 ноября", title: "ДР Пети", allDay: true }));
+    expect(isBirthdayOption(series!)).toBe(false);
+    const [vacation] = options(resolve({ startText: "12 ноября", title: "Отпуск", allDay: true }));
+    expect(isBirthdayOption(vacation!)).toBe(false);
+  });
 });

@@ -217,6 +217,40 @@
         calendar: ivan@gmail.com
         events: [{ summary: "День рождения мамы", start: "2026-10-08", end: "2026-10-09" }]
 
+- id: create-birthday-yearly
+  story: US-31
+  steps:
+    - *setup
+    # День рождения с датой без времени — ежегодное на весь день (US-62, R2); повтор виден и снимается одной кнопкой
+    - telegram: { from: 1001, text: "Завтра день рождения мамы" }
+    - expect_telegram:
+        - { text_contains: ["<b>День рождения мамы</b>\n🕒 чт, 8 октября, весь день, 🔁 каждый год"], buttons: ["🔁 Каждый год: да", "Создать", "Отмена"] }
+    - press: "🔁 Каждый год: да"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["🕒 чт, 8 октября, весь день"], text_not_contains: ["каждый год"], buttons: ["🔁 Каждый год: нет", "Создать", "Отмена"] }
+    - press: "🔁 Каждый год: нет"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["весь день, 🔁 каждый год"], buttons: ["🔁 Каждый год: да", "Создать", "Отмена"] }
+    - press: "Создать"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "весь день, 🔁 каждый год"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        events: [{ summary: "День рождения мамы", start: "2026-10-08", end: "2026-10-09", recurrence: ["RRULE:FREQ=YEARLY"] }]
+
+- id: create-birthday-once
+  story: US-31
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Завтра день рождения мамы" }
+    - press: "🔁 Каждый год: да"
+    - press: "Создать"
+    - expect_telegram:
+        - { text_contains: ["🔁 каждый год"] }
+        - { method: editMessageText, text_not_contains: ["каждый год"] }
+        - { method: editMessageText, text_contains: ["✅ Создано", "весь день"], text_not_contains: ["каждый год"] }
+
 - id: create-all-day-range-inclusive
   story: US-31
   steps:

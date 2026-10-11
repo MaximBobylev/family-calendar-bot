@@ -9,6 +9,7 @@ import { cleanTitle, looksAllDay } from "../dates/extract";
 import type { CreateEventIntent, Intent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
 import {
+  BIRTHDAY,
   type CalendarResolution,
   type CreateDraft,
   type CreateOption,
@@ -25,8 +26,6 @@ import type { Piece } from "./multi-split";
 export const MULTI_CARD = "multi";
 export const MAX_OWN = 5;
 export const MAX_FORWARD = 10;
-
-export const BIRTHDAY = /день рождени|(?<!\p{L})др(?!\p{L})|годовщин|юбиле|birthday|anniversary/iu;
 
 export interface MultiItem {
   title: string;

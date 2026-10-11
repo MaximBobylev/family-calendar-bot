@@ -2,16 +2,27 @@
 
 import type { CalendarInfo, CalendarProvider } from "../calendar/model";
 import { formatDate, localToUtc, minutesBetween, utcToLocal } from "../dates/calendar";
-import { AWAIT_TTL_MS, attachMessage, createPendingAction, mergeDialogState, type PendingAction } from "../db/conversations";
+import {
+  AWAIT_TTL_MS,
+  attachMessage,
+  createPendingAction,
+  getOpenCard,
+  mergeDialogState,
+  type PendingAction,
+  updateOpenCardPayload,
+} from "../db/conversations";
 import { DEFAULT_DURATION_MIN } from "../db/settings";
 import { type Feature, recordFeature } from "../db/features";
 import { findUserById, type User } from "../db/users";
+import type { TgCallbackQuery } from "../telegram/types";
+import { toRRule } from "../dates/rrule";
 import type { AppContext } from "./context";
 import {
   type CalendarResolution,
   type CreateCardPayload,
   type CreateDraft,
   type CreateOption,
+  isBirthdayOption,
   namedByAlias,
   resolveCalendar,
   resolveDraft,
@@ -83,6 +94,13 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   }
 
   const showCalendar = calendars.filter((c) => c.writable).length > 1;
+  const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
+  const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
+  const fam = familyCardLines(a.draft.family, locale);
+  const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
+  const notDone = notDoneLines(a.notDone, locale);
+  const birthday = res.options.length === 1 && isBirthdayOption(res.options[0]!);
+  const render = (yearly?: boolean) => `${createCard(res.options, "", now.day, locale, showCalendar, overlaps, yearly).text}${tzNote}${fam}${by}${notDone}`;
   const actionId = await createPendingAction(ctx.db, {
     conversationId: a.conversationId,
     userId: user.id,
@@ -95,17 +113,12 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       ...(a.draft.dateCheck ? { dateCheck: a.draft.dateCheck } : {}),
       ...(a.notDone?.length ? { notDone: a.notDone } : {}),
       ...(a.next?.length ? { next: a.next } : {}),
+      ...(birthday ? { yearly: true, yearlyTexts: [render(true), render(false)] as [string, string] } : {}),
     } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
-
-  const overlaps = res.options.length === 1 ? await findOverlaps(provider, res.options[0]!, calendars, locale) : [];
-  const { text, buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps);
-  const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
-  const fam = familyCardLines(a.draft.family, locale);
-  const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
-  const notDone = notDoneLines(a.notDone, locale);
-  const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}${notDone}`, { inline_keyboard: buttons }, { html: true });
+  const { buttons } = createCard(res.options, actionId, now.day, locale, showCalendar, overlaps, birthday ? true : undefined);
+  const sent = await ctx.telegram.sendMessage(chatId, render(birthday ? true : undefined), { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -135,6 +148,25 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
 export function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
   const r = allDay ? (user.settings.allDayReminders ?? []) : user.settings.reminders;
   return r ? { reminders: r } : {};
+}
+
+const YEARLY_RULE = toRRule({ freq: "yearly" }, { day: 0, minutes: 0 }, "UTC", true);
+
+/** «🔁 Каждый год: да / нет» у дня рождения (US-31, US-62) — без захвата карточки; true — нажатие обработано здесь. */
+export async function pressCreateYearly(ctx: AppContext, user: User, cq: TgCallbackQuery, actionId: string, choice: string): Promise<boolean> {
+  if (choice !== "y") return false;
+  const card = await getOpenCard<CreateCardPayload>(ctx.db, actionId, user.id, ctx.clock.now());
+  if (!card || card.action.kind !== CREATE_CARD || card.action.payload.yearly === undefined || !card.action.payload.yearlyTexts) return false;
+  const p = card.action.payload;
+  const next: CreateCardPayload = { ...p, yearly: !p.yearly };
+  const ok = await updateOpenCardPayload(ctx.db, actionId, user.id, ctx.clock.now(), card.json, JSON.stringify(next));
+  await ctx.telegram.answerCallbackQuery(cq.id);
+  if (ok && card.action.messageId) {
+    const today = utcToLocal(ctx.clock.now(), user.tz).day;
+    const { buttons } = createCard(p.options, actionId, today, user.locale, false, [], next.yearly);
+    await ctx.telegram.editMessageText(p.chatId, card.action.messageId, p.yearlyTexts![next.yearly ? 0 : 1], { inline_keyboard: buttons }, { html: true });
+  }
+  return true;
 }
 
 export async function confirmCreate(
@@ -172,7 +204,7 @@ export async function confirmCreate(
     ...(o.end ? { end: o.end } : {}),
     ...(o.location ? { location: o.location } : {}),
     ...(o.description ? { description: o.description } : {}),
-    ...(o.series ? { recurrence: [o.series.rrule] } : {}),
+    ...(o.series ? { recurrence: [o.series.rrule] } : action.payload.yearly ? { recurrence: [YEARLY_RULE] } : {}),
     ...remindersFor(user, o.allDay),
   });
 
@@ -181,7 +213,7 @@ export async function confirmCreate(
   await saveEventFamily(ctx, created.ref, action.payload.family);
   await notifyResponsible(ctx, action.payload.family, action.userId, o);
   const calendarsCount = (await provider.calendars()).filter((c) => c.writable).length;
-  const body = cardBody(o, today, locale, calendarsCount > 1);
+  const body = cardBody(o, today, locale, calendarsCount > 1, action.payload.yearly);
   const undo = await recordUndo(ctx, {
     conversationId: action.conversationId,
     user,
@@ -211,7 +243,11 @@ export async function confirmCreate(
     ctx.clock.now(),
   );
   await dateFixOnCreated(ctx, action, action.payload, Number(choice.slice(1)), created.ref);
-  const features: Feature[] = ["create", ...(o.series ? ["recurring" as const] : []), ...(action.payload.viaAlias ? ["alias" as const] : [])];
+  const features: Feature[] = [
+    "create",
+    ...(o.series || action.payload.yearly ? ["recurring" as const] : []),
+    ...(action.payload.viaAlias ? ["alias" as const] : []),
+  ];
   await recordFeature(ctx.db, user.id, features, ctx.clock.now());
 
   // Ответом считается только reply на этот вопрос (US-30)

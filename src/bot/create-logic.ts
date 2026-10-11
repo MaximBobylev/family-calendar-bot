@@ -84,7 +84,15 @@ export interface CreateCardPayload {
   notDone?: string[];
   /** US-62: неясные строки списка, о которых спросить после этой карточки. */
   next?: MultiItem[];
+  /** День рождения на весь день (US-31): есть — «🔁 Каждый год: да / нет»; тексты карточки с повтором и без. */
+  yearly?: boolean;
+  yearlyTexts?: [string, string];
 }
+
+export const BIRTHDAY = /день рождени|(?<!\p{L})др(?!\p{L})|годовщин|юбиле|birthday|anniversary/iu;
+
+/** С датой и без времени — ежегодное; со временем («в субботу в 15 в кафе») — праздник, разовое. */
+export const isBirthdayOption = (o: CreateOption) => !o.series && o.allDay && o.startDay === o.endDay && BIRTHDAY.test(o.title);
 
 export function namedByAlias(cal: CalendarInfo, name: string | undefined): boolean {
   return !!name && cal.aliases.length > 0 && !findCalendarByName([{ ...cal, aliases: [] }], name);

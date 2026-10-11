@@ -9,14 +9,14 @@ import { t } from "./messages";
 
 export const whenLabel = (o: CreateOption, today: Day, locale: string) => whenOf(o, today, locale);
 
-export function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boolean): string {
+export function cardBody(o: CreateOption, today: Day, locale: string, showCalendar: boolean, yearly?: boolean): string {
   const lines = [`<b>${escapeHtml(o.title)}</b>`];
   if (o.series) {
     const time = o.allDay ? t("allDayLower", locale) : `${hhmm(o.start!.minutes)}–${hhmm(o.end!.minutes)}`;
     lines.push(`🔁 ${escapeHtml(o.series.text)}, ${time}`);
     lines.push(`📅 ${t("seriesNext", locale, { list: o.series.next.map((d) => dateLabel(d, today, locale)).join(" · ") })}`);
   } else {
-    lines.push(`🕒 ${whenLabel(o, today, locale)}`);
+    lines.push(`🕒 ${whenLabel(o, today, locale)}${yearly ? `, ${t("multiEveryYear", locale)}` : ""}`);
     const zone = zoneLine(o, locale);
     if (zone) lines.push(zone);
   }
@@ -33,14 +33,17 @@ export function createCard(
   locale: string,
   showCalendar: boolean,
   overlaps: string[],
+  /** undefined — не день рождения, кнопки повтора нет. */
+  yearly?: boolean,
 ): { text: string; buttons: InlineKeyboardButton[][] } {
   let text: string;
   let buttons: InlineKeyboardButton[][];
   if (options.length === 1) {
     const o = options[0]!;
-    text = `${t(o.series ? "createSeriesConfirm" : "createConfirm", locale)}\n\n${cardBody(o, today, locale, showCalendar)}`;
+    text = `${t(o.series ? "createSeriesConfirm" : "createConfirm", locale)}\n\n${cardBody(o, today, locale, showCalendar, yearly)}`;
     if (overlaps.length) text += `\n\n${t("overlap", locale, { list: overlaps.join(", ") })}`;
     buttons = [
+      ...(yearly === undefined ? [] : [[{ text: t(yearly ? "multiYearlyOn" : "multiYearlyOff", locale), callback_data: callbackData(actionId, "y") }]]),
       [
         { text: t("createButton", locale), callback_data: callbackData(actionId, "c0") },
         { text: t("cancelButton", locale), callback_data: callbackData(actionId, "x") },
