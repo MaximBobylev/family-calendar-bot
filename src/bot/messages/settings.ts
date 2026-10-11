@@ -56,6 +56,15 @@ export const settingsMessages = {
     ru: "Готово: «{name}» теперь также {aliases}. Скажите, например, «поставь в {first} ужин в субботу в 19».",
     en: "Done: “{name}” is now also {aliases}. Try “dinner in {first} on Saturday at 7pm”.",
   },
+  settingsVoiceDone: { ru: "✅ {line}\n<i>Все настройки — /settings</i>", en: "✅ {line}\n<i>All settings — /settings</i>" },
+  settingsVoiceNeedsGoogle: {
+    ru: "Это настройка календаря Google — она появится, когда вы подключите свой календарь: /connect",
+    en: "This is a Google Calendar setting — it'll be available once you connect your calendar: /connect",
+  },
+  settingsVoiceNoCalendar: {
+    ru: "Не нашёл календарь «{name}». Ваши календари: {list}. Можно выбрать в /settings.",
+    en: "I couldn't find the calendar “{name}”. Your calendars: {list}. You can also pick one in /settings.",
+  },
   settingsAliasEmpty: { ru: "Не понял название — попробуйте ещё раз из /settings.", en: "I didn't get the name — try again from /settings." },
   settingsChooseTz: {
     ru: "🌍 <b>Часовой пояс</b>\n\nСейчас: {value}. Выберите город или напишите пояс, например Europe/Berlin или UTC+4.",

@@ -16,9 +16,9 @@ LLM получает текст + контекст (текущие дата/вр
 | `modify_event` | `event_ref`, `scope?`, `reschedule?`, `duration?`, `title?`, `description?`, `location?`, `recurrence?`, `target_calendar?` | `event_ref` + хотя бы одно изменение | по режиму; `following`/`all` — всегда | MVP |
 | `set_reminders` | `event_ref`, `reminders[]` (`minutes`, `method`), `scope?` | оба | по режиму | MVP — реализован как `modify_event`: напоминания, место и описание разбираются из текста детерминированно (`src/nlu/detail-hints.ts`), отдельного tool у LLM нет |
 | `delete_event` | `event_ref` **или** `range`, `scope?` | одно из двух | всегда | MVP |
-| `set_setting` | `setting` (enum), `value` | оба | нет; `confirmation_mode` — да | MVP |
-| `set_calendar_alias` | `calendar`, `alias?`, `make_default?` | `calendar` | нет | MVP |
-| `set_notifications` | `kind` (`today` / `tomorrow` / `week` / `before_event`), `enabled?`, `time?`, `weekday?`, `minutes_before?` | `kind` | нет | MVP |
+| `set_setting` | `setting` (enum), `value` | оба | нет | R2 — **без LLM**, `src/nlu/settings-command.ts` до шага NLU (кейсы `testdata/nlu/settings.yaml`); tool у LLM нет — не узнанная фраза идёт обычным путём: длительность, напоминания по умолчанию, язык |
+| `set_calendar_alias` | `calendar`, `alias?`, `make_default?` | `calendar` | нет | R2 — без LLM, как `set_setting`: «назови календарь X семейным» (без кавычек граница — по списку календарей), «сделай X календарём по умолчанию» |
+| `set_notifications` | `kind` (`today` / `tomorrow` / `week` / `before_event`), `enabled?`, `time?`, `weekday?`, `minutes_before?` | `kind` | нет | R2 — без LLM, как `set_setting`: сводки, «напоминай в телеграме за 15 минут», уведомления об изменениях |
 | `set_timezone` | `place` / `tz`, `mode` (`trip` / `permanent`)?, `until?`, `return_home?` | `place`/`tz` или `return_home` | да (кнопки «на поездку / навсегда», US-07) | R2: сначала **без LLM** — `src/nlu/timezone-command.ts` до шага NLU (город из словаря); не узнал — tool `set_timezone` (`action` trip/move/return/where, `place`, `tz` IANA, `until`): пояс — город из словаря, иначе `tz` модели после проверки `Intl`; не знаем — подсказка про /settings |
 | `refresh_calendars` | — | — | нет | MVP |
 | `undo` | — | — | нет | MVP |

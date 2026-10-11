@@ -1,0 +1,70 @@
+# Фразы о настройках (US-04, US-06; голосом — R2) — разбор без LLM, src/nlu/settings-command.ts. Переносимые данные (ADR-0006).
+#   cmd — ожидаемая команда; null — не настройка (обычная команда, идёт в LLM)
+cases:
+  # Длительность по умолчанию
+  - { text: "По умолчанию ставь встречи на 30 минут", cmd: { kind: duration, minutes: 30 } }
+  - { text: "по умолчанию встречи на полчаса", cmd: { kind: duration, minutes: 30 } }
+  - { text: "Длительность встречи по умолчанию 45 минут", cmd: { kind: duration, minutes: 45 } }
+  - { text: "Длительность по умолчанию — полтора часа", cmd: { kind: duration, minutes: 90 } }
+  - { text: "Ставь события по умолчанию на 2 часа", cmd: { kind: duration, minutes: 120 } }
+  - { text: "Make meetings 30 minutes by default", cmd: { kind: duration, minutes: 30 } }
+  - { text: "Default duration 45 minutes", cmd: { kind: duration, minutes: 45 } }
+  # Напоминания по умолчанию
+  - { text: "По умолчанию напоминай за 15 минут", cmd: { kind: reminders, minutes: [15] } }
+  - { text: "Напоминания по умолчанию за час и за день", cmd: { kind: reminders, minutes: [60, 1440] } }
+  - { text: "По умолчанию без напоминаний", cmd: { kind: reminders, minutes: [] } }
+  - { text: "Напоминания по умолчанию как в гугле", cmd: { kind: reminders, minutes: null } }
+  - { text: "Remind me 10 minutes before by default", cmd: { kind: reminders, minutes: [10] } }
+  # Напоминания в Telegram
+  - { text: "Напоминай в телеграме за 15 минут", cmd: { kind: tg_reminder, minutes: 15 } }
+  - { text: "Не напоминай в телеграме", cmd: { kind: tg_reminder, minutes: 0 } }
+  - { text: "Выключи напоминания в телеграм", cmd: { kind: tg_reminder, minutes: 0 } }
+  - { text: "Remind me in Telegram 30 minutes before", cmd: { kind: tg_reminder, minutes: 30 } }
+  # Другое название календаря
+  - { text: "Назови календарь Family Budget семейный", cmd: { kind: alias, text: "Family Budget семейный" } }
+  - { text: "Назови календарь Family Budget «семейный»", cmd: { kind: alias, calendar: "Family Budget", alias: "семейный" } }
+  - { text: "Назови календарь Family Budget семейным", cmd: { kind: alias, text: "Family Budget семейным" } }
+  - { text: "Называй календарь Работа — офис", cmd: { kind: alias, calendar: "Работа", alias: "офис" } }
+  - { text: "Календарь Family Budget называй общим", cmd: { kind: alias, calendar: "Family Budget", alias: "общий" } }
+  - { text: "Добавь календарю Работа название офис", cmd: { kind: alias, text: "Работа офис" } }
+  - { text: "Call the calendar Family Budget \"family\"", cmd: { kind: alias, calendar: "Family Budget", alias: "family" } }
+  # Календарь по умолчанию
+  - { text: "Сделай рабочий календарём по умолчанию", cmd: { kind: default_calendar, name: "рабочий" } }
+  - { text: "Сделай календарь Family Budget основным", cmd: { kind: default_calendar, name: "календарь Family Budget" } }
+  - { text: "Календарь по умолчанию — семейный", cmd: { kind: default_calendar, name: "семейный" } }
+  - { text: "По умолчанию пиши в общий", cmd: { kind: default_calendar, name: "общий" } }
+  - { text: "Make Work the default calendar", cmd: { kind: default_calendar, name: "Work" } }
+  # Сводки
+  - { text: "Не присылай утреннюю сводку", cmd: { kind: digest, digest: today, on: false } }
+  - { text: "Выключи сводку", cmd: { kind: digest, digest: today, on: false } }
+  - { text: "Присылай сводку в 7:30", cmd: { kind: digest, digest: today, on: true, time: "07:30" } }
+  - { text: "Утренняя сводка в 9", cmd: { kind: digest, digest: today, on: true, time: "09:00" } }
+  - { text: "Включи утреннюю сводку", cmd: { kind: digest, digest: today, on: true } }
+  - { text: "Не присылай вечерний дайджест", cmd: { kind: digest, digest: tomorrow, on: false } }
+  - { text: "Включи сводку на завтра", cmd: { kind: digest, digest: tomorrow, on: true } }
+  - { text: "Присылай недельную сводку по понедельникам", cmd: { kind: digest, digest: week, on: true, day: mon } }
+  - { text: "Выключи недельную сводку", cmd: { kind: digest, digest: week, on: false } }
+  - { text: "Send the morning summary at 8:30", cmd: { kind: digest, digest: today, on: true, time: "08:30" } }
+  - { text: "Turn off the evening summary", cmd: { kind: digest, digest: tomorrow, on: false } }
+  # Язык
+  - { text: "Отвечай по-английски", cmd: { kind: language, locale: en } }
+  - { text: "Говори со мной на английском", cmd: { kind: language, locale: en } }
+  - { text: "Переключись на английский язык", cmd: { kind: language, locale: en } }
+  - { text: "Switch to Russian", cmd: { kind: language, locale: ru } }
+  - { text: "Speak Russian", cmd: { kind: language, locale: ru } }
+  # Уведомления об изменениях
+  - { text: "Не присылай уведомления об изменениях", cmd: { kind: change_notify, on: false } }
+  - { text: "Включи уведомления об изменениях в календаре", cmd: { kind: change_notify, on: true } }
+  - { text: "Turn off change notifications", cmd: { kind: change_notify, on: false } }
+  # Не настройки — обычные команды
+  - { text: "Поставь встречу завтра на 30 минут", cmd: null }
+  - { text: "Поставь созвон по умолчанию завтра в 10", cmd: null }
+  - { text: "Напомни за 15 минут до планёрки", cmd: null }
+  - { text: "Перенеси встречу на полчаса позже", cmd: null }
+  - { text: "Поставь в общий ужин в субботу в 19", cmd: null }
+  - { text: "Что в утренней сводке?", cmd: null }
+  - { text: "Длительность планёрки сделай 30 минут", cmd: null }
+  - { text: "Сделай встречу с Петей на час", cmd: null }
+  - { text: "Пиши в 10 утра отчёт", cmd: null }
+  - { text: "Добавь напоминание за час к ужину", cmd: null }
+  - { text: "Назови встречу «Ревью»", cmd: null }

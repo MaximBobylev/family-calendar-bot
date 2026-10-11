@@ -59,6 +59,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Поручения «Беру / Не могу» (US-91), ответственный и «для кого» (US-92), семейный дайджест (US-93) | `src/bot/assign/*` (разбор фраз, имена с падежами, роли `roleAlias`, расписание напоминаний и эскалации — `planAssignmentJobs` в `logic.ts`, чистый, `test/assign-logic.test.ts`), задачи — `src/jobs/assign.ts`, SQL — `src/db/assignments.ts`, `src/db/event-meta.ts`; дайджест — `src/jobs/family-digest.ts` |
 | Дом, участники, приглашения, групповой чат (US-90, US-94) | `src/bot/household/*` (разбор команд и «обращено к боту» — `logic.ts`, чистый, `test/household-logic.test.ts`), SQL — `src/db/households.ts`; чьи календари — `AppContext.calendarScope` → `with-calendar.ts` |
 | Событие из чужого контента (US-65/66/67) | `src/bot/ingest.ts` (сценарий: пересланное, фото, `.ics`, карточка `ics`), `src/bot/ingest-logic.ts` (дата по предложениям, место, название без LLM; `test/ingest-logic.test.ts`), `src/ics/*` (`test/ics.test.ts`, `testdata/ics/`), `src/vision/understand.ts` |
+| Настройки фразой / голосом (US-04, US-06, R2) | фразы — `src/nlu/settings-command.ts` (без LLM, до шага NLU в `bot/dialog.ts` сразу после фраз о поясе; кейсы `testdata/nlu/settings.yaml`), применение и ответ — `src/bot/settings/voice.ts`, строки значений — `settingLine` в `src/bot/settings/screens.ts` |
 | Сводки «Сегодня» / «Завтра» / «Неделя» (US-70) | `src/jobs/digest.ts` (виды задач, период, тексты «пусто»), `nextWeeklyAt` — `src/dates/daily.ts`, экран — `digestScreen` в `src/bot/settings/screens.ts` |
 | Inline-карточка «📅 Добавить себе» (US-95) | `src/bot/inline/*`: разбор запроса, текст карточки, шаблон Google Calendar, `.ics` — `logic.ts` (чистый, `test/inline-logic.test.ts`); inline-запрос — `query.ts` (из webhook, без inbox); нажатие и `/start add_<токен>` — `press.ts` (зарегистрированные) и `guest.ts` (посторонние — из `gate.ts`, `/ics/<токен>`); SQL — `src/db/inline.ts` |
 | Синхронизация Google, push, опрос, каналы | `src/sync/engine.ts` (задачи `cal_sync`/`cal_push`/`watch_renew`, `applyEntries`), `src/sync/push.ts`, SQL — `src/db/sync.ts`; требования Google — `docs/research/google-push.md` |
@@ -86,7 +87,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/input/message.ts` | Приём сообщения: текст, голосовое, пересланное (→ карточка), прочее — «пока не умею» |
 | `bot/input/voice.ts` | `recognizeVoice`: голосовое → текст (длина/размер, STT-цепочка, журнал, поправки Whisper, «Услышал: …») |
 | `bot/input/limit.ts` | `withinLimit`: лимит LLM/STT на пользователя перед внешним вызовом (tech-debt #4) |
-| `bot/dialog.ts` | Слой до LLM: `/connect`, `/settings`, ответ на вопрос о названии, `awaiting` (время, ввод настроек), отмена карточек, «отмени последнее», поводы переслушать |
+| `bot/dialog.ts` | Слой до LLM: `/connect`, `/settings`, ответ на вопрос о названии, `awaiting` (время, ввод настроек), отмена карточек, «отмени последнее», фразы о поясе и настройках, поводы переслушать |
 | `bot/nlu-step.ts` | Текст → интент через цепочку LLM, лимит, запись в журнал |
 | `bot/route-intent.ts` | `routeIntent`: интент (с поправками по тексту) → обработчик фичи; даты и «что менять» — из текста |
 | `bot/callbacks.ts` | `handleCallback`: кнопки настроек и карточек; `CALENDAR_CARDS` — kind → обработчик |
@@ -128,6 +129,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
 | `bot/settings/screens.ts` | Экраны меню (текст + кнопки), пресеты значений |
+| `bot/settings/voice.ts` | Настройка фразой (текстом или голосом): применяет сразу, отвечает новым значением; имя календаря без кавычек — граница по списку календарей |
 | `bot/settings/common.ts` | Показ меню, список календарей, смена сводки, «Подключить» (`sendReconnect`) |
 | `bot/settings/labels.ts` | Подписи: длительность, напоминания («за 1 ч», «накануне в 9:00») |
 | `bot/undo.ts` | US-61: отмена последнего действия |
@@ -144,6 +146,7 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `nlu/intent-overrides.ts` | Детерминированные поправки интента («перенеси», «отмени», «когда …?») |
 | `nlu/modify-hints.ts` | Что именно менять/какое событие — из текста, без LLM |
 | `nlu/detail-hints.ts` | Место, описание, напоминания из фразы |
+| `nlu/settings-command.ts` | Фразы о настройках без LLM: настройка — только если кроме значения одни служебные слова |
 | **dates/** | Чистый детерминированный парсер (портируемый, ADR-0005 п.8, ADR-0006) |
 | `dates/index.ts` | `parseDateFragment` — вход парсера |
 | `dates/types.ts` | Контракт = формат золотого корпуса |

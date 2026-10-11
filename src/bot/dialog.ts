@@ -23,6 +23,7 @@ import { parseCommandIntent } from "./nlu-step";
 import { routeIntent } from "./route-intent";
 import { sendReconnect, showSettings } from "./settings/common";
 import { handleSettingsInput } from "./settings/input";
+import { handleSettingsCommand } from "./settings/voice";
 import { attachUndoMessage, recordUndo, undoLast } from "./undo";
 import { answerTripUntil, handleTimezoneCommand } from "./timezone";
 import { escalateVoice } from "./voice-rehear";
@@ -123,6 +124,7 @@ export async function runCommand(
   }
 
   if (await handleTimezoneCommand(ctx, user, chatId, conversationId, text)) return;
+  if (await handleSettingsCommand(ctx, user, chatId, text)) return;
 
   const nowMs = ctx.clock.now();
   const prevVoice = state.lastVoice;

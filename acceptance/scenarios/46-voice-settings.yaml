@@ -1,0 +1,74 @@
+# US-04, US-06 (R2): настройки фразой — текстом или голосом, без LLM; применяются сразу, как кнопка в /settings.
+# «Сейчас» — сб 10 октября 2026, 10:00 МСК.
+
+- id: voice-settings-duration-alias-default-calendar
+  story: US-06
+  steps:
+    - &setup
+      - clock: "2026-10-10T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+            - { id: budget@group.calendar.google.com, summary: "Family Budget", accessRole: writer, timeZone: Europe/Moscow }
+      - llm:
+          "Поставь в семейный завтра в 12 стрижку": { tool: create_event, args: { start: "завтра в 12", title: "Стрижку", calendar: "семейный" } }
+          "Поставь завтра в 15 созвон": { tool: create_event, args: { start: "завтра в 15", title: "Созвон" } }
+    - voice: { from: 1001, transcript: "По умолчанию ставь встречи на 30 минут." }
+    - expect_telegram:
+        - { text_contains: ["🎙", "По умолчанию ставь встречи на 30 минут"] }
+        - { text_contains: ["✅ ⏱ Длительность встречи: 30 мин", "Все настройки — /settings"] }
+    - telegram: { from: 1001, text: "Назови календарь Family Budget семейным" }
+    - expect_telegram:
+        - { text_contains: ["«Family Budget» теперь также «семейный»"] }
+    - expect_llm_requests: 0
+    - telegram: { from: 1001, text: "Поставь в семейный завтра в 12 стрижку" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "вс, 11 октября, 12:00–12:30", "🗓 Family Budget"] }
+    - press: "Отмена"
+    - telegram: { from: 1001, text: "Сделай семейный календарём по умолчанию" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["✅ 🗓 Календарь по умолчанию: Family Budget"] }
+    - telegram: { from: 1001, text: "Поставь завтра в 15 созвон" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "вс, 11 октября, 15:00–15:30", "🗓 Family Budget"] }
+    - press: "Создать"
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: budget@group.calendar.google.com
+        count: 1
+        events: [{ summary: "Созвон", start: "2026-10-11T15:00:00+03:00", end: "2026-10-11T15:30:00+03:00" }]
+
+- id: voice-settings-digests-language-unknown-calendar
+  story: US-04
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Сделай рабочий календарём по умолчанию" }
+    - expect_telegram:
+        - { text_contains: ["Не нашёл календарь «рабочий»", "«Иван», «Family Budget»"] }
+    - telegram: { from: 1001, text: "Присылай сводку в 7:30" }
+    - expect_telegram:
+        - { text_contains: ["✅ ☀️ Утренняя сводка: в 07:30"] }
+    - telegram: { from: 1001, text: "Не присылай вечерний дайджест" }
+    - expect_telegram:
+        - { text_contains: ["✅ 🌙 Сводка на завтра: выключена"] }
+    - telegram: { from: 1001, text: "Присылай недельную сводку по понедельникам" }
+    - expect_telegram:
+        - { text_contains: ["✅ 🗓 Сводка на неделю: пн в 08:00"] }
+    - telegram: { from: 1001, text: "Напоминай в телеграме за 15 минут" }
+    - expect_telegram:
+        - { text_contains: ["✅ ⏰ Напоминать в Telegram: за 15 мин"] }
+    - telegram: { from: 1001, text: "Отвечай по-английски" }
+    - expect_telegram:
+        - { text_contains: ["✅ 🗣 Language: English", "All settings — /settings"] }
+    - expect_llm_requests: 0
+    - telegram: { from: 1001, text: "/settings" }
+    - expect_telegram:
+        - { text_contains: ["Morning summary: at 07:30", "Week summary: Mon at 08:00", "Telegram reminders: 15 min before", "Language: English"] }
+    # Утренняя сводка — в 07:30
+    - clock: "2026-10-11T04:30:00Z"
+    - tick: true
+    - expect_telegram:
+        - { text_contains: ["Good morning"] }

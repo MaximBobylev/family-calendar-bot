@@ -39,6 +39,31 @@ function tzLine(ctx: AppContext, user: User): string {
   return t("settingsTzTrip", l, { tz: trip.tz, time: nowIn(ctx, trip.tz), until, home: user.home_tz });
 }
 
+export type SettingKey = "duration" | "reminders" | "digest" | "tomorrowDigest" | "weekDigest" | "language" | "changeNotify" | "tgReminder";
+
+export function settingLine(user: User, key: SettingKey): string {
+  const l = user.locale;
+  const s = user.settings;
+  switch (key) {
+    case "duration":
+      return t("settingsDuration", l, { value: durationLabel(s.durationMin ?? DEFAULT_DURATION_MIN, l) });
+    case "reminders":
+      return t("settingsReminders", l, { value: remindersLabel(s.reminders, l) });
+    case "digest":
+      return s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME });
+    case "tomorrowDigest":
+      return t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l);
+    case "weekDigest":
+      return t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l);
+    case "language":
+      return t("settingsLanguage", l);
+    case "changeNotify":
+      return s.changeNotifyOff ? t("settingsNotifyOff", l) : t("settingsNotifyOn", l);
+    case "tgReminder":
+      return s.tgReminderMin ? t("settingsTgReminderOn", l, { minutes: String(s.tgReminderMin) }) : t("settingsTgReminderOff", l);
+  }
+}
+
 export interface Screen {
   text: string;
   buttons: InlineKeyboardButton[][];
@@ -59,15 +84,15 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
     "",
     t("settingsCalendar", l, { value: escapeHtml(def?.title ?? t("settingsNone", l)) }),
     tzLine(ctx, user),
-    t("settingsDuration", l, { value: durationLabel(s.durationMin ?? DEFAULT_DURATION_MIN, l) }),
-    t("settingsReminders", l, { value: remindersLabel(s.reminders, l) }),
+    settingLine(user, "duration"),
+    settingLine(user, "reminders"),
     t("settingsAllDayReminders", l, { value: allDayRemindersLabel(s.allDayReminders, l) }),
-    s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
-    t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
-    t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
-    t("settingsLanguage", l),
-    s.changeNotifyOff ? t("settingsNotifyOff", l) : t("settingsNotifyOn", l),
-    s.tgReminderMin ? t("settingsTgReminderOn", l, { minutes: String(s.tgReminderMin) }) : t("settingsTgReminderOff", l),
+    settingLine(user, "digest"),
+    settingLine(user, "tomorrowDigest"),
+    settingLine(user, "weekDigest"),
+    settingLine(user, "language"),
+    settingLine(user, "changeNotify"),
+    settingLine(user, "tgReminder"),
     "",
     `<i>${t("settingsHint", l)}</i>`,
     `<i>${t("settingsDisconnectHint", l)}</i>`,
@@ -86,17 +111,16 @@ export function mainScreen(ctx: AppContext, user: User, calendars: CalendarInfo[
 
 function memberScreen(ctx: AppContext, user: User): Screen {
   const l = user.locale;
-  const s = user.settings;
   const text = [
     t("settingsTitle", l),
     "",
     tzLine(ctx, user),
-    s.digestOff ? t("settingsDigestOff", l) : t("settingsDigest", l, { time: s.digestTime ?? DEFAULT_DIGEST_TIME }),
-    t(s.tomorrowDigest ? "settingsTomorrowDigest" : "settingsTomorrowDigestOff", l),
-    t(s.weekDigest === "sun" ? "settingsWeekDigestSun" : s.weekDigest === "mon" ? "settingsWeekDigestMon" : "settingsWeekDigestOff", l),
-    t("settingsLanguage", l),
-    s.changeNotifyOff ? t("settingsNotifyOff", l) : t("settingsNotifyOn", l),
-    s.tgReminderMin ? t("settingsTgReminderOn", l, { minutes: String(s.tgReminderMin) }) : t("settingsTgReminderOff", l),
+    settingLine(user, "digest"),
+    settingLine(user, "tomorrowDigest"),
+    settingLine(user, "weekDigest"),
+    settingLine(user, "language"),
+    settingLine(user, "changeNotify"),
+    settingLine(user, "tgReminder"),
     "",
     `<i>${t("settingsMemberHint", l)}</i>`,
   ].join("\n");
