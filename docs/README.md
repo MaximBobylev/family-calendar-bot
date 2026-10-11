@@ -39,6 +39,8 @@
 | [research/date-parser-architecture-review.md](research/date-parser-architecture-review.md) | Архитектурное ревью парсера дат: молча неверные даты, сверка с LLM, шаги (ждёт решения) |
 | [research/llm-date-resolution-eval.md](research/llm-date-resolution-eval.md) | Может ли DeepSeek разрешать даты без грамматики (шаг 4 ревью): A «LLM разрешает» 85%, B «LLM структурирует, резолвит наш код» 96% на корпусе; отложенный набор вне корпуса; рекомендация (2026-10-08) |
 | [research/multi-event-scenarios.md](research/multi-event-scenarios.md) | Несколько событий в одном сообщении (US-62, R2): 11 пользовательских сценариев с фразами и ожидаемым поведением — для UX и будущих приёмочных сценариев |
+| [research/multi-event-eval.md](research/multi-event-eval.md) | Несколько событий в одном сообщении (US-62): замер Nemotron / Qwen3 на 15 фразах (теряют события: 33–46 % верно, с правилом в промпте у Qwen 71 %) против своего делителя (24 / 24) — основание ADR-0008 |
+| [research/multi-event-plan.md](research/multi-event-plan.md) | План реализации US-62 для разработчика: делитель, payload карточки, переключатели, идемпотентность, отмена пачки, тексты, сценарии `47-*`; срез S1 (базовый случай владельца) и полный S2 |
 | [research/qa-r1-nlu.md](research/qa-r1-nlu.md) | QA разбора фраз R1 (2026-10-06): 110 фраз (поручения, ответственный, «мои дела», поиск) на Nemotron / Gemini / Gemma с правилами — точность, классы ошибок, исправления по приоритету |
 | [research/hosting-economics.md](research/hosting-economics.md) | Экономика хостинга: Cloudflare vs VPS + Go, AI-провайдеры |
 | [research/monetization-market.md](research/monetization-market.md) | Обзор рынка: модели монетизации и цены |
@@ -51,6 +53,7 @@
 | [adr/0005](adr/0005-runtime-and-processing.md) | Cloudflare Workers + TS, inbox, push-синхронизация, детерминированный разбор дат |
 | [adr/0006](adr/0006-portable-acceptance-tests.md) | Переносимые приёмочные тесты (данные + чёрный ящик) |
 | [adr/0007](adr/0007-one-bot-localization.md) | Один бот + локализация через Bot API; боты по языкам — при выходе на отдельный рынок (R3) |
+| [adr/0008](adr/0008-multi-event-split.md) | Несколько событий в одном сообщении: делит наш код по датам, LLM даёт названия; одна карточка-список, id события = карточка + строка, отмена пачки одной записью |
 
 ## Глоссарий
 

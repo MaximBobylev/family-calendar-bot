@@ -175,6 +175,24 @@ cases:
   - { id: x03, cat: multiple, text: "Поставь встречу с Машей в пятницу в 11 и созвон с Петей в понедельник в 10", intent: multiple }
   - { id: x04, cat: multiple, text: "Перенеси обед на 14 и покажи что у меня завтра", intent: [multiple, modify_event] }
 
+  # --- несколько созданий в одном сообщении (US-62; замер — docs/research/multi-event-eval.md) ----------
+  # multi_create: ждём по вызову create_event на событие; multi_single: одно событие, делить нельзя.
+  - { id: me01, cat: multi_create, text: "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани", intent: multiple }
+  - { id: me02, cat: multi_create, text: "Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря", intent: multiple }
+  - { id: me03, cat: multi_create, text: "В пятницу встреча с Петей в 10 и созвон с Машей в 15", intent: multiple }
+  - { id: me04, cat: multi_create, text: "Завтра в 9 планёрка и ещё созвон с Олегом", intent: multiple }
+  - { id: me05, cat: multi_create, text: "Напоминаем: в среду в 17 хор, в четверг в 18 сольфеджио, в субботу в 11 концерт", intent: multiple }
+  - { id: me06, cat: multi_create, text: "Поставь обед с Аней в среду в 13 и удали планёрку в четверг", intent: multiple }
+  - { id: me07, cat: multi_create, text: "В четверг в 16 стоматолог Вани, отводит папа, и в субботу в 10 плавание Маши, всё в семейный календарь", intent: multiple }
+  - { id: me08, cat: multi_create, text: "Во вторник в 19 родительское собрание, в среду в 8 анализы, в четверг в 20 кино", intent: multiple }
+  - { id: me09, cat: multi_create, text: "Dentist on Friday at 10 and football on Saturday at noon", intent: multiple }
+  - { id: me10, cat: multi_create, text: "В пятницу и в субботу в 10 футбол", intent: multiple }
+  - { id: me11, cat: multi_create, text: "Пн 17:00 — танцы, Вт 18:00 — английский, Ср 16:00 — рисование", intent: multiple }
+  - { id: me12, cat: multi_create, text: "запиши завтра в восемь утра анализы потом в три часа забрать машу из садика и в пятницу в семь вечера ужин у родителей", intent: multiple }
+  - { id: me13, cat: multi_single, text: "Встреча с Петей и Машей в пятницу в 10", intent: create_event, title: ["Встреча с Петей и Машей"] }
+  - { id: me14, cat: multi_single, text: "Созвон в среду или в четверг в 15", intent: create_event }
+  - { id: me15, cat: multi_single, text: "Тренировка каждый вторник и четверг в 19", intent: create_event, title: "Тренировка" }
+
   # --- не про календарь ---------------------------------------------------------------------------
   - { id: n01, cat: unsupported, text: "Какая погода завтра?", intent: unsupported }
   - { id: n02, cat: unsupported, text: "Привет, как дела?", intent: unsupported }

@@ -1,4 +1,4 @@
-// Варианты промпта для scripts/eval-intents.ts. Промпты A–D заморожены; E, F, W — живой прод-промпт из src/nlu/intents.ts.
+// Варианты промпта для scripts/eval-intents.ts. Промпты A–D заморожены; E, F, W — живой прод-промпт из src/nlu/intents.ts, M и MW — он же с правилом деления (US-62).
 
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_NO_WHEN, TOOLS, TOOLS_NO_WHEN } from "../src/nlu/intents";
 import type { ToolDefinition } from "../src/nlu/llm";
@@ -171,6 +171,18 @@ const F_TOOLS: ToolDefinition[] = TOOLS.map((t) => {
   return { ...t, function: { ...t.function, parameters: { ...params, properties: { calendar, ...rest } } } };
 });
 
+const MULTI_RULE = `Several events in one message → one create_event call PER EVENT, in the order said, none skipped: lists («в понедельник бассейн, во вторник рисование»), an event without a date («и ещё позвонить маме» → create_event with empty start), one name on two days («в субботу и в воскресенье дача» → two calls). Each start holds only that event's own date/time words, verbatim.
+Still ONE event: several people («обед с Олей и Ирой»), a range («с 10 до 12»), alternatives («в среду или в четверг»), a recurrence («каждый вторник и четверг»).
+`;
+const MULTI_EXAMPLES = `
+"Стоматолог в понедельник в 9, а во вторник в 18 бассейн" → create_event {"start":"в понедельник в 9","title":"Стоматолог"} + create_event {"start":"во вторник в 18","title":"Бассейн"}
+"В четверг в 12 обед, в 15 созвон, в 19 кино" → create_event {"start":"В четверг в 12","title":"Обед"} + create_event {"start":"в 15","title":"Созвон"} + create_event {"start":"в 19","title":"Кино"}
+"Завтра в 11 врач и ещё позвонить бабушке" → create_event {"start":"Завтра в 11","title":"Врач"} + create_event {"start":"","title":"Позвонить бабушке"}
+"Совещание с Олегом и Ирой в среду в 14" → create_event {"start":"в среду в 14","title":"Совещание с Олегом и Ирой"}   (one event, two people)`;
+const withMulti = (prompt: string) => prompt.replace("one tool call per request. ", `one tool call per request.\n${MULTI_RULE}`) + MULTI_EXAMPLES;
+const M_PROMPT = withMulti(SYSTEM_PROMPT);
+const MW_PROMPT = withMulti(SYSTEM_PROMPT_NO_WHEN);
+
 export const VARIANTS: Record<string, Variant> = {
   A: { id: "A", label: "прод до 2026-10-05", systemPrompt: A_PROMPT, tools: TOOLS, examples: examplesOf(A_PROMPT) },
   B: { id: "B", label: "правила в стиле критики", systemPrompt: B_PROMPT, tools: TOOLS, examples: examplesOf(B_PROMPT) },
@@ -178,5 +190,7 @@ export const VARIANTS: Record<string, Variant> = {
   E: { id: "E", label: "A + точечные контрастные примеры", systemPrompt: E_PROMPT, tools: TOOLS, examples: examplesOf(E_PROMPT) },
   F: { id: "F", label: "E + calendar первым в схеме", systemPrompt: E_PROMPT, tools: F_TOOLS, examples: examplesOf(E_PROMPT) },
   W: { id: "W", label: "E без when (прод Workers AI)", systemPrompt: SYSTEM_PROMPT_NO_WHEN, tools: TOOLS_NO_WHEN, examples: examplesOf(SYSTEM_PROMPT_NO_WHEN) },
+  M: { id: "M", label: "E + правило и примеры нескольких событий (US-62)", systemPrompt: M_PROMPT, tools: TOOLS, examples: examplesOf(M_PROMPT) },
+  MW: { id: "MW", label: "W + правило и примеры нескольких событий (US-62)", systemPrompt: MW_PROMPT, tools: TOOLS_NO_WHEN, examples: examplesOf(MW_PROMPT) },
   D: { id: "D", label: "C + улучшенные описания полей, start необязателен", systemPrompt: C_PROMPT, tools: D_TOOLS, examples: examplesOf(C_PROMPT) },
 };
