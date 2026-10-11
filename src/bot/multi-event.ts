@@ -41,6 +41,7 @@ import {
   MAX_FORWARD,
   MAX_OWN,
   MULTI_CARD,
+  RESPONSIBLE_FOR_ALL,
   type MultiCardPayload,
   type MultiItem,
   mainButton,
@@ -71,7 +72,9 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
   const tz = user.tz;
   const nowMs = ctx.clock.now();
   const now = utcToLocal(nowMs, tz);
-  const families = await Promise.all(a.pieces.map((p) => (isCreatePiece(p) ? familyHints(ctx, user.id, p.text) : { remove: [] })));
+  const families = await Promise.all(
+    a.pieces.map((p) => (isCreatePiece(p) ? familyHints(ctx, user.id, p.text.replace(RESPONSIBLE_FOR_ALL, " ")) : { remove: [] })),
+  );
   let conversationDay: string | undefined;
   if (!a.forward) {
     const state = await getDialogState(ctx.db, a.conversationId, user.id);

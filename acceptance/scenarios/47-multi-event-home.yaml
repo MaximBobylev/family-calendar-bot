@@ -1,0 +1,68 @@
+# US-62 + US-92: несколько событий в доме — общий календарь, названный один раз («всё в семейный»), и ответственный
+# у своего дела («отводит Дима») или у всех («отводит Дима на оба»). «Сейчас» — пн 12 октября 2026, 10:00 МСК.
+# Дом «Бобылевы»: Иван 1001 (владелец, Google; «папа»), Дима 1002 (свой Google); дети — Маша и Ваня; общий — «Семья».
+
+- id: multi-calendar-responsible
+  story: US-62
+  steps:
+    - &home
+      - clock: "2026-10-12T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+            - { id: family@group.calendar.google.com, summary: "Семья", accessRole: writer, timeZone: Europe/Moscow, events: [] }
+      - connected_user:
+          from: 1002
+          email: dima@gmail.com
+          calendars:
+            - { id: dima@gmail.com, summary: "Дима", accessRole: owner, primary: true, timeZone: Europe/Moscow }
+      - telegram: { from: 1001, text: "/home create Бобылевы" }
+      - telegram: { from: 1001, text: "/home name Иван, муж, папа" }
+      - telegram: { from: 1001, text: "/home kid Маша" }
+      - telegram: { from: 1001, text: "/home kid Ваня" }
+      - telegram: { from: 1001, text: "/home invite Дима, брат" }
+      - capture_telegram: { dima: "start=home_([A-Za-z0-9_-]+)" }
+      - telegram: { from: 1002, first_name: "Дима", text: "/start home_{{dima}}" }
+      - expect_telegram_count: 7
+      - llm:
+          "В четверг в 16 стоматолог Вани, отводит Дима, и в субботу в 10 плавание Маши, всё в семейный календарь":
+            { tool: create_event, args: { start: "в четверг в 16", title: "Стоматолог Вани" } }
+          "В четверг в 16 стоматолог Вани и в субботу в 10 плавание Маши, отводит Дима на оба, всё в семейный календарь":
+            { tool: create_event, args: { start: "в четверг в 16", title: "Стоматолог Вани" } }
+    - telegram: { from: 1001, text: "В четверг в 16 стоматолог Вани, отводит Дима, и в субботу в 10 плавание Маши, всё в семейный календарь" }
+    # Календарь назван один раз — у обоих, строкой под заголовком; «отводит Дима» — только у стоматолога
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains:
+            - "Создать эти события?\n🗓 Семья\n\n"
+            - "✅ 1. <b>Стоматолог Вани</b>\nчт, 15 октября, 16:00–17:00 · 👤 Отводит: Дима\n\n"
+            - "✅ 2. <b>Плавание Маши</b>\nсб, 17 октября, 10:00–11:00"
+          text_not_contains: ["отводит Дима", "семейный календарь"]
+    - press: { button: "Создать все (2)", from: 1001 }
+    # Диме — «➕ Новое» по общему календарю и лично «Отводите вы» только про стоматолога (US-92)
+    - expect_telegram:
+        - { chat_id: 1002, text_contains: ["➕ Новое: «Стоматолог Вани»"] }
+        - { chat_id: 1002, text_contains: ["🚗 Отводите вы: Стоматолог (Ваня) — чт, 15 октября 16:00"] }
+        - { chat_id: 1002, text_contains: ["➕ Новое: «Плавание Маши»"] }
+        - { chat_id: 1001, method: editMessageText, text_contains: ["✅ Создано\n🗓 Семья", "Стоматолог Вани</a> — чт, 15 октября, 16:00–17:00 · 👤 Отводит: Дима"], buttons: ["↩ Отменить все (2)"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: family@group.calendar.google.com
+        count: 2
+        events:
+          - { summary: "Стоматолог Вани", start: "2026-10-15T16:00:00+03:00", end: "2026-10-15T17:00:00+03:00" }
+          - { summary: "Плавание Маши", start: "2026-10-17T10:00:00+03:00", end: "2026-10-17T11:00:00+03:00" }
+
+- id: multi-responsible-for-both
+  story: US-62
+  steps:
+    - *home
+    - telegram: { from: 1001, text: "В четверг в 16 стоматолог Вани и в субботу в 10 плавание Маши, отводит Дима на оба, всё в семейный календарь" }
+    - expect_telegram:
+        - chat_id: 1001
+          text_contains:
+            - "🗓 Семья"
+            - "чт, 15 октября, 16:00–17:00 · 👤 Отводит: Дима"
+            - "сб, 17 октября, 10:00–11:00 · 👤 Отводит: Дима"

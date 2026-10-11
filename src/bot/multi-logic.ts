@@ -1,7 +1,7 @@
 // Строки карточки-списка из кусков делителя и ответа LLM, переключатели, лимиты — без ввода-вывода (ADR-0008).
 // Даты каждой строки — наш разбор куска; от LLM — название, календарь и второе мнение о дате.
 
-import { titleScore } from "../calendar/match";
+import { findCalendarByName, titleScore } from "../calendar/match";
 import type { CalendarEvent, CalendarInfo, EventRef } from "../calendar/model";
 import { parseDateFragment } from "../dates";
 import { type Day, formatDate, formatMoment, localToUtc, minutesBetween, type Moment, parseLocal } from "../dates/calendar";
@@ -127,8 +127,41 @@ export interface BuildInput {
 
 export type BuildResult = { items: BuiltItem[]; viaAlias: boolean } | { calendarError: Exclude<CalendarResolution, CalendarInfo> };
 
+// «…, всё в семейный календарь» — календарь для всех строк без своего (US-62, общий календарь)
+const SHARED_CALENDAR = /^(?:и\s+)?(?:(всё|все|оба|обе|both|all|everything)\s+)?(?:в|во|to|into|in)\s+(.+)$/iu;
+/** «отводит папа на оба / везде» — ответственный для всех строк (US-62). */
+export const RESPONSIBLE_FOR_ALL = /(?<!\p{L})(?:на\s+(?:оба|обе|все|всех)|везде|for\s+both|for\s+all)(?!\p{L})/iu;
+
+function sharedCalendar(pieces: Piece[], calls: (CreateEventIntent | undefined)[], calendars: CalendarInfo[]): { name?: string; clause?: string } {
+  const creates = pieces.map((p, i) => [p, i] as const).filter(([p]) => isCreatePiece(p));
+  const lastIdx = creates.at(-1)?.[1];
+  for (const [p, i] of creates) {
+    for (const chunk of p.text.split(/\s*,\s*/).slice(1)) {
+      const m = SHARED_CALENDAR.exec(chunk.trim());
+      if (!m || !(m[1] || i === lastIdx)) continue;
+      const cal = findCalendarByName(calendars, m[2]!);
+      if (cal) return { name: cal.title, clause: chunk.trim() };
+    }
+  }
+  const named = [...new Set(calls.flatMap((c) => (c?.calendar ? [c.calendar] : [])))];
+  return named.length === 1 ? { name: named[0] } : {};
+}
+
+function withResponsibleForAll(pieces: Piece[], families: BuildInput["families"]): BuildInput["families"] {
+  const lead = pieces.findIndex((p, i) => isCreatePiece(p) && RESPONSIBLE_FOR_ALL.test(p.text) && families[i]?.family?.responsibleUserId);
+  const who = lead >= 0 ? families[lead]!.family! : undefined;
+  if (!who) return families;
+  return families.map((f, i) =>
+    !isCreatePiece(pieces[i]!) || f.family?.responsibleUserId
+      ? f
+      : { ...f, family: { ...f.family, responsibleUserId: who.responsibleUserId!, ...(who.responsibleName ? { responsibleName: who.responsibleName } : {}) } },
+  );
+}
+
 export function buildItems(a: BuildInput): BuildResult {
   const base = a.refNow ?? a.now;
+  const shared = sharedCalendar(a.pieces, a.calls, a.calendars);
+  const families = withResponsibleForAll(a.pieces, a.families);
   const items: BuiltItem[] = [];
   const seen = new Set<string>();
   let viaAlias = false;
@@ -138,9 +171,10 @@ export function buildItems(a: BuildInput): BuildResult {
     if (!isCreatePiece(piece)) continue;
     const source = piece.borrowFrom !== undefined ? (a.pieces[piece.borrowFrom] ?? piece) : piece;
     const call = a.calls[piece.borrowFrom ?? i];
-    const fam = a.families[i] ?? { remove: [] };
+    const fam = families[i] ?? { remove: [] };
     const famText = fam.remove.reduce((s, r) => s.replace(r, " "), piece.text);
     const fragments = [
+      shared.clause,
       piece.point,
       ...(piece.pointParts ?? []),
       source.point,
@@ -172,7 +206,7 @@ export function buildItems(a: BuildInput): BuildResult {
       ...(title ? { title } : {}),
       ...((piece.duration ?? call?.duration) ? { durationText: piece.duration ?? call?.duration } : {}),
       ...(call?.allDay || looksAllDay(famText) || (title && BIRTHDAY.test(title)) ? { allDay: true } : {}),
-      ...(call?.calendar ? { calendar: call.calendar } : {}),
+      ...((call?.calendar ?? shared.name) ? { calendar: call?.calendar ?? shared.name } : {}),
       ...(call?.location ? { location: call.location } : {}),
       ...(a.description ? { description: a.description } : {}),
       ...(fam.family ? { family: fam.family } : {}),
