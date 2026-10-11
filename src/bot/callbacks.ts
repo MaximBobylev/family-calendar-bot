@@ -18,6 +18,8 @@ import { ICS_CARD, confirmIcs, type IcsCardPayload } from "./ingest";
 import { parseCallbackData } from "./keyboards";
 import { t } from "./messages";
 import { MODIFY_CARD, confirmModify, proposeChange } from "./modify-event";
+import { confirmMulti, pressMulti } from "./multi-event";
+import { MULTI_CARD, type MultiCardPayload } from "./multi-logic";
 import { handleSettingsCallback, parseSettingsCallback } from "./settings/callbacks";
 import { UNDO_CARD, performUndo } from "./undo";
 import { withCalendar } from "./with-calendar";
@@ -32,6 +34,7 @@ const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
   [UNDO_CARD, (ctx, provider, user, action) => performUndo(ctx, provider, user, action as Parameters<typeof performUndo>[3])],
   [DELETE_CARD, (ctx, provider, user, action, choice) => confirmDelete(ctx, provider, user, action as Parameters<typeof confirmDelete>[3], choice)],
   [ICS_CARD, (ctx, provider, user, action, choice) => confirmIcs(ctx, provider, user, action as PendingAction<IcsCardPayload>, choice)],
+  [MULTI_CARD, (ctx, provider, user, action, choice) => confirmMulti(ctx, provider, user, action as PendingAction<MultiCardPayload>, choice)],
   [
     PICK_CARD,
     async (ctx, provider, user, action, choice) => {
@@ -44,11 +47,11 @@ const CALENDAR_CARDS = new Map<string, CalendarCardHandler>([
 ]);
 
 /**
- * Повтор после умершего обработчика безопасен: create — свой id события (повтор → 409 → успех), modify/delete/undo —
+ * Повтор после умершего обработчика безопасен: create и multi — свой id события (повтор → 409 → успех), modify/delete/undo —
  * etag (уже применённое — «изменили»/«уже удалена», без второго действия), pick — лишь снова показывает карточку.
  * forward и disconnect не повторяем: честное «не завершилось, повторите команду».
  */
-const RETRYABLE = new Set([CREATE_CARD, MODIFY_CARD, DELETE_CARD, UNDO_CARD, PICK_CARD, ICS_CARD]);
+const RETRYABLE = new Set([CREATE_CARD, MODIFY_CARD, DELETE_CARD, UNDO_CARD, PICK_CARD, ICS_CARD, MULTI_CARD]);
 
 const BUSY_ANSWER = {
   inProgress: "cardInProgress",
@@ -72,6 +75,7 @@ export async function handleCallback(ctx: AppContext, user: User, cq: TgCallback
     await ctx.telegram.answerCallbackQuery(cq.id);
     return;
   }
+  if (await pressMulti(ctx, user, cq, parsed.actionId, parsed.choice)) return;
   const claim = await claimCard(ctx.db, parsed.actionId, user.id, ctx.clock.now(), (kind) => RETRYABLE.has(kind));
   if (!claim.ok) {
     const key = BUSY_ANSWER[claim.verdict];

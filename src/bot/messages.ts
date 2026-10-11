@@ -12,6 +12,7 @@ import { ingestMessages } from "./messages/ingest";
 import { inlineMessages } from "./messages/inline";
 import { inputMessages } from "./messages/input";
 import { modifyMessages } from "./messages/modify";
+import { multiMessages } from "./messages/multi";
 import { notifyMessages } from "./messages/notify";
 import { readMessages } from "./messages/read";
 import { settingsMessages } from "./messages/settings";
@@ -36,6 +37,7 @@ export const messages = {
   ...notifyMessages,
   ...assignMessages,
   ...helpMessages,
+  ...multiMessages,
 };
 
 export type MessageKey = keyof typeof messages;

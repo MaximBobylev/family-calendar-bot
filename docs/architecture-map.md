@@ -45,7 +45,8 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | Даты из всего сообщения, название без дат | `src/dates/extract.ts` + `testdata/extract/*.yaml` |
 | Справка `/help`, приветствие `/start` | `src/bot/help.ts`, тексты — `src/bot/messages/help.ts`; меню команд — `scripts/deploy.ts` (`setMyCommands`) |
 | Тексты ответов бота | `src/bot/messages/*.ts` — словарь RU/EN по областям (новый текст — в файл своей области), `t()` и `MessageKey` — `src/bot/messages.ts`; форматирование — `src/bot/format.ts`, `format-events.ts` |
-| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/db/conversations.ts` (pending_actions), `src/db/card-status.ts` (статусы, повтор), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`, `RETRYABLE`) |
+| Несколько событий в одном сообщении (US-62, ADR-0008) | делитель — `src/bot/multi-split.ts` (`testdata/split/cases.yaml`, `test/multi-split.test.ts`), строки и переключатели — `multi-logic.ts`, текст — `multi-view.ts`, сценарий — `multi-event.ts`; вход — `routeMulti` в `route-intent.ts`, пересланное — `ingest.ts` (`multiForwardPieces`); сценарии `47-multi-event*.yaml` |
+| Кнопки и карточки подтверждения | `src/bot/keyboards.ts`, `src/bot/callback-data.ts` (формат `pa:<id>:<выбор>`), `src/db/conversations.ts` (pending_actions), `src/db/card-status.ts` (статусы, повтор), `src/bot/callbacks.ts` (`handleCallback`, `CALENDAR_CARDS`, `RETRYABLE`) |
 | Качество дат: сверка с LLM и правки после карточки | лог `date_check` (`bot/route-intent.ts`, `bot/ingest.ts`), `date_fix` — `src/bot/date-fix.ts`, сводка — `/admin/usage#date-fix` |
 | Учёт функций (US-64) | `src/db/features.ts` (`Feature`, `recordFeature` — вызывать после успешного действия), сводка — `/admin/usage` |
 | Настройки пользователя | `src/bot/settings/*` (экраны, кнопки, ввод текстом, подписи), `src/db/settings.ts` |
@@ -114,6 +115,10 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/create-logic.ts` | Чистая логика создания: черновик → варианты (`resolveDraft`, серии, длительность), `resolveCalendar`, типы карточки |
 | `bot/date-fix-logic.ts`, `bot/date-fix.ts` | Метрика `date_fix` (tech-debt #26): правка даты сразу после карточки — классификация (чистая) и хуки создания / изменения / отмены |
 | `bot/create-view.ts` | Карточка создания: тело события, варианты дат кнопками, выбор для 29–31 числа |
+| `bot/multi-split.ts` | US-62, чистый: сообщение → куски-дела по нашим датам (склейка уточнений, перечисление «в пятницу и в субботу в 10», «ещё …», глаголы изменения/удаления/показа), черновые названия; пересланное — с вёрсткой и часами работы |
+| `bot/multi-logic.ts` | US-62, чистый: пары кусков с вызовами LLM (`alignCalls`), строки карточки (`buildItems`: общий день, день рождения, дубли, неясные), переключатели (`toggle`), главная кнопка, лимиты 5 / 10, `ordinalLead` |
+| `bot/multi-view.ts` | US-62, чистый: текст и кнопки карточки-списка, итог (✅ / ❌ по строкам), текст отмены пачки |
+| `bot/multi-event.ts` | US-62: `startMulti` (своё и пересланное, карточка или правка карточки пересланного на месте), `pressMulti` (переключатели без захвата, CAS по payload), `confirmMulti` (id на строку, «Повторить», «↩ Отменить все») |
 | `bot/modify-event.ts` | US-40/41/42/43: сценарий изменения — проверки, карточка, подтверждение «эту/всю серию», отмена |
 | `bot/modify-logic.ts` | Чистый `computeChange`: перенос, длительность, переименование, место, описание, напоминания; тип карточки |
 | `bot/modify-view.ts` | Карточка «Было → Стало», кнопки, итог изменения |
@@ -124,8 +129,9 @@ GET /ics/<токен> → bot/inline/guest.ts (файл события inline-к
 | `bot/format-events.ts` | Список событий для Telegram, разбиение по лимиту длины |
 | `bot/format.ts` | Общие форматтеры времени, дат, интервалов, `escapeHtml` |
 | `bot/messages.ts` | `t()`, `MessageKey`: склейка словаря из `bot/messages/*` |
-| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `help` (справка и /start), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram), `timezone` (пояс и поездки); ключи не повторяются (`test/messages.test.ts`) |
+| `bot/messages/*.ts` | Тексты RU/EN по областям: `common`, `account`, `read`, `create`, `find`, `modify`, `delete`, `undo`, `settings`, `input` (голос, пересланные), `household` (дом, групповой чат), `assign` (поручения), `help` (справка и /start), `ingest` (событие из чужого контента, сводки «Завтра»/«Неделя»), `inline` (inline-карточка), `notify` (уведомления об изменениях, напоминания в Telegram), `timezone` (пояс и поездки), `multi` (карточка-список US-62); ключи не повторяются (`test/messages.test.ts`) |
 | `bot/keyboards.ts` | Inline-клавиатуры |
+| `bot/callback-data.ts` | Чистый: формат `callback_data` карточек `pa:<id>:<выбор>` (≤ 64 байт) |
 | `bot/settings/callbacks.ts` | `/settings`: нажатия кнопок `st:<раздел>:<значение>` (пояс, календари, длительность, напоминания, сводка, язык, «📣 Уведомления») |
 | `bot/settings/input.ts` | `/settings`: ввод текстом — пояс, время сводки, другие названия календаря |
 | `bot/settings/screens.ts` | Экраны меню (текст + кнопки), пресеты значений |

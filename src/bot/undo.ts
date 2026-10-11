@@ -19,11 +19,14 @@ import type { AppContext } from "./context";
 import { dateFixOnUndoCreate } from "./date-fix";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
+import { multiUndoText } from "./multi-view";
 
 export const UNDO_CARD = "undo";
 
 export type UndoRecord =
   | { kind: "create"; ref: EventRef; etag?: string }
+  /** Пачка из карточки-списка (US-62): одно действие — одна отмена. */
+  | { kind: "create_many"; items: { ref: EventRef; etag?: string; title: string }[] }
   | {
       kind: "update";
       ref: EventRef;
@@ -77,6 +80,7 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
     return false;
   }
 
+  if (record.kind === "create_many") return undoMany(ctx, provider, user, action, record.items);
   try {
     if (record.kind === "create") {
       await provider.deleteEvent(record.ref, { notify: false, ...(record.etag ? { etag: record.etag } : {}) });
@@ -97,6 +101,39 @@ export async function performUndo(ctx: AppContext, provider: CalendarProvider, u
   await mergeDialogState(ctx.db, action.conversationId, user.id, { lastUndo: undefined, lastEvent: undefined }, ctx.clock.now());
   if (record.kind === "create") await dateFixOnUndoCreate(ctx, action, record.ref);
   await reply(`${t("undone", locale)}\n\n${summary}`);
+  await recordFeature(ctx.db, user.id, "undo", ctx.clock.now());
+  return true;
+}
+
+// Изменённое после создания не трогаем и называем; удалённое в Google — уже удалено
+async function undoMany(
+  ctx: AppContext,
+  provider: CalendarProvider,
+  user: User,
+  action: PendingAction<UndoPayload>,
+  items: { ref: EventRef; etag?: string; title: string }[],
+): Promise<boolean> {
+  const { chatId } = action.payload;
+  let deleted = 0;
+  const kept: string[] = [];
+  for (const it of items) {
+    try {
+      await provider.deleteEvent(it.ref, { notify: false, ...(it.etag ? { etag: it.etag } : {}) });
+      deleted++;
+    } catch (e) {
+      if (e instanceof EventConflict) kept.push(it.title);
+      else if (e instanceof EventGone) deleted++;
+      else throw e;
+    }
+  }
+  if (deleted === 0) {
+    await ctx.telegram.sendMessage(chatId, t("undoChangedAfter", user.locale));
+    return false;
+  }
+  await mergeDialogState(ctx.db, action.conversationId, user.id, { lastUndo: undefined, lastEvent: undefined, lastList: undefined }, ctx.clock.now());
+  const text = multiUndoText(deleted, kept, user.locale);
+  if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, text, undefined, { html: true });
+  else await ctx.telegram.sendMessage(chatId, text, undefined, { html: true });
   await recordFeature(ctx.db, user.id, "undo", ctx.clock.now());
   return true;
 }

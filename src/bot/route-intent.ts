@@ -24,15 +24,19 @@ import { lookupEvent } from "./event-lookup";
 import type { EventRequest } from "./find-event";
 import { t } from "./messages";
 import { startModify } from "./modify-event";
+import { startMulti } from "./multi-event";
+import { createPieces, llmCalls } from "./multi-logic";
+import { splitMessage } from "./multi-split";
 import { readEvents } from "./read-events";
 import { handleTimezoneIntent } from "./timezone";
 import { withCalendar } from "./with-calendar";
 
 export async function routeIntent(ctx: AppContext, user: User, chatId: number, conversationId: string, text: string, parsedIntent: Intent): Promise<void> {
+  const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
+  if (await routeMulti(ctx, user, chatId, conversationId, text, parsedIntent, localNow)) return;
   // Слова в тексте важнее выбора LLM (замер Qwen3): глаголы изменения/удаления, «когда …?»; поручения — до остальных поправок
   const assign = assignOverride(text, parsedIntent);
   let intent = assign && (await assignmentApplies(ctx, user.id, assign, parsedIntent)) ? assign : effectiveIntent(text, parsedIntent);
-  const localNow = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
   if (intent.name === "set_timezone" && intent.action === "trip") {
     const planned = plannedTripStart(text, localNow, user.tz);
     if (planned) intent = { name: "create_event", start: planned, ...(cleanTitle(text, [planned]) ? { title: cleanTitle(text, [planned])! } : {}) };
@@ -186,6 +190,34 @@ export async function routeIntent(ctx: AppContext, user: User, chatId: number, c
       return;
     }
   }
+}
+
+// Делитель — до поправок интента (ADR-0008 п.2): «удали» во втором деле иначе превратило бы всё сообщение в удаление,
+// а «отводит папа» при multiple схлопнуло бы его в первое событие
+async function routeMulti(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  text: string,
+  parsed: Intent,
+  localNow: string,
+): Promise<boolean> {
+  if (parsed.name !== "create_event" && parsed.name !== "multiple" && parsed.name !== "unsupported") return false;
+  const pieces = splitMessage(text, localNow, user.tz);
+  const creates = createPieces(pieces);
+  if (creates.length === 1 && pieces.some((p) => p.action === "other")) {
+    await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
+    return true;
+  }
+  if (creates.length < 2) return false;
+  const assign = assignOverride(text, parsed);
+  if (assign && assign.name !== "create_event") return false;
+  let handled = false;
+  const ok = await withCalendar(ctx, user, chatId, async (provider) => {
+    handled = await startMulti(ctx, provider, { user, chatId, conversationId, pieces, calls: llmCalls(parsed) });
+  });
+  return handled || !ok;
 }
 
 function escapeRe(s: string): string {

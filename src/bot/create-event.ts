@@ -101,7 +101,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
-function calendarErrorText(cal: Exclude<CalendarResolution, CalendarInfo>, calendars: CalendarInfo[], locale: string): string {
+export function calendarErrorText(cal: Exclude<CalendarResolution, CalendarInfo>, calendars: CalendarInfo[], locale: string): string {
   if (cal.error === "noWritable") return t("noWritableCalendar", locale);
   if (cal.error === "readOnly") return t("calendarReadOnly", locale, { name: cal.name });
   const list = calendars
@@ -124,7 +124,7 @@ async function findOverlaps(provider: CalendarProvider, o: CreateOption, calenda
 }
 
 // Не заданы в настройках — не передаём: Google поставит свои по умолчанию (для «весь день» — без напоминаний)
-function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
+export function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
   const r = allDay ? (user.settings.allDayReminders ?? []) : user.settings.reminders;
   return r ? { reminders: r } : {};
 }

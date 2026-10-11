@@ -1,0 +1,99 @@
+# US-62: сбои и отмена пачки. Частичный сбой Google — созданное не откатываем, «Повторить» создаёт только несозданное
+# без дублей (свой id на строку); «↩ Отменить все» и «отмени последнее» удаляют всю пачку, изменённое после — не трогают.
+# «Сейчас» — пн 12 октября 2026, 10:00 МСК.
+
+- id: multi-partial-failure-retry
+  story: US-62
+  steps:
+    - &setup
+      - clock: "2026-10-12T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+      - llm:
+          "Во вторник в 19 родительское собрание, в среду в 8 анализы, в четверг в 20 кино": { tool: create_event, args: { start: "во вторник в 19", title: "Родительское собрание" } }
+      - telegram: { from: 1001, text: "Во вторник в 19 родительское собрание, в среду в 8 анализы, в четверг в 20 кино" }
+      - expect_telegram:
+          - { text_contains: ["Создать эти события?"], buttons: ["✅ 1 · Родительское собран…", "✅ 2 · Анализы", "✅ 3 · Кино", "Создать все (3)", "Отмена"] }
+    - google_insert_fails: { summary_contains: "Анализы", status: 503 }
+    - press: "Создать все (3)"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains:
+            - "Создано 2 из 3"
+            - "1. ✅ <a href="
+            - "2. ❌ Анализы — ср, 14 октября, 08:00–09:00 — Google не ответил"
+            - "3. ✅ <a href="
+          buttons: ["🔁 Повторить (1)", "↩ Отменить все (2)"]
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 2, events: [] }
+    - press: "🔁 Повторить (1)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "2. <a href=", ">Анализы</a> — ср, 14 октября, 08:00–09:00"], buttons: ["↩ Отменить все (3)"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 3
+        events:
+          - { summary: "Родительское собрание", start: "2026-10-13T19:00:00+03:00", end: "2026-10-13T20:00:00+03:00" }
+          - { summary: "Анализы", start: "2026-10-14T08:00:00+03:00", end: "2026-10-14T09:00:00+03:00" }
+          - { summary: "Кино", start: "2026-10-15T20:00:00+03:00", end: "2026-10-15T21:00:00+03:00" }
+    # Отмена — по всей пачке, включая созданное повтором
+    - press: "↩ Отменить все (3)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["↩ Отменил: удалил 3 события."] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }
+
+- id: multi-double-press
+  story: US-62
+  steps:
+    - *setup
+    - press: "Создать все (3)"
+    - expect_telegram_count: 1
+    - press: { button: "Создать все (3)", again: true }
+    - expect_callback_answer: { text_contains: ["Уже сделано"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 3, events: [] }
+
+- id: multi-undo-last-by-text
+  story: US-62
+  steps:
+    - *setup
+    - press: "Создать все (3)"
+    - expect_telegram_count: 1
+    - telegram: { from: 1001, text: "отмени последнее" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["↩ Отменил: удалил 3 события."] }
+    - expect_google_deletes: { count: 3 }
+
+- id: multi-undo-changed
+  story: US-62
+  steps:
+    - *setup
+    - press: "Создать все (3)"
+    - expect_telegram_count: 1
+    # Собрание перенесли в Google после создания — его не трогаем и называем
+    - google_touch: { email: ivan@gmail.com, calendar: ivan@gmail.com, summary: "Родительское собрание" }
+    - press: "↩ Отменить все (3)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["↩ Отменил: удалил 2 события.\nНе удалил «Родительское собрание» — его уже изменили."] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 1
+        events: [{ summary: "Родительское собрание", start: "2026-10-13T19:00:00+03:00", end: "2026-10-13T20:00:00+03:00" }]
+
+- id: multi-google-down
+  story: US-62
+  steps:
+    - *setup
+    - provider_outage: { provider: google-write, status: 503 }
+    - press: "Создать все (3)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Google не отвечает — ничего не создал", "1. ❌ Родительское собрание"], buttons: ["🔁 Повторить (3)", "Отмена"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }
+    - provider_outage: { provider: google-write, status: 0 }
+    - press: "🔁 Повторить (3)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"], buttons: ["↩ Отменить все (3)"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 3, events: [] }

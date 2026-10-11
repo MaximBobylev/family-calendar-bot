@@ -258,3 +258,45 @@ export async function findOpenByMessage<P>(
     .first<{ id: string; conversation_id: string; user_id: string; kind: string; payload_json: string; message_id: string | null }>();
   return row ? rowToAction<P>(row) : null;
 }
+
+/** Карточка, которую ещё можно нажать; json — для compare-and-swap в updateOpenCardPayload. */
+export async function getOpenCard<P>(db: D1Database, id: string, userId: string, now: number): Promise<{ action: PendingAction<P>; json: string } | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, conversation_id, user_id, kind, payload_json, message_id
+       FROM pending_actions
+       WHERE id = ? AND user_id = ? AND status = 'open' AND expires_at > ?`,
+    )
+    .bind(id, userId, now)
+    .first<ActionRow>();
+  return row ? { action: rowToAction<P>(row), json: row.payload_json } : null;
+}
+
+/** Переключатель в открытой карточке — без захвата (open → executing): false, если payload уже поменяли. */
+export async function updateOpenCardPayload(db: D1Database, id: string, userId: string, now: number, prevJson: string, nextJson: string): Promise<boolean> {
+  const res = await db
+    .prepare("UPDATE pending_actions SET payload_json = ? WHERE id = ? AND user_id = ? AND status = 'open' AND expires_at > ? AND payload_json = ?")
+    .bind(nextJson, id, userId, now, prevJson)
+    .run();
+  return res.meta.changes > 0;
+}
+
+/** Частичный сбой: карточка снова open с новым сроком — «Повторить» нажимается как обычная кнопка. */
+export async function reopenCard(db: D1Database, id: string, payloadJson: string, now: number): Promise<void> {
+  await db
+    .prepare("UPDATE pending_actions SET status = 'open', payload_json = ?, expires_at = ? WHERE id = ? AND status = 'executing'")
+    .bind(payloadJson, now + CARD_TTL_MS, id)
+    .run();
+}
+
+export async function setCardPayload(db: D1Database, id: string, payloadJson: string): Promise<void> {
+  await db.prepare("UPDATE pending_actions SET payload_json = ? WHERE id = ?").bind(payloadJson, id).run();
+}
+
+export async function hasOpenCard(db: D1Database, conversationId: string, userId: string, kind: string, now: number): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS x FROM pending_actions WHERE conversation_id = ? AND user_id = ? AND kind = ? AND status = 'open' AND expires_at > ? LIMIT 1")
+    .bind(conversationId, userId, kind, now)
+    .first<{ x: number }>();
+  return !!row;
+}

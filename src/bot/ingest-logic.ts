@@ -3,12 +3,12 @@
 import { parseDateFragment } from "../dates";
 import { cleanTitle, extractDateSpans } from "../dates/extract";
 
-const MAX_TEXT = 1500;
+export const MAX_TEXT = 1500;
 const MAX_SENTENCE_WORDS = 40;
 const QUOTE_LEN = 300;
 
 // Не после сокращений адреса: «ул. Ленина», «каб. 12», «д. 5»
-const SENTENCE_END = /\n+|(?<!(?:^|[\s,(])(?:ул|каб|д|пр|г|корп|стр|кв|пер|наб|им|тел|ауд|ст|просп|пл|ш|т|р-н|мкр)\.)(?<=[.!?])\s+(?=\p{Lu}|$)/iu;
+export const SENTENCE_END = /\n+|(?<!(?:^|[\s,(])(?:ул|каб|д|пр|г|корп|стр|кв|пер|наб|им|тел|ауд|ст|просп|пл|ш|т|р-н|мкр)\.)(?<=[.!?])\s+(?=\p{Lu}|$)/iu;
 
 // Длинные предложения — кусками: перебор кусков в extract квадратичный
 export function sentences(text: string): string[] {
@@ -46,7 +46,7 @@ function kindOf(text: string, now: string, tz: string): { k: "date"; days: strin
 }
 
 // Строка из одного времени «14:02» — время сообщения в скриншоте чата, а не время события (tech-debt #25)
-const CHAT_TIMESTAMP = /^\d{1,2}:\d{2}(\s*(?:[AaPp]\.?[Mm]\.?))?(\s*[✓✔]+)?$/u;
+export const CHAT_TIMESTAMP = /^\d{1,2}:\d{2}(\s*(?:[AaPp]\.?[Mm]\.?))?(\s*[✓✔]+)?$/u;
 
 // Часы работы, а не событие (замер картинок, tech-debt #28): «Часы приёма: Пн–Пт 8:00–14:00», «Залы работают с 12.00
 // до 19.00», «(понедельник — выходной)», «Open daily 10–6»
@@ -59,7 +59,7 @@ const OPENING_HOURS = new RegExp(
 const HOURS_GO_ON = new RegExp(`^(?:${DAY}(?!\\p{L})|\\d)`, "iu");
 
 // От признака до запятой, после которой уже не день и не число («…с 10 до 19, ждём в субботу»)
-function withoutOpeningHours(s: string): string {
+export function withoutOpeningHours(s: string): string {
   let t = s;
   for (let m = OPENING_HOURS.exec(t); m; m = OPENING_HOURS.exec(t)) {
     let end = t.length;
@@ -119,7 +119,7 @@ export function foreignDateSpans(text: string, now: string, tz: string): Foreign
 }
 
 // Строка «6-20», «16–28» — дни диапазоном, месяц строкой ниже (вёрстка афиш); время так не пишут
-const BARE_DAY_SPAN = /^\d{1,2}\s*[–—-]\s*\d{1,2}$/;
+export const BARE_DAY_SPAN = /^\d{1,2}\s*[–—-]\s*\d{1,2}$/;
 // К дате на афише время ищем и через пару строк («(К 60-летию со дня рождения)»)
 const MAX_PIECES = 4;
 
@@ -187,7 +187,8 @@ export function guessPlace(text: string): string | undefined {
   return undefined;
 }
 
-const LEADS = /^(напоминаем[,:]?\s*(что\s+)?|вы записаны\s+|приглашаем(\s+вас)?(\s+на)?\s+|уважаемые\s+[^,!.]+[,!.]\s*|внимание[!:.]?\s*|reminder:?\s*)/iu;
+export const LEADS =
+  /^(напоминаем[,:]?\s*(что\s+)?|вы записаны\s+|приглашаем(\s+вас)?(\s+на)?\s+|уважаемые\s+[^,!.]+[,!.]\s*|внимание[!:.]?\s*|reminder:?\s*)/iu;
 
 export function heuristicTitle(sentence: string | undefined, fragments: string[], place: string | undefined): string | undefined {
   if (!sentence) return undefined;

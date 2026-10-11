@@ -3,7 +3,7 @@
 import { parseDateFragment } from "../dates";
 import { formatMoment, utcToLocal } from "../dates/calendar";
 import { looksAllDay } from "../dates/extract";
-import { cancelOpenCards, claimPendingAction, findOpenByMessage, getDialogState, mergeDialogState, type PendingAction } from "../db/conversations";
+import { cancelOpenCards, claimPendingAction, findOpenByMessage, getDialogState, hasOpenCard, mergeDialogState, type PendingAction } from "../db/conversations";
 import type { User } from "../db/users";
 import { effectiveIntent } from "../nlu/intent-overrides";
 import { BARE_CANCEL, UNDO_PHRASE } from "../nlu/modify-hints";
@@ -19,6 +19,7 @@ import { FORWARD_CARD } from "./forwarded";
 import { ICS_CARD } from "./ingest";
 import { t } from "./messages";
 import { MODIFY_CARD } from "./modify-event";
+import { MULTI_CARD, ordinalLead } from "./multi-logic";
 import { parseCommandIntent } from "./nlu-step";
 import { routeIntent } from "./route-intent";
 import { sendReconnect, showSettings } from "./settings/common";
@@ -41,6 +42,7 @@ export async function cancelCards(ctx: AppContext, user: User, conversationId: s
     ICS_CARD,
     ASSIGN_CARD,
     ASSIGN_WHO_CARD,
+    MULTI_CARD,
   ]);
   for (const c of cancelled) {
     const cardChat = (c.payload as { chatId?: number }).chatId;
@@ -110,6 +112,13 @@ export async function runCommand(
       }
       // Не похоже на время — это новая команда
     }
+  }
+
+  // «второе — в 13» при открытой карточке-списке: правку словами не делаем (US-62), но и не отменяем карточку,
+  // и не переносим чужое событие из последнего списка (US-60)
+  if (ordinalLead(text) && (await hasOpenCard(ctx.db, conversationId, user.id, MULTI_CARD, ctx.clock.now()))) {
+    await ctx.telegram.sendMessage(chatId, t("multiOrdinalHint", user.locale));
+    return;
   }
 
   const cancelled = await cancelCards(ctx, user, conversationId);

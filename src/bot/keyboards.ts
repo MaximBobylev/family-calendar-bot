@@ -1,4 +1,4 @@
-// В callback_data — только id карточки и выбор: данные карточки живут в D1.
+// Клавиатура «Подключить» и формат callback_data (callback-data.ts — чистый, его импортируют и юнит-тесты).
 
 import { randomToken } from "../crypto";
 import { createOAuthState } from "../db/accounts";
@@ -15,9 +15,4 @@ export async function connectKeyboard(ctx: AppContext, userId: string, locale: s
   };
 }
 
-export const callbackData = (actionId: string, choice: string) => `pa:${actionId}:${choice}`;
-
-export function parseCallbackData(data: string | undefined): { actionId: string; choice: string } | null {
-  const m = /^pa:([0-9a-f]+):(\w+)$/.exec(data ?? "");
-  return m ? { actionId: m[1]!, choice: m[2]! } : null;
-}
+export { callbackData, parseCallbackData } from "./callback-data";

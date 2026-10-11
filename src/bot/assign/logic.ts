@@ -184,7 +184,8 @@ export const isAssignedByMeQuestion = (text: string) => ASSIGNED_BY_ME.test(text
 const SELF_REMIND =
   /^(?:пожалуйста,?\s+)?(?:напомни|напомните)(?:те)?,?\s+(?:(?:мне|себе|нам)(?!\p{L})|(?=\p{L}+(?:ть|ти|чь|ться)(?!\p{L})))|^(?:please\s+)?remind\s+(?:me|myself|us)(?!\p{L})/iu;
 const SELF_REMIND_QUESTION = /^,?\s*(?:когда|что|где|во\s+сколько|сколько|when|what|where)(?!\p{L})/iu;
-const CREATE_VERB = /^(?:эээ\s+)?(?:поставь|запиши|добавь|создай|запланируй|внеси|schedule|add|create|book|put)(?:те)?(?!\p{L})\s*(?:мне\s+|пожалуйста\s+)*/iu;
+export const CREATE_VERB =
+  /^(?:эээ\s+)?(?:поставь|запиши|добавь|создай|запланируй|внеси|schedule|add|create|book|put)(?:те)?(?!\p{L})\s*(?:мне\s+|пожалуйста\s+)*/iu;
 
 const WHO_QUESTION = /(?<![\p{L}])(кто|who)(?![\p{L}])/iu;
 

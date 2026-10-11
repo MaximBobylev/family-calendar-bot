@@ -1,0 +1,156 @@
+# US-62 + US-65: несколько событий в пересланном (текст и голос). До нажатия LLM не зовём, кнопка без числа;
+# по нажатию это же сообщение становится карточкой-списком. Дни рождения — на весь день, «🔁 каждый год» одной кнопкой.
+# «Сейчас» — пн 12 октября 2026, 10:00 МСК.
+
+- id: multi-forwarded-birthdays
+  story: US-62
+  steps:
+    - &setup
+      - clock: "2026-10-12T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+      - llm:
+          # Как Nemotron в замере: вернул только первое событие
+          "Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря": { tool: create_event, args: { start: "12 ноября", title: "День рождения Пети", all_day: true } }
+          "Напоминаем: в среду в 17 хор, в четверг в 18 сольфеджио, удалите старое расписание": { tool: create_event, args: { start: "в среду в 17", title: "Хор" } }
+    - telegram: { from: 1001, text: "Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря", forwarded: true, forward_from: "Аня" }
+    - expect_telegram:
+        - text_contains: ["📅 Похоже на события: «Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря». Создать?"]
+          buttons: ["📅 Создать события из этого", "Выполнить как команду", "Не надо"]
+    - expect_llm_requests: 0
+    - press: "📅 Создать события из этого"
+    # То же сообщение становится списком — без «Создаю событие…» и без второго сообщения
+    - expect_telegram:
+        - method: editMessageText
+          text_contains:
+            - "Создать эти события?\n📝 Из пересланного сообщения от Аня"
+            - "✅ 1. <b>День рождения Пети</b>\nчт, 12 ноября, весь день, 🔁 каждый год"
+            - "✅ 2. <b>День рождения Маши</b>\nчт, 3 декабря, весь день, 🔁 каждый год"
+          buttons: ["✅ 1 · День рождения Пети", "✅ 2 · День рождения Маши", "🔁 Каждый год: да", "Создать все (2)", "Отмена"]
+    - expect_llm_requests: 1
+    - press: "🔁 Каждый год: да"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ 1. <b>День рождения Пети</b>\nчт, 12 ноября, весь день"]
+          text_not_contains: ["каждый год"]
+          buttons: ["✅ 1 · День рождения Пети", "✅ 2 · День рождения Маши", "🔁 Каждый год: нет", "Создать все (2)", "Отмена"]
+    - press: "🔁 Каждый год: нет"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["весь день, 🔁 каждый год"], buttons: ["✅ 1 · День рождения Пети", "✅ 2 · День рождения Маши", "🔁 Каждый год: да", "Создать все (2)", "Отмена"] }
+    - press: "Создать все (2)"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ Создано", ">День рождения Пети</a> — чт, 12 ноября, весь день, 🔁 каждый год", ">День рождения Маши</a> — чт, 3 декабря, весь день, 🔁 каждый год"]
+          buttons: ["↩ Отменить все (2)"]
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events:
+          - summary: "День рождения Пети"
+            start: "2026-11-12"
+            end: "2026-11-13"
+            recurrence: ["RRULE:FREQ=YEARLY"]
+            description: "Из пересланного сообщения от Аня:\n«Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря»"
+          - { summary: "День рождения Маши", start: "2026-12-03", end: "2026-12-04", recurrence: ["RRULE:FREQ=YEARLY"] }
+
+- id: multi-forwarded-birthdays-once
+  story: US-62
+  steps:
+    - *setup
+    # Пересланное голосовое; повтор снят — разовые события на весь день
+    - voice: { from: 1001, transcript: "Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря", forwarded: true }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["📅 Похоже на события"], buttons: ["📅 Создать события из этого", "Выполнить как команду", "Не надо"] }
+    - press: "📅 Создать события из этого"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["📝 Из пересланного сообщения от Friend", "🔁 каждый год"] }
+    - press: "🔁 Каждый год: да"
+    - expect_telegram_count: 1
+    - press: "Создать все (2)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "весь день"], text_not_contains: ["каждый год"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events:
+          - { summary: "День рождения Пети", start: "2026-11-12", end: "2026-11-13" }
+          - { summary: "День рождения Маши", start: "2026-12-03", end: "2026-12-04" }
+
+- id: multi-forwarded-schedule
+  story: US-62
+  steps:
+    - *setup
+    - llm:
+        "Расписание кружков:\nПн 17:00 — танцы\nВт 18:00 — английский\nСр 16:00 — рисование\nЧт 17:30 — бассейн\nПт 16:00 — шахматы\nСб 11:00 — футбол\nВс 12:00 — театр":
+          tool: create_event
+          args: { start: "Пн 17:00", title: "Танцы" }
+    - telegram:
+        from: 1001
+        text: "Расписание кружков:\nПн 17:00 — танцы\nВт 18:00 — английский\nСр 16:00 — рисование\nЧт 17:30 — бассейн\nПт 16:00 — шахматы\nСб 11:00 — футбол\nВс 12:00 — театр"
+        forwarded: true
+        forward_from: "Хор, 3 класс"
+    - expect_telegram:
+        - { text_contains: ["📅 Похоже на события"], buttons: ["📅 Создать события из этого", "Выполнить как команду", "Не надо"] }
+    - press: "📅 Создать события из этого"
+    # Пересланное — до 10 в одной карточке. «Пн» в понедельник — сегодня или через неделю: строка ❓, её скажут отдельно
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["❓ 1. <b>Танцы</b>\nне понял день или время", "✅ 4. <b>Бассейн</b>\nчт, 15 октября, 17:30–18:30", "✅ 7. <b>Театр</b>\nвс, 18 октября, 12:00–13:00"]
+          buttons: ["✅ 2 · Английский", "✅ 3 · Рисование", "✅ 4 · Бассейн", "✅ 5 · Шахматы", "✅ 6 · Футбол", "✅ 7 · Театр", "Создать все (6)", "Отмена"]
+    - press: "Создать все (6)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", "6. <a href=", "❓ Танцы — скажите его отдельным сообщением"], buttons: ["↩ Отменить все (6)"] }
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 6
+        events:
+          - { summary: "Английский", start: "2026-10-13T18:00:00+03:00", end: "2026-10-13T19:00:00+03:00" }
+          - { summary: "Театр", start: "2026-10-18T12:00:00+03:00", end: "2026-10-18T13:00:00+03:00" }
+
+- id: multi-forwarded-too-many
+  story: US-62
+  steps:
+    - *setup
+    - llm:
+        "Пн 17:00 — танцы\nПн 18:30 — хор\nВт 18:00 — английский\nВт 19:30 — гитара\nСр 16:00 — рисование\nСр 18:00 — лепка\nЧт 17:30 — бассейн\nЧт 19:00 — шашки\nПт 16:00 — шахматы\nПт 18:00 — театр\nСб 11:00 — футбол\nВс 12:00 — цирк":
+          tool: create_event
+          args: { start: "Пн 17:00", title: "Танцы" }
+    - telegram:
+        from: 1001
+        text: "Пн 17:00 — танцы\nПн 18:30 — хор\nВт 18:00 — английский\nВт 19:30 — гитара\nСр 16:00 — рисование\nСр 18:00 — лепка\nЧт 17:30 — бассейн\nЧт 19:00 — шашки\nПт 16:00 — шахматы\nПт 18:00 — театр\nСб 11:00 — футбол\nВс 12:00 — цирк"
+        forwarded: true
+    - press: "📅 Создать события из этого"
+    - expect_telegram:
+        - { text_contains: ["📅 Похоже на события"] }
+        - { method: editMessageText, text_contains: ["Слишком много событий в одном сообщении (12) — добавьте их вручную или частями."] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }
+
+- id: multi-forwarded-ignore-delete
+  story: US-62
+  steps:
+    - *setup
+    # Удаление в пересланном не исполняется никогда — в карточке только создания
+    - telegram: { from: 1001, text: "Напоминаем: в среду в 17 хор, в четверг в 18 сольфеджио, удалите старое расписание", forwarded: true }
+    - press: "📅 Создать события из этого"
+    - expect_telegram:
+        - { text_contains: ["📅 Похоже на события"] }
+        - method: editMessageText
+          text_contains: ["✅ 1. <b>Хор</b>\nср, 14 октября, 17:00–18:00", "✅ 2. <b>Сольфеджио</b>\nчт, 15 октября, 18:00–19:00"]
+          text_not_contains: ["удалите", "расписание"]
+          buttons: ["✅ 1 · Хор", "✅ 2 · Сольфеджио", "Создать все (2)", "Отмена"]
+
+- id: multi-forwarded-no-press
+  story: US-62
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Не забудь, у Пети день рождения 12 ноября, а у Маши — 3 декабря", forwarded: true }
+    - expect_telegram_count: 1
+    - expect_llm_requests: 0
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }

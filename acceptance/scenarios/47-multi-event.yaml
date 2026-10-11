@@ -1,0 +1,227 @@
+# US-62: несколько событий в одном своём сообщении (текст и голос) — одна карточка-список. Делит наш код по датам,
+# LLM даёт названия (ADR-0008); фикстуры LLM, как модели прода, иногда теряют второе событие — сценарии проходят и так.
+# «Сейчас» — пн 12 октября 2026, 10:00 МСК.
+
+- id: multi-own-two-events
+  story: US-62
+  steps:
+    - &setup
+      - clock: "2026-10-12T07:00:00Z"
+      - connected_user:
+          from: 1001
+          email: ivan@gmail.com
+          calendars:
+            - { id: ivan@gmail.com, summary: "Иван", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+      - llm:
+          "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани":
+            tools:
+              - { tool: create_event, args: { start: "в пятницу в 10", title: "Стоматолог" } }
+              - { tool: create_event, args: { start: "в субботу в 12", title: "Футбол у Вани" } }
+          "В пятницу встреча с Петей в 10 и созвон с Машей в 15": { tool: create_event, args: { start: "в пятницу в 10", title: "Встреча с Петей" } }
+          "В 10 встреча с Петей и в пятницу созвон в 15": { tool: create_event, args: { start: "в 10", title: "Встреча с Петей" } }
+          "Встреча с Петей и Машей в пятницу в 10": { tool: create_event, args: { start: "в пятницу в 10", title: "Встреча с Петей и Машей" } }
+          "Обед в среду с 13 до 14": { tool: create_event, args: { start: "в среду с 13 до 14", title: "Обед" } }
+          "Тренировка каждый вторник и четверг в 19": { tool: create_event, args: { start: "каждый вторник и четверг в 19", title: "Тренировка" } }
+          "Созвон в среду или в четверг в 15": { tool: create_event, args: { start: "в среду или в четверг в 15", title: "Созвон" } }
+          "В пятницу и в субботу в 10 футбол": { tool: create_event, args: { start: "в пятницу в 10", title: "Футбол" } }
+          "Поставь обед с Аней в среду в 13 и удали планёрку в четверг": { tool: create_event, args: { start: "в среду в 13", title: "Обед с Аней" } }
+          "второе — в 13": { tool: unsupported, args: {} }
+    - telegram: { from: 1001, text: "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани" }
+    - expect_telegram:
+        - text_contains:
+            - "Создать эти события?"
+            - "✅ 1. <b>Стоматолог</b>\nпт, 16 октября, 10:00–11:00"
+            - "✅ 2. <b>Футбол у Вани</b>\nсб, 17 октября, 12:00–13:00"
+          buttons: ["✅ 1 · Стоматолог", "✅ 2 · Футбол у Вани", "Создать все (2)", "Отмена"]
+    - expect_llm_requests: 1
+    - press: "Создать все (2)"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ Создано", "1. <a href=", ">Стоматолог</a> — пт, 16 октября, 10:00–11:00", "2. <a href=", ">Футбол у Вани</a> — сб, 17 октября, 12:00–13:00"]
+          buttons: ["↩ Отменить все (2)"]
+    - expect_google_events:
+        email: ivan@gmail.com
+        calendar: ivan@gmail.com
+        count: 2
+        events:
+          - { summary: "Стоматолог", start: "2026-10-16T10:00:00+03:00", end: "2026-10-16T11:00:00+03:00" }
+          - { summary: "Футбол у Вани", start: "2026-10-17T12:00:00+03:00", end: "2026-10-17T13:00:00+03:00" }
+
+- id: multi-own-voice
+  story: US-62
+  steps:
+    - *setup
+    - voice: { from: 1001, transcript: "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани" }
+    - expect_telegram:
+        - { text_contains: ["🎙 <i>Запиши в пятницу в 10 стоматолог"] }
+        - text_contains: ["Создать эти события?", "пт, 16 октября, 10:00–11:00", "сб, 17 октября, 12:00–13:00"]
+          buttons: ["✅ 1 · Стоматолог", "✅ 2 · Футбол у Вани", "Создать все (2)", "Отмена"]
+
+- id: multi-llm-lost-second
+  story: US-62
+  steps:
+    - *setup
+    # Модель вернула одно событие из двух (замер: Nemotron так делает чаще всего) — второе не теряется, название — из текста
+    - telegram: { from: 1001, text: "В пятницу встреча с Петей в 10 и созвон с Машей в 15" }
+    - expect_telegram:
+        - text_contains: ["✅ 1. <b>Встреча с Петей</b>\nпт, 16 октября, 10:00–11:00", "✅ 2. <b>Созвон с Машей</b>\nпт, 16 октября, 15:00–16:00"]
+          buttons: ["✅ 1 · Встреча с Петей", "✅ 2 · Созвон с Машей", "Создать все (2)", "Отмена"]
+
+- id: multi-shared-day
+  story: US-62
+  steps:
+    - *setup
+    # Время без дня у второго дела — день первого; у первого — обычные правила: «в 10» в 10:00 — неоднозначно
+    - telegram: { from: 1001, text: "В 10 встреча с Петей и в пятницу созвон в 15" }
+    - expect_telegram:
+        - text_contains: ["❓ 1. <b>Встреча с Петей</b>\nне понял день или время — скажите его отдельным сообщением", "✅ 2. <b>Созвон</b>\nпт, 16 октября, 15:00–16:00"]
+          buttons: ["✅ 2 · Созвон", "Создать все (1)", "Отмена"]
+    - press: "Создать все (1)"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ Создано", ">Созвон</a> — пт, 16 октября, 15:00–16:00", "❓ Встреча с Петей — скажите его отдельным сообщением"]
+          buttons: ["↩ Отменить все (1)"]
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 1, events: [{ summary: "Созвон", start: "2026-10-16T15:00:00+03:00", end: "2026-10-16T16:00:00+03:00" }] }
+
+- id: multi-not-split
+  story: US-62
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Встреча с Петей и Машей в пятницу в 10" }
+    - expect_telegram:
+        - { text_contains: ["Создать событие?", "<b>Встреча с Петей и Машей</b>", "пт, 16 октября, 10:00–11:00"], buttons: ["Создать", "Отмена"] }
+    - telegram: { from: 1001, text: "Обед в среду с 13 до 14" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Создать событие?", "<b>Обед</b>", "ср, 14 октября, 13:00–14:00"], buttons: ["Создать", "Отмена"] }
+    - telegram: { from: 1001, text: "Тренировка каждый вторник и четверг в 19" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_contains: ["Создать повторяющееся событие?", "<b>Тренировка</b>"], text_not_contains: ["Создать эти события"] }
+    # Повторения в словах нет — два события, а не серия
+    - telegram: { from: 1001, text: "В пятницу и в субботу в 10 футбол" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - text_contains: ["✅ 1. <b>Футбол</b>\nпт, 16 октября, 10:00–11:00", "✅ 2. <b>Футбол</b>\nсб, 17 октября, 10:00–11:00"]
+          buttons: ["✅ 1 · Футбол", "✅ 2 · Футбол", "Создать все (2)", "Отмена"]
+    - telegram: { from: 1001, text: "Созвон в среду или в четверг в 15" }
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["Отменено"] }
+        - { text_not_contains: ["Создать эти события"] }
+
+- id: multi-toggle
+  story: US-62
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани" }
+    - expect_telegram_count: 1
+    # Переключатель меняет значок в тексте и на кнопке и главную кнопку, карточку не захватывает
+    - press: "✅ 2 · Футбол у Вани"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ 1. <b>Стоматолог</b>", "⬜ 2. <b>Футбол у Вани</b>\nсб, 17 октября, 12:00–13:00 — не создаю"]
+          buttons: ["✅ 1 · Стоматолог", "⬜ 2 · Футбол у Вани", "Создать выбранные (1)", "Отмена"]
+    - expect_callback_answer: { empty: true }
+    - press: "✅ 1 · Стоматолог"
+    - expect_telegram:
+        - { method: editMessageText, buttons: ["⬜ 1 · Стоматолог", "⬜ 2 · Футбол у Вани", "Создать выбранные (0)", "Отмена"] }
+    # Ничего не отмечено — всплывающая подсказка, клавиатура не прыгает
+    - press: "Создать выбранные (0)"
+    - expect_no_telegram: true
+    - expect_callback_answer: { text_contains: ["Отметьте хотя бы одно событие"] }
+    - press: "⬜ 1 · Стоматолог"
+    - expect_telegram:
+        - { method: editMessageText, buttons: ["✅ 1 · Стоматолог", "⬜ 2 · Футбол у Вани", "Создать выбранные (1)", "Отмена"] }
+    - press: "Создать выбранные (1)"
+    - expect_telegram:
+        - method: editMessageText
+          text_contains: ["✅ Создано", ">Стоматолог</a> — пт, 16 октября, 10:00–11:00", "Не создавал: Футбол у Вани"]
+          buttons: ["↩ Отменить все (1)"]
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 1, events: [{ summary: "Стоматолог", start: "2026-10-16T10:00:00+03:00", end: "2026-10-16T11:00:00+03:00" }] }
+
+- id: multi-limit-own
+  story: US-62
+  steps:
+    - *setup
+    - llm:
+        "Во вторник в 19 собрание, в среду в 8 анализы, в четверг в 20 кино, в пятницу в 10 стоматолог, в субботу в 12 футбол, в воскресенье в 11 бассейн":
+          tool: create_event
+          args: { start: "во вторник в 19", title: "Собрание" }
+    - telegram:
+        from: 1001
+        text: "Во вторник в 19 собрание, в среду в 8 анализы, в четверг в 20 кино, в пятницу в 10 стоматолог, в субботу в 12 футбол, в воскресенье в 11 бассейн"
+    - expect_telegram:
+        - { text_contains: ["В сообщении 6 событий — за раз добавляю до 5. Продиктуйте частями."] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }
+
+- id: multi-english
+  story: US-62
+  steps:
+    - clock: "2026-10-12T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - { id: ivan@gmail.com, summary: "Ivan", accessRole: owner, primary: true, timeZone: Europe/Moscow, events: [] }
+    - llm:
+        "Dentist on Friday at 10 and football on Saturday at noon":
+          tools:
+            - { tool: create_event, args: { start: "on Friday at 10", title: "Dentist" } }
+            - { tool: create_event, args: { start: "on Saturday at noon", title: "Football" } }
+    - telegram: { from: 1001, text: "Язык английский" }
+    - expect_telegram_count: 1
+    - telegram: { from: 1001, text: "Dentist on Friday at 10 and football on Saturday at noon" }
+    - expect_telegram:
+        - text_contains: ["Create these events?", "✅ 1. <b>Dentist</b>\nFri 16 October, 10:00–11:00", "✅ 2. <b>Football</b>\nSat 17 October, 12:00–13:00"]
+          buttons: ["✅ 1 · Dentist", "✅ 2 · Football", "Create all (2)", "Cancel"]
+    - press: "✅ 2 · Football"
+    - expect_telegram:
+        - { method: editMessageText, buttons: ["✅ 1 · Dentist", "⬜ 2 · Football", "Create selected (1)", "Cancel"] }
+    - press: "Create selected (1)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Created", ">Dentist</a> — Fri 16 October, 10:00–11:00", "Skipped: Football"], buttons: ["↩ Undo all (1)"] }
+
+- id: multi-ordinal-guard
+  story: US-62
+  steps:
+    - *setup
+    - telegram: { from: 1001, text: "Запиши в пятницу в 10 стоматолог, а в субботу в 12 футбол у Вани" }
+    - expect_telegram_count: 1
+    # Номер при открытой карточке-списке — подсказка; карточка жива, LLM не звали
+    - voice: { from: 1001, transcript: "второе — в 13" }
+    - expect_telegram:
+        - { text_contains: ["🎙"] }
+        - { text_contains: ["Чтобы поменять событие в списке, снимите галочку и скажите его отдельным сообщением."] }
+    - expect_llm_requests: 1
+    - press: "Создать все (2)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано"] }
+    # Карточки нет — фраза разбирается как обычно
+    - telegram: { from: 1001, text: "второе — в 13" }
+    - expect_telegram:
+        - { text_not_contains: ["снимите галочку"] }
+    - expect_llm_requests: 2
+
+- id: multi-mixed-delete
+  story: US-62
+  steps:
+    - clock: "2026-10-12T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: e1, summary: "Планёрка", start: { dateTime: "2026-10-15T10:00:00+03:00" }, end: { dateTime: "2026-10-15T11:00:00+03:00" } }
+    - llm:
+        "Поставь обед с Аней в среду в 13 и удали планёрку в четверг": { tool: create_event, args: { start: "в среду в 13", title: "Обед с Аней" } }
+    # Модель увидела только создание, а «удали» во втором деле не превращает всё сообщение в удаление планёрки
+    - telegram: { from: 1001, text: "Поставь обед с Аней в среду в 13 и удали планёрку в четверг" }
+    - expect_telegram:
+        - { text_contains: ["Давайте по одной команде за раз."] }
+    - expect_google_deletes: { count: 0 }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 1, events: [{ summary: "Планёрка", start: "2026-10-15T10:00:00+03:00", end: "2026-10-15T11:00:00+03:00" }] }

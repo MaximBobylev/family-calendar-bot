@@ -55,3 +55,13 @@ export function orderForDisplay(events: CalendarEvent[], fromDay: Day): Calendar
       a.title.localeCompare(b.title),
   );
 }
+
+// «1 событие», «2 события», «5 событий»; в английском — только one / many
+export function pluralForm(n: number, locale: string): "one" | "few" | "many" {
+  if (locale === "en") return n === 1 ? "one" : "many";
+  const d = n % 10;
+  const dd = n % 100;
+  if (d === 1 && dd !== 11) return "one";
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return "few";
+  return "many";
+}

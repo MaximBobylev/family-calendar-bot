@@ -59,7 +59,10 @@ type Step =
   | { expect_token_revocations: { count: number; last?: string } }
   /** Статус ошибки эндпоинта отзыва у Google. */
   | { token_revoke_fails: number }
-  | { google_touch: { email: string; calendar: string; id: string } }
+  /** id — событие из фикстуры; summary — созданное ботом (id заранее не известен). */
+  | { google_touch: { email: string; calendar: string; id?: string; summary?: string } }
+  /** Ближайшие times (1) вставок события, в названии которого есть summary_contains, отвечают ошибкой status. */
+  | { google_insert_fails: { summary_contains: string; status: number; times?: number } }
   | { expect_google_patches: { count?: number; sendUpdates?: string; id?: string } }
   | { expect_google_deletes: { count?: number; sendUpdates?: string; id?: string } }
   /**
@@ -683,6 +686,8 @@ async function runScenario(s: Scenario): Promise<void> {
       }
     } else if ("google_touch" in step) {
       await post(`${FAKES}/__fake/google/touch`, step.google_touch);
+    } else if ("google_insert_fails" in step) {
+      await post(`${FAKES}/__fake/google/insert-fails`, step.google_insert_fails);
     } else if ("expect_google_patches" in step) {
       const e = step.expect_google_patches;
       const list = (await (await fetch(`${FAKES}/__fake/google/patches`)).json()) as { id: string; sendUpdates: string | null }[];

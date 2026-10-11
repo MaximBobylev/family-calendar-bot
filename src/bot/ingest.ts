@@ -18,7 +18,7 @@ import { rememberRateHeaders } from "../ops/quotas";
 import type { TgMessage } from "../telegram/types";
 import { understandImageChain } from "../vision/understand";
 import type { AppContext } from "./context";
-import { startCreate } from "./create-event";
+import { remindersFor, startCreate } from "./create-event";
 import { type CreateDraft, llmDateCheck, resolveCalendar } from "./create-logic";
 import { cancelCards } from "./dialog";
 import { escapeHtml, whenOf } from "./format";
@@ -27,6 +27,9 @@ import { withinLimit } from "./input/limit";
 import { foreignDateSpans, guessPlace, heuristicTitle, sourceDescription } from "./ingest-logic";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
+import { startMulti } from "./multi-event";
+import { createPieces, llmCalls } from "./multi-logic";
+import { type Piece, splitMessage } from "./multi-split";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { withCalendar } from "./with-calendar";
 
@@ -49,16 +52,42 @@ interface ForeignSource {
   intent?: CreateEventIntent;
   useLlm: boolean;
   refNow?: number;
+  /** Несколько дел (US-62): эта карточка пересланного станет списком на месте. */
+  multi?: { pieces: Piece[]; from?: string; messageId?: number };
 }
 
 async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, conversationId: string, src: ForeignSource): Promise<void> {
   let intent = src.intent;
+  let calls: CreateEventIntent[] = [];
   if (!intent && src.useLlm) {
-    const res = await titleFromLlm(ctx, user, chatId, src.text);
+    const res = await titleFromLlm(ctx, user, chatId, src.text, src.multi ? MULTI_LLM_TEXT : SINGLE_LLM_TEXT);
     if (res === null) return; // лимит исчерпан — уже ответили
-    intent = res;
+    calls = res;
+    intent = res[0];
   }
   const tz = user.tz;
+  if (src.multi) {
+    const multi = src.multi;
+    const description = sourceDescription(src.sourceLine, src.quote ?? src.text, (url) => t("ingestLink", user.locale, { url }));
+    let handled = false;
+    const ok = await withCalendar(ctx, user, chatId, async (provider) => {
+      handled = await startMulti(ctx, provider, {
+        user,
+        chatId,
+        conversationId,
+        pieces: multi.pieces,
+        calls,
+        forward: {
+          ...(src.refNow ? { refNow: src.refNow } : {}),
+          ...(multi.from ? { from: multi.from } : {}),
+          description,
+          ...(multi.messageId ? { messageId: multi.messageId } : {}),
+        },
+      });
+    });
+    if (handled || !ok) return;
+    if (multi.messageId) await ctx.telegram.editMessageText(chatId, multi.messageId, t("forwardEventStarted", user.locale));
+  }
   const localNow = formatMoment(utcToLocal(src.refNow ?? ctx.clock.now(), tz));
   const dates = foreignDateSpans(src.text, localNow, tz);
   const location = intent?.location ?? guessPlace(src.text);
@@ -95,20 +124,25 @@ async function proposeFromForeign(ctx: AppContext, user: User, chatId: number, c
   );
 }
 
-// undefined — LLM не помогла (не create_event, сбой): берём эвристику; null — лимит исчерпан, пользователю ответили
-async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: string): Promise<CreateEventIntent | undefined | null> {
+const SINGLE_LLM_TEXT = 500;
+// Расписание на 7–10 строк в 500 символов не влезает
+const MULTI_LLM_TEXT = 1500;
+
+// [] — LLM не помогла (не create_event, сбой): берём эвристику; null — лимит исчерпан, пользователю ответили
+async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: string, maxLen: number): Promise<CreateEventIntent[] | null> {
   if (!(await withinLimit(ctx, user, "llm", chatId))) return null;
   const now = ctx.clock.now();
   const seen: SeenHeaders[] = [];
   try {
-    const res = await parseIntentChain(ctx.config.llm, text.slice(0, 500), { calendars: await calendarNamesOf(ctx.db, user.id) }, seen);
+    const res = await parseIntentChain(ctx.config.llm, text.slice(0, maxLen), { calendars: await calendarNamesOf(ctx.db, user.id) }, seen);
     const { parsed, via } = res;
     const costs = {
       ...ctx.config.costs,
       ...(via.inPerM !== undefined ? { llmInPerM: via.inPerM } : {}),
       ...(via.outPerM !== undefined ? { llmOutPerM: via.outPerM } : {}),
     };
-    const intent = parsed.intent.name === "create_event" ? parsed.intent : undefined;
+    const calls = llmCalls(parsed.intent);
+    const intent = calls[0];
     // Журнал — без чужого текста: только извлечённое
     await recordUsage(ctx.db, {
       userId: user.id,
@@ -123,11 +157,12 @@ async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: s
         intent: parsed.intent.name,
         ...(intent?.title ? { title: intent.title } : {}),
         ...(intent?.start ? { start: intent.start } : {}),
+        ...(calls.length > 1 ? { events: calls.map((c) => ({ title: c.title ?? "", start: c.start })) } : {}),
       },
       outcome: "ok",
       now,
     });
-    return intent;
+    return calls;
   } catch (e) {
     console.error("forward llm failed", e instanceof Error ? e.message : e);
     await recordUsage(ctx.db, {
@@ -139,10 +174,16 @@ async function titleFromLlm(ctx: AppContext, user: User, chatId: number, text: s
       outcome: "error",
       now,
     });
-    return undefined;
+    return [];
   } finally {
     await rememberRateHeaders(ctx, seen);
   }
+}
+
+/** Дел с датой два и больше — список (US-62). */
+export function multiForwardPieces(text: string, localNow: string, tz: string): Piece[] | undefined {
+  const pieces = splitMessage(text, localNow, tz, { foreign: true });
+  return createPieces(pieces).filter((p) => !p.undated).length >= 2 ? pieces : undefined;
 }
 
 export async function eventFromForwarded(
@@ -151,14 +192,18 @@ export async function eventFromForwarded(
   chatId: number,
   conversationId: string,
   p: ForwardOrigin & { text: string },
+  messageId?: number,
 ): Promise<void> {
   const dateMs = p.date ? p.date * 1000 : undefined;
   const refNow = dateMs && dateMs <= ctx.clock.now() && ctx.clock.now() - dateMs <= MAX_FORWARD_AGE_MS ? dateMs : undefined;
+  const pieces = multiForwardPieces(p.text, formatMoment(utcToLocal(refNow ?? ctx.clock.now(), user.tz)), user.tz);
+  if (!pieces && messageId) await ctx.telegram.editMessageText(chatId, messageId, t("forwardEventStarted", user.locale));
   await proposeFromForeign(ctx, user, chatId, conversationId, {
     text: p.text,
     sourceLine: p.from ? t("ingestFromForwardBy", user.locale, { name: p.from }) : t("ingestFromForward", user.locale),
     useLlm: true,
     ...(refNow ? { refNow } : {}),
+    ...(pieces ? { multi: { pieces, ...(p.from ? { from: p.from } : {}), ...(messageId ? { messageId } : {}) } } : {}),
   });
   await recordFeature(ctx.db, user.id, "forward_event", ctx.clock.now());
 }
@@ -347,11 +392,6 @@ function icsItemBody(it: IcsItem, today: number, locale: string): string {
   if (it.rrule) lines.push(t("icsRepeats", locale));
   if (it.location) lines.push(`📍 ${escapeHtml(it.location)}`);
   return lines.join("\n");
-}
-
-function remindersFor(user: User, allDay: boolean): { reminders?: number[] } {
-  const r = allDay ? (user.settings.allDayReminders ?? []) : user.settings.reminders;
-  return r ? { reminders: r } : {};
 }
 
 // idempotencyKey на каждое событие: повтор после сбоя не дублирует уже созданные

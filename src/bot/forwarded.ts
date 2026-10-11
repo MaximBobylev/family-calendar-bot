@@ -6,7 +6,7 @@ import type { User } from "../db/users";
 import type { AppContext } from "./context";
 import { escapeHtml } from "./format";
 import { formatMoment, utcToLocal } from "../dates/calendar";
-import { eventFromForwarded } from "./ingest";
+import { eventFromForwarded, multiForwardPieces } from "./ingest";
 import { foreignDateSpans } from "./ingest-logic";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
@@ -65,17 +65,18 @@ export async function proposeForwarded(
   // Без нажатия ничего не выполняется при любом порядке кнопок — поэтому, если в тексте есть дата,
   // «Создать событие» первым и без вопроса безопасности в заголовке
   const nowLocal = formatMoment(utcToLocal(ctx.clock.now(), user.tz));
-  const looksEvent = !!foreignDateSpans(stored, nowLocal, user.tz).point;
+  const many = !!multiForwardPieces(stored, nowLocal, user.tz);
+  const looksEvent = many || !!foreignDateSpans(stored, nowLocal, user.tz).point;
   const l = user.locale;
   const limit = looksEvent ? MAX_SHOWN_EVENT_LEN : MAX_SHOWN_LEN;
   const shown = escapeHtml(stored.length > limit ? `${stored.slice(0, limit)}…` : stored);
   const sent = await ctx.telegram.sendMessage(
     chatId,
-    looksEvent ? t("forwardedLooksEvent", l, { text: shown }) : t("forwardedConfirm", l, { text: shown }),
+    many ? t("forwardLooksEvents", l, { text: shown }) : looksEvent ? t("forwardedLooksEvent", l, { text: shown }) : t("forwardedConfirm", l, { text: shown }),
     {
       inline_keyboard: looksEvent
         ? [
-            [{ text: t("forwardEventButton", l), callback_data: callbackData(id, "ev") }],
+            [{ text: t(many ? "forwardEventsButton" : "forwardEventButton", l), callback_data: callbackData(id, "ev") }],
             [
               { text: t("forwardRunAsCommandButton", l), callback_data: callbackData(id, "run") },
               { text: t("forwardNoButton", l), callback_data: callbackData(id, "x") },
@@ -99,7 +100,9 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
   const { chatId, text } = action.payload;
   const run = choice === "run";
   const event = choice === "ev";
-  if (action.messageId) {
+  // Несколько дел — это же сообщение станет списком (US-62)
+  const many = event && !!multiForwardPieces(text, formatMoment(utcToLocal(ctx.clock.now(), user.tz)), user.tz);
+  if (action.messageId && !many) {
     const shown = escapeHtml(text.length > MAX_SHOWN_LEN ? `${text.slice(0, MAX_SHOWN_LEN)}…` : text);
     await ctx.telegram.editMessageText(
       chatId,
@@ -110,6 +113,9 @@ export async function confirmForwarded(ctx: AppContext, user: User, action: Pend
     );
   }
   if (run) await recordFeature(ctx.db, user.id, "forwarded_confirm", ctx.clock.now());
-  if (event) await withTyping(ctx, chatId, () => eventFromForwarded(ctx, user, chatId, action.conversationId, action.payload));
+  if (event)
+    await withTyping(ctx, chatId, () =>
+      eventFromForwarded(ctx, user, chatId, action.conversationId, action.payload, many && action.messageId ? Number(action.messageId) : undefined),
+    );
   return run ? text : null;
 }

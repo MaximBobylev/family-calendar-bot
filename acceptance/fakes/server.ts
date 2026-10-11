@@ -34,7 +34,9 @@
 //   POST /__fake/google/revoke-fails  — {status}: отзыв отвечает этой ошибкой (0 — снова работает)
 //   GET  /__fake/google/patches       — журнал PATCH: {calendar, id, sendUpdates, body}
 //   GET  /__fake/google/deletes       — журнал DELETE: {calendar, id, sendUpdates}
-//   POST /__fake/google/touch         — {email, calendar, id}: «кто-то другой» изменил событие (новый etag)
+//   POST /__fake/google/touch         — {email, calendar, id | summary}: «кто-то другой» изменил событие (новый etag)
+//   POST /__fake/google/insert-fails  — {summary_contains, status, times?}: ближайшие times (1) вставок события с таким
+//                                       названием отвечают ошибкой status (503 — Google не ответил)
 //   GET  /__fake/google/events?email=… — календари аккаунта с событиями
 //   POST /__fake/outage               — {provider, status}: провайдер отвечает этой ошибкой (0 — снова работает). provider:
 //                                       llm | llm-backup | stt | stt-openai | gemini | vision | google-write (insert/patch/delete;
@@ -170,6 +172,7 @@ const QUOTAS_DEFAULT = {
 let quotas = structuredClone(QUOTAS_DEFAULT);
 let quotaRequests: { via: string; auth: string }[] = [];
 let outages = new Map<string, number>();
+let insertFails: { summary_contains: string; status: number; times: number }[] = [];
 let googlePageSize = 0;
 
 function googlePage<T>(url: URL, items: T[]): { items: T[]; nextPageToken?: string } {
@@ -355,6 +358,7 @@ const server = createServer(async (req, res) => {
       visionFixtures = new Map();
       visionRequests = [];
       outages = new Map();
+      insertFails = [];
       googlePageSize = 0;
       quotas = structuredClone(QUOTAS_DEFAULT);
       quotaRequests = [];
@@ -533,12 +537,17 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/__fake/google/patches") return send(res, 200, patches);
     if (url.pathname === "/__fake/google/deletes") return send(res, 200, deletes);
+    if (url.pathname === "/__fake/google/insert-fails" && req.method === "POST") {
+      const b = (await readJson(req)) as { summary_contains: string; status: number; times?: number };
+      insertFails.push({ summary_contains: b.summary_contains, status: b.status, times: b.times ?? 1 });
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/__fake/google/touch" && req.method === "POST") {
-      const { email, calendar, id } = (await readJson(req)) as { email: string; calendar: string; id: string };
+      const { email, calendar, id, summary } = (await readJson(req)) as { email: string; calendar: string; id?: string; summary?: string };
       const ev = googleAccounts
         .get(email)
         ?.calendars.find((c) => c.id === calendar)
-        ?.events?.find((e) => e.id === id);
+        ?.events?.find((e) => (id ? e.id === id : e.summary === summary && e.status !== "cancelled"));
       if (ev) {
         ev.etag = newEtag();
         bump(ev);
@@ -846,6 +855,11 @@ const server = createServer(async (req, res) => {
       if (!cal) return send(res, 404, { error: { code: 404, message: "Not Found" } });
       if (cal.accessRole !== "owner" && cal.accessRole !== "writer") return send(res, 403, { error: { code: 403, message: "Forbidden" } });
       const input = (await readJson(req)) as unknown as GoogleEvent;
+      const fail = insertFails.find((f) => f.times > 0 && (input.summary ?? "").includes(f.summary_contains));
+      if (fail) {
+        fail.times--;
+        return googleWriteOutage(res, fail.status);
+      }
       // Свой id клиента (идемпотентность): повтор → 409, как у Google
       if (input.id && cal.events?.some((e) => e.id === input.id))
         return send(res, 409, { error: { code: 409, message: "The requested identifier already exists." } });
