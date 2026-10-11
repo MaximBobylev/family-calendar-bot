@@ -55,12 +55,14 @@ export class TelegramApi {
     return json.result as T;
   }
 
-  sendMessage(chatId: number | string, text: string, replyMarkup?: ReplyMarkup, opts: { html?: boolean } = {}) {
+  // replyTo: сообщение пропало — всё равно отправить, без цитаты
+  sendMessage(chatId: number | string, text: string, replyMarkup?: ReplyMarkup, opts: { html?: boolean; replyTo?: number } = {}) {
     return this.call<{ message_id: number }>("sendMessage", {
       chat_id: chatId,
       text,
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
       ...(opts.html ? { parse_mode: "HTML", link_preview_options: { is_disabled: true } } : {}),
+      ...(opts.replyTo ? { reply_parameters: { message_id: opts.replyTo, allow_sending_without_reply: true } } : {}),
     });
   }
 

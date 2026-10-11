@@ -12,6 +12,7 @@ import { tokenize } from "../dates/tokenize";
 import { namedZone, type NamedZone, zoneByTz } from "../dates/zone";
 import type { CreateEventIntent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
+import type { MultiItem } from "./multi-logic";
 import { t } from "./messages";
 
 // Фрагменты, как их сказал пользователь, — до разрешения дат
@@ -81,6 +82,8 @@ export interface CreateCardPayload {
   dateCheck?: DateCheckInfo;
   /** US-62: не выполненные куски того же сообщения (⏭) — и в карточке, и в итоге. */
   notDone?: string[];
+  /** US-62: неясные строки списка, о которых спросить после этой карточки. */
+  next?: MultiItem[];
 }
 
 export function namedByAlias(cal: CalendarInfo, name: string | undefined): boolean {

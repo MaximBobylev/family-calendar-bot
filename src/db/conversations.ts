@@ -18,8 +18,8 @@ export interface StoredRef {
 }
 
 export interface DialogState {
-  awaiting?:
-    | { kind: "create_time"; draft: unknown; expiresAt: number }
+  awaiting?: /** next — очередь неясных строк карточки-списка (US-62). */
+    | { kind: "create_time"; draft: unknown; expiresAt: number; next?: unknown[] }
     | { kind: "settings_tz"; expiresAt: number }
     | { kind: "settings_digest_time"; expiresAt: number }
     | { kind: "settings_alias"; calendarId: string; expiresAt: number }

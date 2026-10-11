@@ -19,7 +19,7 @@ import { FORWARD_CARD } from "./forwarded";
 import { ICS_CARD } from "./ingest";
 import { t } from "./messages";
 import { MODIFY_CARD } from "./modify-event";
-import { MULTI_CARD, ordinalLead } from "./multi-logic";
+import { MULTI_CARD, type MultiItem, ordinalLead } from "./multi-logic";
 import { parseCommandIntent } from "./nlu-step";
 import { routeIntent } from "./route-intent";
 import { sendReconnect, showSettings } from "./settings/common";
@@ -107,7 +107,10 @@ export async function runCommand(
     if (state.awaiting.kind === "create_time" && state.awaiting.expiresAt > ctx.clock.now()) {
       const draft = completeDraft(state.awaiting.draft as CreateDraft, text, formatMoment(utcToLocal(ctx.clock.now(), user.tz)), user.tz);
       if (draft) {
-        await withCalendar(ctx, user, chatId, (provider) => startCreate(ctx, provider, { user, chatId, conversationId, draft }));
+        const next = state.awaiting.next as MultiItem[] | undefined;
+        await withCalendar(ctx, user, chatId, (provider) =>
+          startCreate(ctx, provider, { user, chatId, conversationId, draft, ...(next?.length ? { next } : {}) }),
+        );
         return;
       }
       // Не похоже на время — это новая команда

@@ -6,9 +6,17 @@ import type { InlineKeyboardButton } from "../telegram/types";
 import { escapeHtml, hhmm, pluralForm, weekdayShort, whenOf } from "./format";
 import { callbackData } from "./callback-data";
 import { t } from "./messages";
-import { isCreated, mainButton, type MultiCardPayload, type MultiItem } from "./multi-logic";
+import { isCreated, mainButton, type MultiCardPayload, type MultiItem, toAsk } from "./multi-logic";
 
 const BUTTON_TITLE = 20;
+
+const ASK_LINE = {
+  askWhen: "multiLineAskWhen",
+  askZoneTime: "multiLineAskWhen",
+  askTime: "multiLineAskTime",
+  pick: "multiLinePick",
+  inPast: "multiLineInPast",
+} as const;
 
 const titleOf = (it: MultiItem, locale: string) => it.title || t("defaultTitle", locale);
 
@@ -48,7 +56,10 @@ export function multiCardText(p: MultiCardPayload, today: Day, locale: string): 
   const shared = sharedCalendar(p);
   const blocks = p.items.map((it, i) => {
     const n = i + 1;
-    if (!it.option) return `❓ ${n}. <b>${escapeHtml(titleOf(it, locale))}</b>\n${t("multiLineSayApart", locale)}`;
+    if (!it.option) {
+      const on = it.sel === "on";
+      return `${on ? "❓" : "⬜"} ${n}. <b>${escapeHtml(titleOf(it, locale))}</b>\n${on ? t(ASK_LINE[it.ask?.question ?? "askWhen"], locale) : t("multiLineOff", locale)}`;
+    }
     const mark = it.sel === "on" ? "✅" : "⬜";
     const lines = [`${mark} ${n}. <b>${escapeHtml(titleOf(it, locale))}</b>`];
     const off = it.sel === "off" && !it.dup;
@@ -71,8 +82,15 @@ const shortTitle = (s: string) => (s.length > BUTTON_TITLE ? `${s.slice(0, BUTTO
 
 export function multiCardButtons(p: MultiCardPayload, actionId: string, locale: string): InlineKeyboardButton[][] {
   const rows: InlineKeyboardButton[][] = p.items.flatMap((it, i) =>
-    it.option
-      ? [[{ text: `${it.sel === "on" ? "✅" : "⬜"} ${i + 1} · ${shortTitle(titleOf(it, locale))}`, callback_data: callbackData(actionId, `t${i}`) }]]
+    it.option || it.ask
+      ? [
+          [
+            {
+              text: `${it.sel === "off" ? "⬜" : it.option ? "✅" : "❓"} ${i + 1} · ${shortTitle(titleOf(it, locale))}`,
+              callback_data: callbackData(actionId, `t${i}`),
+            },
+          ],
+        ]
       : [],
   );
   if (p.items.some((it) => it.birthday))
@@ -104,7 +122,7 @@ export function multiSummaryText(p: MultiCardPayload, today: Day, locale: string
   let first: string;
   let rows: string[];
   if (failed === 0) {
-    first = t("created", locale);
+    first = t(created.length ? "created" : "multiNothingReady", locale);
     rows = created.map((it, i) => `${i + 1}. ${line(it)}`);
   } else {
     first = created.length ? t("multiCreatedPartial", locale, { ok: String(created.length), n: String(attempted.length) }) : t("multiNothingCreated", locale);
@@ -115,11 +133,14 @@ export function multiSummaryText(p: MultiCardPayload, today: Day, locale: string
     );
   }
   const skipped = p.items
-    .filter((it) => it.option && it.sel === "off")
+    .filter((it) => it.sel === "off")
     .map((it) => (it.dup ? t("multiAlreadyExists", locale, { title: escapeHtml(titleOf(it, locale)) }) : escapeHtml(titleOf(it, locale))));
-  const unclear = p.items.filter((it) => !it.option).map((it) => t("multiSayApartLater", locale, { title: escapeHtml(titleOf(it, locale)) }));
+  const unclear = toAsk(p).map((it) => t("multiAskLater", locale, { title: escapeHtml(titleOf(it, locale)) }));
   const tail = [...(skipped.length ? [t("multiSkipped", locale, { list: skipped.join(", ") })] : []), ...unclear];
-  return [...head(first, p, locale), "", rows.join("\n"), ...(tail.length ? ["", ...tail] : [])].join("\n") + notDoneLines(p.notDone, locale);
+  return (
+    [...head(first, p, locale), ...(rows.length ? ["", rows.join("\n")] : []), ...(tail.length ? ["", ...tail] : [])].join("\n") +
+    notDoneLines(p.notDone, locale)
+  );
 }
 
 export function multiUndoText(deleted: number, kept: string[], locale: string): string {

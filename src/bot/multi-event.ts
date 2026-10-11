@@ -6,6 +6,7 @@ import { type Day, formatDate, localToUtc, utcToLocal } from "../dates/calendar"
 import { toRRule } from "../dates/rrule";
 import {
   attachMessage,
+  AWAIT_TTL_MS,
   CONTEXT_TTL_MS,
   createPendingAction,
   getDialogState,
@@ -24,7 +25,9 @@ import type { CreateEventIntent } from "../nlu/intents";
 import type { InlineKeyboardButton, TgCallbackQuery } from "../telegram/types";
 import { familyHints, notifyResponsible, saveEventFamily } from "./assign/family";
 import type { AppContext } from "./context";
-import { calendarErrorText, remindersFor, startCreate } from "./create-event";
+import { CREATE_CARD, type CreateCardPayload, calendarErrorText, remindersFor, startCreate } from "./create-event";
+import { createCard } from "./create-view";
+import { dateLabel, escapeHtml } from "./format";
 import { noteCreator } from "./household/scope";
 import { callbackData } from "./keyboards";
 import { t } from "./messages";
@@ -39,14 +42,16 @@ import {
   MAX_OWN,
   MULTI_CARD,
   type MultiCardPayload,
+  type MultiItem,
   mainButton,
   markExisting,
   notDoneOf,
+  toAsk,
   toCreate,
   toggle,
 } from "./multi-logic";
 import type { Piece } from "./multi-split";
-import { multiCardButtons, multiCardText, multiSummaryText } from "./multi-view";
+import { eventsCount, multiCardButtons, multiCardText, multiSummaryText } from "./multi-view";
 import { attachUndoMessage, recordUndo } from "./undo";
 
 export interface MultiArgs {
@@ -124,17 +129,17 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
     await reply(t(a.forward ? "multiTooManyForward" : "multiTooManyOwn", locale, { n: String(items.length), max: String(max) }));
     return true;
   }
+  // Все неясные — без карточки-списка, сразу вопросы по одному
   if (!items.some((b) => b.item.option)) {
-    if (a.forward) {
-      if (a.forward.messageId) await ctx.telegram.editMessageText(chatId, a.forward.messageId, t("forwardEventStarted", locale));
-      await startCreate(ctx, provider, {
-        user,
-        chatId,
-        conversationId: a.conversationId,
-        draft: items[0]!.draft,
-        ...(a.forward.refNow ? { refNow: a.forward.refNow } : {}),
-      });
-    } else await ctx.telegram.sendMessage(chatId, t("oneAtATime", locale));
+    if (a.forward?.messageId) await ctx.telegram.editMessageText(chatId, a.forward.messageId, t("forwardEventStarted", locale));
+    await askQueue(
+      ctx,
+      user,
+      chatId,
+      a.conversationId,
+      items.map((b) => b.item),
+      { allUnclear: items.length },
+    );
     return true;
   }
 
@@ -165,6 +170,66 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
   return true;
 }
 
+/**
+ * Неясные строки — по одной, после создания остальных (US-62): варианты — карточкой, нажатие сразу создаёт; иначе — вопрос,
+ * ответ — обычная карточка одного события. Остаток очереди едет в вопросе и в карточке; ответ «не про время» — новая команда,
+ * очередь пропадает (теряется только неясное).
+ */
+export async function askQueue(
+  ctx: AppContext,
+  user: User,
+  chatId: number,
+  conversationId: string,
+  queue: MultiItem[],
+  opts: { replyTo?: number; more?: boolean; allUnclear?: number },
+): Promise<void> {
+  const [first, ...next] = queue;
+  if (!first?.ask) return;
+  const locale = user.locale;
+  const title = escapeHtml(first.title || t("defaultTitle", locale));
+  const prefix = opts.more
+    ? `${t("multiAskMore", locale)} `
+    : opts.allUnclear
+      ? `${t("multiAllUnclear", locale, { count: eventsCount(opts.allUnclear, locale) })}\n`
+      : "";
+  const send = (text: string, markup?: { inline_keyboard: InlineKeyboardButton[][] }) =>
+    ctx.telegram.sendMessage(chatId, text, markup, { html: true, ...(opts.replyTo ? { replyTo: opts.replyTo } : {}) });
+  const ask = first.ask;
+  if (ask.question === "pick" && ask.options?.length) {
+    const id = await createPendingAction(ctx.db, {
+      conversationId,
+      userId: user.id,
+      kind: CREATE_CARD,
+      payload: {
+        chatId,
+        options: ask.options,
+        ...(first.family ? { family: first.family } : {}),
+        ...(next.length ? { next } : {}),
+      } satisfies CreateCardPayload,
+      now: ctx.clock.now(),
+    });
+    const today = utcToLocal(ctx.clock.now(), user.tz).day;
+    const { buttons } = createCard(ask.options, id, today, locale, false, []);
+    const sent = await send(`${prefix}${t("multiPickHeader", locale, { title })}`, { inline_keyboard: buttons });
+    await attachMessage(ctx.db, id, sent.message_id);
+    return;
+  }
+  await mergeDialogState(
+    ctx.db,
+    conversationId,
+    user.id,
+    { awaiting: { kind: "create_time", draft: ask.draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS, ...(next.length ? { next } : {}) } },
+    ctx.clock.now(),
+  );
+  const question =
+    ask.question === "inPast"
+      ? t("multiInPast", locale, { title })
+      : ask.question === "askTime" && ask.day !== undefined
+        ? t("multiAskTime", locale, { title, day: dateLabel(ask.day, utcToLocal(ctx.clock.now(), user.tz).day, locale) })
+        : t("multiAskWhen", locale, { title });
+  await send(`${prefix}${question}`);
+}
+
 // Разброс больше двух месяцев — по запросу на день строки (их ≤ 10), а не один огромный список
 const MAX_LIST_SPAN_DAYS = 62;
 
@@ -186,7 +251,7 @@ export async function pressMulti(ctx: AppContext, user: User, cq: TgCallbackQuer
     if (!card || card.action.kind !== MULTI_CARD) return false;
     const p = card.action.payload;
     if (choice === "c") {
-      if (mainButton(p).n > 0) return false;
+      if (mainButton(p).n > 0 || toAsk(p).length > 0) return false;
       await ctx.telegram.answerCallbackQuery(cq.id, t("multiSelectOne", user.locale));
       return true;
     }
@@ -335,5 +400,6 @@ export async function confirmMulti(
     ];
     await recordFeature(ctx.db, user.id, features, ctx.clock.now());
   }
+  if (!left) await askQueue(ctx, user, p.chatId, action.conversationId, toAsk(next), action.messageId ? { replyTo: Number(action.messageId) } : {});
   return createdNow > 0;
 }

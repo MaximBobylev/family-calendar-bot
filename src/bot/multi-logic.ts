@@ -3,7 +3,8 @@
 
 import { titleScore } from "../calendar/match";
 import type { CalendarEvent, CalendarInfo, EventRef } from "../calendar/model";
-import { type Day, formatDate, localToUtc, minutesBetween, type Moment } from "../dates/calendar";
+import { parseDateFragment } from "../dates";
+import { type Day, formatDate, formatMoment, localToUtc, minutesBetween, type Moment, parseLocal } from "../dates/calendar";
 import { cleanTitle, looksAllDay } from "../dates/extract";
 import type { CreateEventIntent, Intent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
@@ -32,8 +33,8 @@ export interface MultiItem {
   /** Переключатель; у строки без готового события — не используется. */
   sel: "on" | "off";
   option?: CreateOption;
-  /** Нет готового события: день или время не поняли, варианты, прошлое — строка «скажите отдельно». */
-  ask?: { question: "askWhen" | "askTime" | "inPast" | "askZoneTime" | "pick" };
+  /** Нет готового события: спросить после создания остальных (по одному); день — если известен. */
+  ask?: { question: "askWhen" | "askTime" | "inPast" | "askZoneTime" | "pick"; draft: CreateDraft; options?: CreateOption[]; day?: Day };
   birthday?: true;
   /** ⚠️ Похожее уже есть в этот день в этом календаре — по умолчанию не создаём. */
   dup?: { title: string; day: Day; start?: Moment };
@@ -183,20 +184,30 @@ export function buildItems(a: BuildInput): BuildResult {
     if ("error" in cal) return { calendarError: cal };
     if (namedByAlias(cal, draft.calendar)) viaAlias = true;
 
+    const t0 = title ?? "";
     let item: MultiItem;
-    if (piece.undated) item = { title: title ?? "", sel: "on", ask: { question: "askTime" } };
-    else {
+    if (piece.undated) {
+      const d = prevDay ? askDraft(draft, true, dotted(prevDay)) : askDraft(draft, false);
+      item = { title: t0, sel: "on", ask: prevDay ? { question: "askTime", draft: d, day: dayOfIso(prevDay) } : { question: "askWhen", draft: d } };
+    } else {
       const res = resolveDraft(draft, base, a.tz, cal, a.locale, a.durationMin);
       const past = (o: CreateOption) => (o.start ? minutesBetween(o.start, a.now) <= 0 : o.endDay < a.now.day);
-      if (res.kind === "options" && a.refNow && res.options.every(past)) item = { title: title ?? "", sel: "on", ask: { question: "inPast" } };
+      if (res.kind === "options" && a.refNow && res.options.every(past))
+        item = { title: t0, sel: "on", ask: { question: "inPast", draft: askDraft(draft, false) } };
       else if (res.kind === "options" && res.options.length === 1) {
         const o = res.options[0]!;
         item = { title: o.title, sel: "on", option: o };
         if (!o.series && o.allDay && o.startDay === o.endDay && BIRTHDAY.test(`${o.title} ${famText}`)) item.birthday = true;
         prevDay = o.series ? undefined : formatDate(o.startDay);
-      } else if (res.kind === "options") item = { title: res.options[0]!.title, sel: "on", ask: { question: "pick" } };
-      else if (res.kind === "ask") item = { title: title ?? "", sel: "on", ask: { question: res.question } };
-      else item = { title: title ?? "", sel: "on", ask: { question: "askWhen" } };
+      } else if (res.kind === "options") item = { title: res.options[0]!.title, sel: "on", ask: { question: "pick", draft, options: res.options } };
+      else if (res.kind === "ask") {
+        const d = askDraft(draft, res.keepStart, res.startText);
+        const day = res.question === "askTime" && d.startText ? dayOfText(d.startText, base, a.tz) : undefined;
+        item = { title: t0, sel: "on", ask: { question: res.question, draft: d, ...(day !== undefined ? { day } : {}) } };
+      } else {
+        const { durationText: _d, ...rest } = askDraft(draft, false);
+        item = { title: t0, sel: "on", ask: { question: "askWhen", draft: rest } };
+      }
     }
     if (fam.family) item.family = fam.family;
     if (!item.option) prevDay = piece.undated ? prevDay : undefined;
@@ -207,6 +218,23 @@ export function buildItems(a: BuildInput): BuildResult {
     items.push({ item, draft, ...(check ? { check: { agreement: check.agreement, llm: check.llm, contextDay: !!inContext } } : {}) });
   }
   return { items, viaAlias };
+}
+
+// Как startCreate: второе мнение LLM — только для первой карточки, ответ на вопрос дополняет наш кусок
+function askDraft(draft: CreateDraft, keepStart: boolean, startText?: string): CreateDraft {
+  const { altStartText: _alt, altWhen: _when, llmFirst: _first, unknownZone: _zone, startText: own, ...rest } = draft;
+  const kept = keepStart ? (startText ?? own) : undefined;
+  return kept ? { ...rest, startText: kept } : rest;
+}
+
+const dayOfIso = (iso: string): Day => parseLocal(`${iso}T00:00`).day;
+
+function dayOfText(text: string, now: Moment, tz: string): Day | undefined {
+  const r = parseDateFragment({ text, kind: "point", now: formatMoment(now), tz });
+  if ("error" in r) return undefined;
+  const vs = "ambiguous" in r ? r.ambiguous : [r];
+  const days = [...new Set(vs.flatMap((v) => ("date" in v ? [typeof v.date === "string" ? v.date : v.date.date] : [])))];
+  return days.length === 1 ? dayOfIso(days[0]!) : undefined;
 }
 
 const dotted = (iso: string) => {
@@ -255,11 +283,16 @@ export const isCreated = (it: MultiItem) => !!doneOf(it);
 /** Строки, которые создаст нажатие «Создать» / «Повторить». */
 export const toCreate = (p: MultiCardPayload) => p.items.map((it, i) => [it, i] as const).filter(([it]) => it.option && it.sel === "on" && !isCreated(it));
 
-export function mainButton(p: MultiCardPayload): { key: "multiCreateAll" | "multiCreateSelected"; n: number } {
+export function mainButton(p: MultiCardPayload): { key: "multiCreateAll" | "multiCreateSelected" | "multiAskNext"; n: number } {
   const ready = p.items.filter(isReady);
   const on = ready.filter((it) => it.sel === "on").length;
-  return on > 0 && on === ready.length ? { key: "multiCreateAll", n: on } : { key: "multiCreateSelected", n: on };
+  if (on > 0 && on === ready.length && toAsk(p).length === 0) return { key: "multiCreateAll", n: on };
+  if (on === 0 && toAsk(p).length > 0) return { key: "multiAskNext", n: 0 };
+  return { key: "multiCreateSelected", n: on };
 }
+
+/** Неясные строки, по которым спросим после создания (по одной). */
+export const toAsk = (p: MultiCardPayload) => p.items.filter((it) => !it.option && it.ask && it.sel === "on");
 
 /** null — выбор не про переключатель или строка не переключается. */
 export function toggle(p: MultiCardPayload, choice: string): MultiCardPayload | null {
@@ -267,7 +300,7 @@ export function toggle(p: MultiCardPayload, choice: string): MultiCardPayload | 
   const m = /^t(\d)$/.exec(choice);
   const i = m ? Number(m[1]) : -1;
   const it = p.items[i];
-  if (!it?.option || it.done) return null;
+  if (!it || it.done || (!it.option && !it.ask)) return null;
   return { ...p, items: p.items.map((x, k) => (k === i ? { ...x, sel: x.sel === "on" ? "off" : "on" } : x)) };
 }
 

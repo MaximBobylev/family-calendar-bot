@@ -108,6 +108,16 @@ describe("buildItems", () => {
     expect(build("В 10 встреча с Петей и в пятницу созвон в 15").map(when)).toEqual(["ask pick", "2026-10-16T15:00"]);
   });
 
+  it("вопрос после создания: у дела без даты — день предыдущего, черновик без второго мнения LLM", () => {
+    const [, olegItem] = build("Завтра в 9 планёрка и ещё созвон с Олегом", [call("завтра в 9", "Планёрка")]);
+    expect(olegItem!.ask).toMatchObject({ question: "askTime", draft: { startText: "13.10.2026", title: "Созвон с Олегом" } });
+    expect(olegItem!.ask?.day).toBe(parseLocal("2026-10-13T00:00").day);
+    const [pick] = build("В 10 встреча с Петей и в пятницу созвон в 15");
+    expect(pick!.ask?.options?.map((o) => formatMoment(o.start!))).toEqual(["2026-10-12T22:00", "2026-10-13T10:00"]);
+    const [dayOnly] = build("В пятницу встреча с Петей и в субботу в 12 футбол");
+    expect(dayOnly!.ask).toMatchObject({ question: "askTime", draft: { startText: "В пятницу" } });
+  });
+
   it("пересланное: прошедшие от даты сообщения даты — строка «прошло»", () => {
     const items = build("Вчера в 10 собрание и завтра в 12 концерт", [], { refNow: parseLocal("2026-10-05T10:00") });
     expect(items.map(when)).toEqual(["ask inPast", "ask inPast"]);

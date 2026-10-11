@@ -24,6 +24,8 @@ import { familyCardLines, notifyResponsible, saveEventFamily } from "./assign/fa
 import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
+import { askQueue } from "./multi-event";
+import type { MultiItem } from "./multi-logic";
 import { notDoneLines } from "./multi-view";
 
 export { type CreateCardPayload, type CreateDraft, draftFromIntent, type TitleQuestionPayload } from "./create-logic";
@@ -39,6 +41,7 @@ export interface CreateArgs {
   // От какого момента считать «завтра»: дата пересланного сообщения (US-65); нет — сейчас
   refNow?: number;
   notDone?: string[];
+  next?: MultiItem[];
 }
 
 export async function startCreate(ctx: AppContext, provider: CalendarProvider, a: CreateArgs): Promise<void> {
@@ -72,7 +75,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       ctx.db,
       a.conversationId,
       user.id,
-      { awaiting: { kind: "create_time", draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS } },
+      { awaiting: { kind: "create_time", draft, expiresAt: ctx.clock.now() + AWAIT_TTL_MS, ...(a.next?.length ? { next: a.next } : {}) } },
       ctx.clock.now(),
     );
     await ctx.telegram.sendMessage(chatId, t(res.question, locale, { zone: a.draft.unknownZone ?? "" }));
@@ -91,6 +94,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       ...(a.draft.family ? { family: a.draft.family } : {}),
       ...(a.draft.dateCheck ? { dateCheck: a.draft.dateCheck } : {}),
       ...(a.notDone?.length ? { notDone: a.notDone } : {}),
+      ...(a.next?.length ? { next: a.next } : {}),
     } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
@@ -144,9 +148,13 @@ export async function confirmCreate(
   const locale = user.locale;
   const today = utcToLocal(ctx.clock.now(), user.tz).day;
 
+  const askNext = async () => {
+    if (action.payload.next?.length) await askQueue(ctx, user, chatId, action.conversationId, action.payload.next, { more: true });
+  };
   if (choice === "x") {
     if (action.messageId) await ctx.telegram.editMessageText(chatId, action.messageId, t("cancelled", locale));
     await dateFixOnCancelled(ctx, action, action.payload);
+    await askNext();
     return false;
   }
   const o = options[Number(choice.slice(1))];
@@ -218,6 +226,7 @@ export async function confirmCreate(
     const q = await ctx.telegram.sendMessage(chatId, t("askTitle", locale), { force_reply: true });
     await attachMessage(ctx.db, qId, q.message_id);
   }
+  await askNext();
   return true;
 }
 
