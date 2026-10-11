@@ -2,8 +2,8 @@
 // Даты каждой строки — наш разбор куска; от LLM — название, календарь и второе мнение о дате.
 
 import { titleScore } from "../calendar/match";
-import type { CalendarInfo, EventRef } from "../calendar/model";
-import { formatDate, minutesBetween, type Moment } from "../dates/calendar";
+import type { CalendarEvent, CalendarInfo, EventRef } from "../calendar/model";
+import { type Day, formatDate, localToUtc, minutesBetween, type Moment } from "../dates/calendar";
 import { cleanTitle, looksAllDay } from "../dates/extract";
 import type { CreateEventIntent, Intent } from "../nlu/intents";
 import type { EventFamily } from "./assign/logic";
@@ -35,6 +35,10 @@ export interface MultiItem {
   /** Нет готового события: день или время не поняли, варианты, прошлое — строка «скажите отдельно». */
   ask?: { question: "askWhen" | "askTime" | "inPast" | "askZoneTime" | "pick" };
   birthday?: true;
+  /** ⚠️ Похожее уже есть в этот день в этом календаре — по умолчанию не создаём. */
+  dup?: { title: string; day: Day; start?: Moment };
+  /** ⏰ Пересечения — создаём, но показываем. */
+  overlap?: { title: string; start: Moment; end: Moment }[];
   family?: EventFamily;
   done?: { ref: EventRef; link?: string; etag?: string } | { failed: true };
 }
@@ -209,6 +213,41 @@ const dotted = (iso: string) => {
   const [y, m, d] = iso.split("-");
   return `${d}.${m}.${y}`;
 };
+
+// Правила связывания поручения (US-91, findEventToLink): тот же день, похожее название, со временем — не дальше 3 часов
+const DUP_SCORE = 0.5;
+const DUP_NEAR_MIN = 3 * 60;
+const MAX_OVERLAPS = 3;
+
+/** Строки, о которых надо спросить Google: готовые, не серии. */
+export function daysToCheck(items: MultiItem[]): Day[] {
+  return [...new Set(items.flatMap((it) => (it.option && !it.option.series ? [it.option.startDay] : [])))].sort((a, b) => a - b);
+}
+
+export function markExisting(items: MultiItem[], events: CalendarEvent[], defaultCalendarId: string | undefined): MultiItem[] {
+  return items.map((it) => {
+    const o = it.option;
+    if (!o || o.series) return it;
+    const sameDay = events.filter((e) => e.startDay <= o.startDay && o.startDay <= e.endDay);
+    const near = (e: CalendarEvent) => !o.start || !e.start || Math.abs(localToUtc(e.start, o.tz) - localToUtc(o.start, o.tz)) <= DUP_NEAR_MIN * 60_000;
+    const dup = sameDay
+      .filter((e) => e.ref.calendarId === o.calendarId && near(e))
+      .map((e) => ({ e, score: titleScore(o.title, e.title) }))
+      .filter((x) => x.score >= DUP_SCORE)
+      .sort((a, b) => b.score - a.score)[0]?.e;
+    if (dup) return { ...it, sel: "off", dup: { title: dup.title, day: dup.startDay, ...(dup.start ? { start: dup.start } : {}) } };
+    if (o.allDay || !o.start || !o.end) return it;
+    const relevant = new Set([o.calendarId, defaultCalendarId]);
+    const from = localToUtc(o.start, o.tz);
+    const to = localToUtc(o.end, o.tz);
+    const overlap = events
+      .filter((e) => !e.allDay && !e.free && e.start && e.end && relevant.has(e.ref.calendarId))
+      .filter((e) => localToUtc(e.start!, o.tz) < to && localToUtc(e.end!, o.tz) > from)
+      .slice(0, MAX_OVERLAPS)
+      .map((e) => ({ title: e.title, start: e.start!, end: e.end! }));
+    return overlap.length ? { ...it, overlap } : it;
+  });
+}
 
 export const isReady = (it: MultiItem) => !!it.option;
 export const doneOf = (it: MultiItem) => (it.done && "ref" in it.done ? it.done : undefined);

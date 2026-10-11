@@ -3,7 +3,7 @@
 
 import type { Day } from "../dates/calendar";
 import type { InlineKeyboardButton } from "../telegram/types";
-import { escapeHtml, hhmm, pluralForm, whenOf } from "./format";
+import { escapeHtml, hhmm, pluralForm, weekdayShort, whenOf } from "./format";
 import { callbackData } from "./callback-data";
 import { t } from "./messages";
 import { isCreated, mainButton, type MultiCardPayload, type MultiItem } from "./multi-logic";
@@ -51,10 +51,17 @@ export function multiCardText(p: MultiCardPayload, today: Day, locale: string): 
     if (!it.option) return `❓ ${n}. <b>${escapeHtml(titleOf(it, locale))}</b>\n${t("multiLineSayApart", locale)}`;
     const mark = it.sel === "on" ? "✅" : "⬜";
     const lines = [`${mark} ${n}. <b>${escapeHtml(titleOf(it, locale))}</b>`];
-    lines.push(
-      it.sel === "on" ? `${whenLine(it, p, today, locale)}${responsible(it, locale)}` : `${whenLine(it, p, today, locale)} — ${t("multiLineOff", locale)}`,
-    );
+    const off = it.sel === "off" && !it.dup;
+    lines.push(off ? `${whenLine(it, p, today, locale)} — ${t("multiLineOff", locale)}` : `${whenLine(it, p, today, locale)}${responsible(it, locale)}`);
     if (p.showCalendar && !shared) lines.push(`🗓 ${escapeHtml(it.option.calendarTitle)}`);
+    if (it.overlap?.length)
+      lines.push(
+        t("multiOverlap", locale, { list: it.overlap.map((x) => `${escapeHtml(x.title)}, ${hhmm(x.start.minutes)}–${hhmm(x.end.minutes)}`).join("; ") }),
+      );
+    if (it.dup) {
+      const when = `${weekdayShort(it.dup.day, locale)}${it.dup.start ? ` ${hhmm(it.dup.start.minutes)}` : ""}`;
+      lines.push(t(it.sel === "on" ? "multiDupOn" : "multiDupOff", locale, { title: escapeHtml(it.dup.title), when }));
+    }
     return lines.join("\n");
   });
   return [...head(t("multiHeader", locale), p, locale), "", blocks.join("\n\n")].join("\n") + notDoneLines(p.notDone, locale);
@@ -107,7 +114,9 @@ export function multiSummaryText(p: MultiCardPayload, today: Day, locale: string
         : `${i + 1}. ❌ ${escapeHtml(titleOf(it, locale))} — ${whenLine(it, p, today, locale)} — ${t("multiFailedLine", locale)}`,
     );
   }
-  const skipped = p.items.filter((it) => it.option && it.sel === "off").map((it) => escapeHtml(titleOf(it, locale)));
+  const skipped = p.items
+    .filter((it) => it.option && it.sel === "off")
+    .map((it) => (it.dup ? t("multiAlreadyExists", locale, { title: escapeHtml(titleOf(it, locale)) }) : escapeHtml(titleOf(it, locale))));
   const unclear = p.items.filter((it) => !it.option).map((it) => t("multiSayApartLater", locale, { title: escapeHtml(titleOf(it, locale)) }));
   const tail = [...(skipped.length ? [t("multiSkipped", locale, { list: skipped.join(", ") })] : []), ...unclear];
   return [...head(first, p, locale), "", rows.join("\n"), ...(tail.length ? ["", ...tail] : [])].join("\n") + notDoneLines(p.notDone, locale);

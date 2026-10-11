@@ -1,8 +1,8 @@
 // Сценарий карточки-списка (US-62, ADR-0008): показать, переключать без захвата карточки, создать с id на строку.
 // Частичный сбой Google — карточка снова open с «Повторить»: те же id не дадут дублей, созданное не откатываем.
 
-import { type CalendarProvider, ProviderUnavailable } from "../calendar/model";
-import { formatDate, utcToLocal } from "../dates/calendar";
+import { type CalendarEvent, type CalendarProvider, ProviderUnavailable } from "../calendar/model";
+import { type Day, formatDate, localToUtc, utcToLocal } from "../dates/calendar";
 import { toRRule } from "../dates/rrule";
 import {
   attachMessage,
@@ -31,6 +31,7 @@ import { t } from "./messages";
 import {
   alignCalls,
   buildItems,
+  daysToCheck,
   doneOf,
   isCreated,
   isCreatePiece,
@@ -39,6 +40,7 @@ import {
   MULTI_CARD,
   type MultiCardPayload,
   mainButton,
+  markExisting,
   notDoneOf,
   toCreate,
   toggle,
@@ -136,9 +138,14 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
     return true;
   }
 
+  const marked = markExisting(
+    items.map((b) => b.item),
+    await eventsAround(provider, daysToCheck(items.map((b) => b.item)), tz),
+    calendars.find((c) => c.isDefault)?.id,
+  );
   const payload: MultiCardPayload = {
     chatId,
-    items: items.map((b) => b.item),
+    items: marked,
     ...(items.some((b) => b.item.birthday) ? { yearly: true } : {}),
     ...(a.forward ? { forwardedFrom: a.forward.from ?? "" } : {}),
     ...(built.viaAlias ? { viaAlias: true } : {}),
@@ -156,6 +163,17 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
     await attachMessage(ctx.db, id, sent.message_id);
   }
   return true;
+}
+
+// Разброс больше двух месяцев — по запросу на день строки (их ≤ 10), а не один огромный список
+const MAX_LIST_SPAN_DAYS = 62;
+
+async function eventsAround(provider: CalendarProvider, days: Day[], tz: string): Promise<CalendarEvent[]> {
+  if (days.length === 0) return [];
+  const range = async (from: Day, to: Day) =>
+    (await provider.listEvents(localToUtc({ day: from, minutes: 0 }, tz), localToUtc({ day: to + 1, minutes: 0 }, tz), tz)).events;
+  if (days.at(-1)! - days[0]! <= MAX_LIST_SPAN_DAYS) return range(days[0]!, days.at(-1)!);
+  return (await Promise.all(days.map((d) => range(d, d)))).flat();
 }
 
 const PRESS_ATTEMPTS = 3;

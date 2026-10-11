@@ -154,3 +154,41 @@
     - expect_telegram_count: 1
     - expect_llm_requests: 0
     - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 0, events: [] }
+
+- id: multi-duplicate-and-overlap
+  story: US-62
+  steps:
+    - clock: "2026-10-12T07:00:00Z"
+    - connected_user:
+        from: 1001
+        email: ivan@gmail.com
+        calendars:
+          - id: ivan@gmail.com
+            summary: "Иван"
+            accessRole: owner
+            primary: true
+            timeZone: Europe/Moscow
+            events:
+              - { id: e1, summary: "Хор", start: { dateTime: "2026-10-14T17:00:00+03:00" }, end: { dateTime: "2026-10-14T18:00:00+03:00" } }
+              - { id: e2, summary: "Созвон с подрядчиком", start: { dateTime: "2026-10-15T18:30:00+03:00" }, end: { dateTime: "2026-10-15T19:00:00+03:00" } }
+    - llm:
+        "Напоминаем: в среду в 17 хор, в четверг в 18 сольфеджио, в субботу в 11 концерт": { tool: create_event, args: { start: "в среду в 17", title: "Хор" } }
+    - telegram: { from: 1001, text: "Напоминаем: в среду в 17 хор, в четверг в 18 сольфеджио, в субботу в 11 концерт", forwarded: true, forward_from: "Хор, 3 класс" }
+    - press: "📅 Создать события из этого"
+    # Похожее уже есть — строка выключена (⚠️); пересечение — включена, но видно (⏰)
+    - expect_telegram:
+        - { text_contains: ["📅 Похоже на события"] }
+        - method: editMessageText
+          text_contains:
+            - "⬜ 1. <b>Хор</b>\nср, 14 октября, 17:00–18:00\n⚠️ Похоже, уже есть: «Хор», ср 17:00. Отметьте, если это другое"
+            - "✅ 2. <b>Сольфеджио</b>\nчт, 15 октября, 18:00–19:00\n⏰ Пересекается: Созвон с подрядчиком, 18:30–19:00"
+          buttons: ["⬜ 1 · Хор", "✅ 2 · Сольфеджио", "✅ 3 · Концерт", "Создать выбранные (2)", "Отмена"]
+    - press: "⬜ 1 · Хор"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ 1. <b>Хор</b>", "⚠️ Похоже, уже есть: «Хор», ср 17:00. Создам ещё одно"], buttons: ["✅ 1 · Хор", "✅ 2 · Сольфеджио", "✅ 3 · Концерт", "Создать все (3)", "Отмена"] }
+    - press: "✅ 1 · Хор"
+    - expect_telegram_count: 1
+    - press: "Создать выбранные (2)"
+    - expect_telegram:
+        - { method: editMessageText, text_contains: ["✅ Создано", ">Сольфеджио</a>", ">Концерт</a>", "Не создавал: Хор — уже есть"], buttons: ["↩ Отменить все (2)"] }
+    - expect_google_events: { email: ivan@gmail.com, calendar: ivan@gmail.com, count: 4, events: [] }

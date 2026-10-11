@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { CalendarInfo } from "../src/calendar/model";
+import type { CalendarEvent, CalendarInfo } from "../src/calendar/model";
 import { formatMoment, parseLocal } from "../src/dates/calendar";
 import type { CreateEventIntent } from "../src/nlu/intents";
 import {
   alignCalls,
   type BuildInput,
   buildItems,
+  daysToCheck,
+  markExisting,
   type MultiCardPayload,
   type MultiItem,
   mainButton,
@@ -124,6 +126,58 @@ describe("buildItems", () => {
       calendars: [cal],
     });
     expect(res).toEqual({ calendarError: { error: "notFound", name: "Работа" } });
+  });
+});
+
+describe("markExisting — ⚠️ похожее и ⏰ пересечения", () => {
+  const ev = (title: string, start: string, end: string, extra: Partial<CalendarEvent> = {}): CalendarEvent => {
+    const s0 = parseLocal(start);
+    const e0 = parseLocal(end);
+    return {
+      ref: { accountId: "a1", calendarId: "c1", providerEventId: title },
+      calendarTitle: "Иван",
+      title,
+      allDay: false,
+      startDay: s0.day,
+      endDay: e0.day,
+      start: s0,
+      end: e0,
+      free: false,
+      organizerIsSelf: true,
+      hasOtherAttendees: false,
+      recurring: false,
+      ...extra,
+    };
+  };
+  const items = () => build("В среду в 17 хор, в четверг в 18 сольфеджио, в субботу в 11 концерт");
+
+  it("похожее название в тот же день рядом по времени — выключено; дальше 3 часов или другой календарь — нет", () => {
+    const marked = markExisting(items(), [ev("Хор", "2026-10-14T17:00", "2026-10-14T18:00"), ev("Концерт", "2026-10-17T19:00", "2026-10-17T21:00")], "c1");
+    expect(marked.map((i) => [i.sel, i.dup?.title])).toEqual([
+      ["off", "Хор"],
+      ["on", undefined],
+      ["on", undefined],
+    ]);
+    const other = markExisting(
+      items(),
+      [ev("Хор", "2026-10-14T17:00", "2026-10-14T18:00", { ref: { accountId: "a1", calendarId: "c2", providerEventId: "x" } })],
+      "c1",
+    );
+    expect(other[0]!.dup).toBeUndefined();
+  });
+
+  it("пересечение — строка включена, событие названо", () => {
+    const marked = markExisting(
+      items(),
+      [ev("Созвон", "2026-10-15T18:30", "2026-10-15T19:00"), ev("Свободно", "2026-10-15T18:00", "2026-10-15T19:00", { free: true })],
+      "c1",
+    );
+    expect(marked[1]!.sel).toBe("on");
+    expect(marked[1]!.overlap?.map((o) => o.title)).toEqual(["Созвон"]);
+  });
+
+  it("дни для запроса — только готовые строки без серий", () => {
+    expect(daysToCheck(build("Каждый понедельник в 10 планёрка и в среду в 15 ретро")).length).toBe(1);
   });
 });
 

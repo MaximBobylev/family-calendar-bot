@@ -27,6 +27,12 @@ export function dateLabel(day: Day, today: Day, locale: string): string {
   }).format(new Date(Date.UTC(year, month - 1, date)));
 }
 
+// «ср», «Wed» — подпись рядом с уже названным днём
+export function weekdayShort(day: Day, locale: string): string {
+  const { year, month, date } = parts(day);
+  return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", { weekday: "short", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, date)));
+}
+
 export function spanLabel(start: Moment, end: Moment, today: Day, locale: string): string {
   if (start.day === end.day) return `${dateLabel(start.day, today, locale)}, ${hhmm(start.minutes)}–${hhmm(end.minutes)}`;
   return `${dateLabel(start.day, today, locale)}, ${hhmm(start.minutes)} — ${dateLabel(end.day, today, locale)}, ${hhmm(end.minutes)}`;
