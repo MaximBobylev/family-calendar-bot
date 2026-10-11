@@ -37,6 +37,7 @@ export const multiMessages = {
     ru: "Чтобы поменять событие в списке, снимите галочку и скажите его отдельным сообщением.",
     en: "To change an event in the list, untick it and send it as a separate message.",
   },
+  multiNotDone: { ru: "⏭ Не сделал: «{text}» — пришлите это отдельным сообщением.", en: "⏭ Not done: “{text}” — send it as a separate message." },
   forwardLooksEvents: { ru: "📅 Похоже на события: «{text}». Создать?", en: "📅 Looks like events: “{text}”. Create them?" },
   forwardEventsButton: { ru: "📅 Создать события из этого", en: "📅 Create events from this" },
   undoneMany: { ru: "↩ Отменил: удалил {count}.", en: "↩ Undone: deleted {count}." },

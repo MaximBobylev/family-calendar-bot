@@ -48,7 +48,14 @@ export interface MultiCardPayload {
   forwardedFrom?: string;
   viaAlias?: boolean;
   showCalendar?: boolean;
+  /** Куски-не-создания своего сообщения, как сказаны: не выполняем, а называем (⏭). */
+  notDone?: string[];
 }
+
+const NOT_DONE_LEN = 200;
+/** Своё сообщение: «удали …», «перенеси …», «покажи …» рядом с созданиями не выполняются, а называются. */
+export const notDoneOf = (pieces: Piece[]) =>
+  pieces.filter((p) => p.action === "other").map((p) => (p.text.length > NOT_DONE_LEN ? `${p.text.slice(0, NOT_DONE_LEN)}…` : p.text));
 
 export const isCreatePiece = (p: Piece) => p.action === "create" && !!(p.point || p.recurrence || p.unsure || p.undated);
 export const createPieces = (pieces: Piece[]) => pieces.filter(isCreatePiece);

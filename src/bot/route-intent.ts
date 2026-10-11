@@ -206,11 +206,7 @@ async function routeMulti(
   if (parsed.name !== "create_event" && parsed.name !== "multiple" && parsed.name !== "unsupported") return false;
   const pieces = splitMessage(text, localNow, user.tz);
   const creates = createPieces(pieces);
-  if (creates.length === 1 && pieces.some((p) => p.action === "other")) {
-    await ctx.telegram.sendMessage(chatId, t("oneAtATime", user.locale));
-    return true;
-  }
-  if (creates.length < 2) return false;
+  if (creates.length === 0 || (creates.length === 1 && !pieces.some((p) => p.action === "other"))) return false;
   const assign = assignOverride(text, parsed);
   if (assign && assign.name !== "create_event") return false;
   let handled = false;

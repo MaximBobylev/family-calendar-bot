@@ -39,6 +39,7 @@ import {
   MULTI_CARD,
   type MultiCardPayload,
   mainButton,
+  notDoneOf,
   toCreate,
   toggle,
 } from "./multi-logic";
@@ -52,7 +53,7 @@ export interface MultiArgs {
   conversationId: string;
   pieces: Piece[];
   calls: CreateEventIntent[];
-  /** Пересланное: карточка пересланного (messageId) становится списком на месте. */
+  /** Пересланное: карточка пересланного (messageId) становится списком на месте; удаления в нём просто не попадают в карточку. */
   forward?: { refNow?: number; from?: string; description: string; messageId?: number };
 }
 
@@ -103,6 +104,7 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
       });
   }
   if (items.length === 0) return false;
+  const notDone = a.forward ? [] : notDoneOf(a.pieces);
   if (items.length === 1) {
     if (a.forward?.messageId) await ctx.telegram.editMessageText(chatId, a.forward.messageId, t("forwardEventStarted", locale));
     await startCreate(ctx, provider, {
@@ -111,6 +113,7 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
       conversationId: a.conversationId,
       draft: items[0]!.draft,
       ...(a.forward?.refNow ? { refNow: a.forward.refNow } : {}),
+      ...(notDone.length ? { notDone } : {}),
     });
     return true;
   }
@@ -140,6 +143,7 @@ export async function startMulti(ctx: AppContext, provider: CalendarProvider, a:
     ...(a.forward ? { forwardedFrom: a.forward.from ?? "" } : {}),
     ...(built.viaAlias ? { viaAlias: true } : {}),
     ...(calendars.filter((c) => c.writable).length > 1 ? { showCalendar: true } : {}),
+    ...(notDone.length ? { notDone } : {}),
   };
   const id = await createPendingAction(ctx.db, { conversationId: a.conversationId, userId: user.id, kind: MULTI_CARD, payload, now: nowMs });
   const text = multiCardText(payload, now.day, locale);

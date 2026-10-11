@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { CalendarInfo } from "../src/calendar/model";
 import { parseLocal } from "../src/dates/calendar";
-import { alignCalls, buildItems, type MultiCardPayload, type MultiItem, toggle } from "../src/bot/multi-logic";
+import { alignCalls, buildItems, type MultiCardPayload, type MultiItem, notDoneOf, toggle } from "../src/bot/multi-logic";
 import { splitMessage } from "../src/bot/multi-split";
-import { eventsCount, multiCardButtons, multiCardText, multiSummaryText, multiUndoText } from "../src/bot/multi-view";
+import { eventsCount, multiCardButtons, multiCardText, multiSummaryText, multiUndoText, notDoneLines } from "../src/bot/multi-view";
 
 const NOW = parseLocal("2026-10-12T10:00");
 const tz = "Europe/Moscow";
@@ -82,6 +82,15 @@ describe("карточка-список", () => {
   it("длинное название на кнопке обрезается", () => {
     const p = card("Во вторник в 19 родительское собрание, в среду в 8 анализы");
     expect(buttons(p)[0]).toBe("✅ 1 · Родительское собран…");
+  });
+});
+
+describe("не сделано (⏭)", () => {
+  it("куски-не-создания своего сообщения — абзацем внизу карточки и итога", () => {
+    const pieces = splitMessage("Запиши в пятницу в 10 стоматолог, в субботу в 12 футбол и удали планёрку в четверг", "2026-10-12T10:00", tz);
+    const p = { ...card("Запиши в пятницу в 10 стоматолог, в субботу в 12 футбол"), notDone: notDoneOf(pieces) };
+    expect(multiCardText(p, NOW.day, "ru")).toMatch(/12:00–13:00\n\n⏭ Не сделал: «удали планёрку в четверг» — пришлите это отдельным сообщением\.$/);
+    expect(notDoneLines(undefined, "ru")).toBe("");
   });
 });
 

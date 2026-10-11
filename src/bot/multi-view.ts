@@ -41,6 +41,9 @@ function head(first: string, p: MultiCardPayload, locale: string): string[] {
   return lines;
 }
 
+export const notDoneLines = (notDone: string[] | undefined, locale: string) =>
+  notDone?.length ? `\n\n${notDone.map((text) => t("multiNotDone", locale, { text: escapeHtml(text) })).join("\n")}` : "";
+
 export function multiCardText(p: MultiCardPayload, today: Day, locale: string): string {
   const shared = sharedCalendar(p);
   const blocks = p.items.map((it, i) => {
@@ -54,7 +57,7 @@ export function multiCardText(p: MultiCardPayload, today: Day, locale: string): 
     if (p.showCalendar && !shared) lines.push(`🗓 ${escapeHtml(it.option.calendarTitle)}`);
     return lines.join("\n");
   });
-  return [...head(t("multiHeader", locale), p, locale), "", blocks.join("\n\n")].join("\n");
+  return [...head(t("multiHeader", locale), p, locale), "", blocks.join("\n\n")].join("\n") + notDoneLines(p.notDone, locale);
 }
 
 const shortTitle = (s: string) => (s.length > BUTTON_TITLE ? `${s.slice(0, BUTTON_TITLE - 1)}…` : s);
@@ -107,7 +110,7 @@ export function multiSummaryText(p: MultiCardPayload, today: Day, locale: string
   const skipped = p.items.filter((it) => it.option && it.sel === "off").map((it) => escapeHtml(titleOf(it, locale)));
   const unclear = p.items.filter((it) => !it.option).map((it) => t("multiSayApartLater", locale, { title: escapeHtml(titleOf(it, locale)) }));
   const tail = [...(skipped.length ? [t("multiSkipped", locale, { list: skipped.join(", ") })] : []), ...unclear];
-  return [...head(first, p, locale), "", rows.join("\n"), ...(tail.length ? ["", ...tail] : [])].join("\n");
+  return [...head(first, p, locale), "", rows.join("\n"), ...(tail.length ? ["", ...tail] : [])].join("\n") + notDoneLines(p.notDone, locale);
 }
 
 export function multiUndoText(deleted: number, kept: string[], locale: string): string {

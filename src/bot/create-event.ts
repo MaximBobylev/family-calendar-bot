@@ -24,6 +24,7 @@ import { familyCardLines, notifyResponsible, saveEventFamily } from "./assign/fa
 import { creatorNote, noteCreator } from "./household/scope";
 import { attachUndoMessage, recordUndo } from "./undo";
 import { t } from "./messages";
+import { notDoneLines } from "./multi-view";
 
 export { type CreateCardPayload, type CreateDraft, draftFromIntent, type TitleQuestionPayload } from "./create-logic";
 
@@ -37,6 +38,7 @@ export interface CreateArgs {
   draft: CreateDraft;
   // От какого момента считать «завтра»: дата пересланного сообщения (US-65); нет — сейчас
   refNow?: number;
+  notDone?: string[];
 }
 
 export async function startCreate(ctx: AppContext, provider: CalendarProvider, a: CreateArgs): Promise<void> {
@@ -88,6 +90,7 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
       ...(namedByAlias(cal, a.draft.calendar) ? { viaAlias: true } : {}),
       ...(a.draft.family ? { family: a.draft.family } : {}),
       ...(a.draft.dateCheck ? { dateCheck: a.draft.dateCheck } : {}),
+      ...(a.notDone?.length ? { notDone: a.notDone } : {}),
     } satisfies CreateCardPayload,
     now: ctx.clock.now(),
   });
@@ -97,7 +100,8 @@ export async function startCreate(ctx: AppContext, provider: CalendarProvider, a
   const by = await creatorNote(ctx, user.id, "homeCreatedBy", locale);
   const fam = familyCardLines(a.draft.family, locale);
   const tzNote = res.options.length === 1 ? await homeTzNote(ctx, res.options[0]!, locale) : "";
-  const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}`, { inline_keyboard: buttons }, { html: true });
+  const notDone = notDoneLines(a.notDone, locale);
+  const sent = await ctx.telegram.sendMessage(chatId, `${text}${tzNote}${fam}${by}${notDone}`, { inline_keyboard: buttons }, { html: true });
   await attachMessage(ctx.db, actionId, sent.message_id);
 }
 
@@ -185,7 +189,7 @@ export async function confirmCreate(
     await ctx.telegram.editMessageText(
       chatId,
       action.messageId,
-      `${t("created", locale)}\n\n${body}${tz}${fam}${by}`,
+      `${t("created", locale)}\n\n${body}${tz}${fam}${by}${notDoneLines(action.payload.notDone, locale)}`,
       { inline_keyboard: [row] },
       { html: true },
     );

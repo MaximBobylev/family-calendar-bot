@@ -79,6 +79,8 @@ export interface CreateCardPayload {
   viaAlias?: boolean;
   family?: EventFamily;
   dateCheck?: DateCheckInfo;
+  /** US-62: не выполненные куски того же сообщения (⏭) — и в карточке, и в итоге. */
+  notDone?: string[];
 }
 
 export function namedByAlias(cal: CalendarInfo, name: string | undefined): boolean {
