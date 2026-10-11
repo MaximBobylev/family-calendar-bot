@@ -304,7 +304,13 @@ export async function confirmMulti(
   }
   if (createdNow) {
     const recurring = items.some((it) => isCreated(it) && (it.option?.series || (it.birthday && p.yearly)));
-    const features: Feature[] = ["create", ...(recurring ? ["recurring" as const] : []), ...(p.viaAlias ? ["alias" as const] : [])];
+    const before = p.items.filter(isCreated).length;
+    const features: Feature[] = [
+      "create",
+      ...(recurring ? ["recurring" as const] : []),
+      ...(p.viaAlias ? ["alias" as const] : []),
+      ...(before < 2 && created.length >= 2 ? ["multi_create" as const] : []),
+    ];
     await recordFeature(ctx.db, user.id, features, ctx.clock.now());
   }
   return createdNow > 0;

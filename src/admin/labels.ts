@@ -18,6 +18,7 @@ export const FEATURE_LABELS = {
   image_event: "Событие из фото (US-66)",
   ics_import: "Импорт .ics (US-67)",
   assign: "Поручение участнику дома (US-91)",
+  multi_create: "Несколько событий из одного сообщения (US-62)",
 } as const satisfies Record<string, string>;
 
 // Неизвестная (старая запись, функция из соседней ветки) — ключ как есть.

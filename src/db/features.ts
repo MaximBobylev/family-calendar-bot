@@ -18,7 +18,8 @@ export type Feature =
   | "forward_event" // из пересланного предложено событие
   | "image_event"
   | "ics_import"
-  | "assign";
+  | "assign"
+  | "multi_create"; // ≥ 2 события из одного сообщения (US-62)
 
 export async function recordFeature(db: D1Database, userId: string, feature: Feature | Feature[], now: number): Promise<void> {
   const features = Array.isArray(feature) ? feature : [feature];

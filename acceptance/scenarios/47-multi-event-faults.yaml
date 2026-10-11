@@ -39,6 +39,11 @@
           - { summary: "Родительское собрание", start: "2026-10-13T19:00:00+03:00", end: "2026-10-13T20:00:00+03:00" }
           - { summary: "Анализы", start: "2026-10-14T08:00:00+03:00", end: "2026-10-14T09:00:00+03:00" }
           - { summary: "Кино", start: "2026-10-15T20:00:00+03:00", end: "2026-10-15T21:00:00+03:00" }
+    # Учёт функций: одно сообщение — один multi_create, хотя создавали в два нажатия
+    - http_get:
+        path: "/admin/usage"
+        basic_auth: "admin:test-admin-password"
+        text_contains: ["<code>multi_create</code></td><td>1</td><td>1</td>", "<code>create</code></td><td>1</td><td>2</td>"]
     # Отмена — по всей пачке, включая созданное повтором
     - press: "↩ Отменить все (3)"
     - expect_telegram:
